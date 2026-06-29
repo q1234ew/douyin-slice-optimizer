@@ -1,0 +1,163 @@
+<template>
+  <section id="videos" class="panel">
+    <div class="panel-head">
+      <div>
+        <h2 class="panel-title"><Icon name="video" />节目管理</h2>
+        <p class="panel-subtitle">节目素材、切片候选、评分排序、样本导出</p>
+      </div>
+      <div class="toolbar-actions">
+        <button id="refresh-btn" type="button" :disabled="state.busyKey === 'refresh-videos'" @click="withBusy('refresh-videos', refreshVideos)">
+          <span v-if="state.busyKey === 'refresh-videos'" class="spinner"></span>
+          <Icon v-else name="refresh-cw" />刷新
+        </button>
+        <button
+          id="run-selected-btn"
+          class="primary"
+          type="button"
+          :disabled="!state.selectedVideoId || state.busyKey === 'run-selected'"
+          @click="runSelected"
+        >
+          <span v-if="state.busyKey === 'run-selected'" class="spinner"></span>
+          <Icon v-else name="wand-sparkles" />处理选中
+        </button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="workbench-focus" aria-live="polite">
+        <div class="focus-next">
+          <span class="meta">下一步任务</span>
+          <strong>{{ workflowGuide.title }}</strong>
+          <p>{{ workflowGuide.copy }}</p>
+        </div>
+        <div class="focus-current">
+          <span class="meta">当前节目</span>
+          <strong>{{ selectedVideo?.title || "未选择节目" }}</strong>
+          <p>{{ selectedVideo ? `${selectedVideo.account_id || "未设置账号"} / ${fmtSeconds(selectedVideo.duration_seconds)} / ${selectedVideo.status || "待处理"}` : "从左侧导入节目，或在下方列表选择已有节目。" }}</p>
+        </div>
+        <button type="button" class="primary" :data-guide-action="workflowGuide.action" @click="handleGuideAction(workflowGuide.action)">
+          <Icon name="arrow-right" />{{ workflowGuide.actionLabel }}
+        </button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><span>节目</span><strong id="stat-videos">{{ state.stats.videos }}</strong></div>
+        <div class="stat"><span>候选</span><strong id="stat-segments">{{ state.stats.segments }}</strong></div>
+        <div class="stat"><span>导出</span><strong id="stat-exports">{{ state.stats.exports }}</strong></div>
+        <div class="stat"><span>训练样本</span><strong id="stat-samples">{{ state.stats.training_samples }}</strong></div>
+      </div>
+
+      <QualitySentinel />
+
+      <div class="toolbar" style="margin-bottom:10px;">
+        <div class="filters">
+          <input id="video-search" v-model="state.videoSearch" placeholder="搜索节目名称 / 账号" aria-label="搜索节目" />
+          <select id="account-filter" v-model="state.accountFilter" aria-label="账号筛选">
+            <option value="">全部账号</option>
+            <option v-for="account in accountOptions" :key="account" :value="account">{{ account }}</option>
+          </select>
+          <select id="status-filter" v-model="state.statusFilter" aria-label="状态筛选">
+            <option value="">全部状态</option>
+            <option v-for="status in statusOptions" :key="status" :value="status">{{ status }}</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>节目名称</th>
+              <th>账号</th>
+              <th>时长</th>
+              <th>分辨率</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="video-rows">
+            <tr
+              v-for="video in filteredVideos"
+              :key="video.id"
+              class="video-row"
+              :class="{ selected: video.id === state.selectedVideoId }"
+              :data-video-id="video.id"
+              @click="selectVideo(video.id)"
+            >
+              <td><div class="video-title">{{ video.title }}</div><code>{{ video.id }}</code></td>
+              <td>{{ video.account_id }}</td>
+              <td>{{ fmtSeconds(video.duration_seconds) }}</td>
+              <td>{{ Number(video.width || 0) }}x{{ Number(video.height || 0) }}</td>
+              <td><span class="status" :class="statusClass(video.status)">{{ video.status }}</span></td>
+              <td>
+                <div class="row-actions" @click.stop>
+                  <button class="icon-only" title="提取" data-action="extract" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'extract')"><Icon name="scan-line" /></button>
+                  <button class="icon-only" title="生成候选" data-action="segments" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'segments')"><Icon name="list-video" /></button>
+                  <button class="icon-only" title="评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
+                  <button class="primary" data-action="run-all" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runWholeVideo(video.id)">
+                    <span v-if="state.busyKey === `run-all-${video.id}`" class="spinner"></span>
+                    <Icon v-else name="wand-sparkles" />处理
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!filteredVideos.length">
+              <td colspan="6">
+                <div class="empty"><Icon name="video" /><strong>暂无节目</strong><span>先展开左侧导入节目，再进入候选审核。</span></div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+import Icon from "./Icon.vue";
+import QualitySentinel from "./QualitySentinel.vue";
+import { useDashboardContext } from "../composables/dashboardContext";
+import type { VideoRow } from "../types";
+import { fmtSeconds } from "../utils";
+
+const {
+  state,
+  filteredVideos,
+  accountOptions,
+  statusOptions,
+  refreshVideos,
+  loadSuggestions,
+  runStep,
+  runAll,
+  selectedVideo,
+  workflowGuide,
+  handleGuideAction,
+  withBusy,
+  toast
+} = useDashboardContext();
+
+function statusClass(status?: string): string {
+  if (status === "scored" || status === "extracted") return "ok";
+  if (status === "ingested") return "neutral";
+  return "warn";
+}
+
+function selectVideo(videoId: string): void {
+  loadSuggestions(videoId).catch(error => toast(error.message));
+}
+
+async function runSelected(): Promise<void> {
+  if (!state.selectedVideoId) {
+    toast("请选择节目");
+    return;
+  }
+  await withBusy("run-selected", () => runAll(state.selectedVideoId));
+}
+
+async function runVideoStep(videoId: string, step: "extract" | "segments" | "score"): Promise<void> {
+  await withBusy(`${step}-${videoId}`, () => runStep(videoId, step));
+}
+
+async function runWholeVideo(videoId: VideoRow["id"]): Promise<void> {
+  await withBusy(`run-all-${videoId}`, () => runAll(videoId));
+}
+</script>

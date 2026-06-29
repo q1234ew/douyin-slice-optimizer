@@ -1,0 +1,713 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import os
+import re
+import shlex
+from functools import lru_cache
+from pathlib import Path
+
+from dso.config import ensure_data_dirs
+from dso.db.session import connect
+from dso.features.asr_profile import normalize_asr_profile, resolve_asr_model_size
+from dso.features.asr_routing import route_video_asr
+from dso.features.whisper_cpp import (
+    whisper_cpp_binary,
+    whisper_cpp_language,
+    whisper_cpp_model,
+    whisper_cpp_ready,
+    whisper_cpp_vad_enabled,
+    whisper_cpp_vad_model,
+)
+from dso.media.ffmpeg import extract_audio
+from dso.media.ingest import get_video
+from dso.text.zh_hans import to_zh_hans
+from dso.utils import read_json, run_cmd, seconds_to_srt_time, utc_now, write_json
+from dso.versions import ASR_MODEL_ROUTING_VERSION
+
+POSTPROCESS_VERSION = "2026-06-29.1"
+DEFAULT_ASR_PROMPT = (
+    "音乐综艺节目中文转写。常见词包括：歌手2025、陈楚生、张韶涵、导师、评委、"
+    "副歌、高音、转调、升key、改编、晋级、淘汰、听审、芒果卡、动感地带、"
+    "范玮琪、陈楚生、王老吉、vivo、白雀羚、欧丽薇兰、压力、彩排、离开舞台、"
+    "补位歌手。英文歌手名保持原文，英文歌词保持英文。"
+)
+HOTWORD_REPLACEMENTS = {
+    "清春": "青春",
+    "清水印记": "青春印记",
+    "盲國卡": "芒果卡",
+    "盲国卡": "芒果卡",
+    "芒國卡": "芒果卡",
+    "範圍期": "范玮琪",
+    "范围期": "范玮琪",
+    "範圍棋": "范玮琪",
+    "范围棋": "范玮琪",
+    "范維奇": "范玮琪",
+    "范维奇": "范玮琪",
+    "范維琪": "范玮琪",
+    "范维琪": "范玮琪",
+    "范偉琪": "范玮琪",
+    "范偉奇": "范玮琪",
+    "魏范維奇": "范玮琪",
+    "魏范维奇": "范玮琪",
+    "飯飯": "范范",
+    "饭饭": "范范",
+    "犯法": "范范",
+    "陳楚聲": "陈楚生",
+    "陈楚聲": "陈楚生",
+    "陳處生": "陈楚生",
+    "陈處生": "陈楚生",
+    "陳处生": "陈楚生",
+    "陈处生": "陈楚生",
+    "廚生": "陈楚生",
+    "厨生": "陈楚生",
+    "沉處生": "陈楚生",
+    "沉处生": "陈楚生",
+    "楚聲": "楚生",
+    "楚山歌": "楚生哥",
+    "賽值": "赛制",
+    "赛值": "赛制",
+    "賽指": "赛制",
+    "赛指": "赛制",
+    "排名莫位": "排名末位",
+    "本場最終排名莫位": "本场最终排名末位",
+    "本场最终排名莫位": "本场最终排名末位",
+    "腰跃": "邀约",
+    "邀跃": "邀约",
+    "经验顺序": "竞演顺序",
+    "经验结果": "竞演结果",
+    "经验排名": "竞演排名",
+    "經驗結果": "竞演结果",
+    "經驗排名": "竞演排名",
+    "下一周的经验": "下一周的竞演",
+    "下一週的經驗": "下一周的竞演",
+    "下次最多的一次": "想得最多的一次",
+    "这次正式的这次唱": "这次正式地唱",
+    "聽神": "听审",
+    "听神": "听审",
+    "敬眼": "竞演",
+    "進演": "竞演",
+    "季節順序": "竞演顺序",
+    "季节顺序": "竞演顺序",
+    "Grease": "Grace",
+    "玄律": "旋律",
+    "部位歌手": "补位歌手",
+    "不畏歌手": "补位歌手",
+    "補位歌手": "补位歌手",
+    "NP3": "MP3",
+    "名詞沒有接小": "名次没有揭晓",
+    "名词没有接小": "名次没有揭晓",
+    "王老级": "王老吉",
+    "王老積": "王老吉",
+    "白确灵": "白雀羚",
+    "白却灵": "白雀羚",
+    "欧利威兰": "欧丽薇兰",
+    "欧丽威兰": "欧丽薇兰",
+    "猛牛酸酸乳": "蒙牛酸酸乳",
+    "升 key": "升key",
+    "升Key": "升key",
+}
+AD_KEYWORDS = [
+    "合作伙伴",
+    "超級合作夥伴",
+    "超级合作伙伴",
+    "提醒您",
+    "銷量第一",
+    "销量第一",
+    "怕上火",
+    "广告",
+    "廣告",
+    "VIP",
+    "vivo",
+    "王老吉",
+    "白雀羚",
+    "欧丽薇兰",
+    "動感地帶",
+    "动感地带",
+    "芒果卡",
+    "盲國卡",
+    "盲国卡",
+    "歌手听我唱",
+    "歌手聽我唱",
+    "合唱官",
+    "扫码",
+    "掃碼",
+    "直播间",
+    "直播間",
+    "直拍",
+    "QQ音乐",
+    "QQ音樂",
+    "网易云",
+    "網易雲",
+    "汽水音乐",
+    "汽水音樂",
+    "酷狗",
+    "酷我",
+    "酸酸乳",
+    "蒙牛",
+    "猛流酸酸乳",
+    "官方帐号",
+    "官方帳號",
+    "参与互动",
+    "參與互動",
+    "登录",
+    "登入",
+    "收听",
+    "收聽",
+]
+
+
+def transcribe_video(
+    video_id: str,
+    *,
+    model_size: str | None = None,
+    asr_profile: str | None = None,
+    backend: str | None = None,
+    force: bool = False,
+) -> dict:
+    settings = ensure_data_dirs()
+    video = get_video(video_id)
+    requested_profile = asr_profile if asr_profile is not None else os.getenv("DSO_ASR_PROFILE")
+    routing = route_video_asr(video, requested_profile=requested_profile, model_size=model_size)
+    profile_name = routing["recommended_profile"]
+    model_size = resolve_asr_model_size(model_size, profile=profile_name)
+    routing = {**routing, "recommended_model": model_size}
+    video_path = Path(video["file_path"])
+    transcript_dir = settings.cache_dir / video_id / "transcript"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = transcript_dir / "transcript.json"
+
+    sidecar = _find_sidecar_transcript(video_path)
+    if sidecar:
+        segments = post_process_segments(_parse_srt(sidecar))
+        source = "sidecar_srt"
+        metadata = {
+            "cache_key": {
+                "backend": "sidecar_srt",
+                "path": str(sidecar),
+                "postprocess_version": POSTPROCESS_VERSION,
+            },
+            "cache_hit": False,
+            "profile": profile_name,
+            "model_size": model_size,
+            "routing": routing,
+        }
+    else:
+        audio_path = transcript_dir / "audio.wav"
+        extract_audio(video_path, audio_path)
+        cache_key = _asr_cache_key(audio_path, model_size, profile_name, backend)
+        cached = _cached_transcript(transcript_path, cache_key, force=force)
+        if cached:
+            _mark_transcribed(transcript_path, video_id)
+            return cached
+        result = transcribe_audio_file(
+            audio_path,
+            transcript_dir,
+            model_size=model_size,
+            asr_profile=profile_name,
+            backend=backend,
+            routing_context=routing,
+        )
+        segments = result["segments"]
+        source = result["source"]
+        if not segments:
+            segments = _placeholder_segments(float(video["duration_seconds"]))
+            source = "placeholder"
+        metadata = {**result.get("metadata", {}), "cache_key": cache_key, "cache_hit": False}
+
+    data = {
+        "video_id": video_id,
+        "source": source,
+        "segments": segments,
+        "metadata": metadata,
+        "created_at": utc_now(),
+    }
+    write_json(transcript_path, data)
+    _mark_transcribed(transcript_path, video_id)
+    return data
+
+
+def transcribe_audio_file(
+    audio_path: Path,
+    transcript_dir: Path,
+    *,
+    model_size: str | None = None,
+    asr_profile: str | None = None,
+    backend: str | None = None,
+    routing_context: dict | None = None,
+) -> dict:
+    profile_name = normalize_asr_profile(asr_profile)
+    model_size = resolve_asr_model_size(model_size, profile=profile_name)
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    segments, source = _try_configured_asr(audio_path, transcript_dir, model_size, backend=backend)
+    processed = post_process_segments(segments)
+    return {
+        "source": source,
+        "segments": processed,
+        "metadata": {
+            "backend": source.split(":", 1)[0],
+            "profile": profile_name,
+            "model_size": model_size,
+            "prompt": asr_prompt(),
+            "postprocess_version": POSTPROCESS_VERSION,
+            "segment_count_raw": len(segments),
+            "segment_count_processed": len(processed),
+            "routing": routing_context
+            or {
+                "contract_version": ASR_MODEL_ROUTING_VERSION,
+                "scope": "audio_file",
+                "decision": "manual_profile",
+                "recommended_profile": profile_name,
+                "recommended_model": model_size,
+                "reason_keys": ["manual_profile"],
+                "reasons": ["手动指定 ASR profile"],
+                "candidate_only": False,
+                "preserve_quality_result": profile_name == "verify",
+                "signals": {},
+            },
+        },
+    }
+
+
+def active_asr_backend(
+    backend: str | None = None,
+    *,
+    model_size: str | None = None,
+    asr_profile: str | None = None,
+) -> str:
+    model_size = resolve_asr_model_size(model_size, profile=asr_profile)
+    requested = (backend or os.getenv("DSO_ASR_BACKEND", "auto")).strip().lower() or "auto"
+    if requested == "auto":
+        if whisper_cpp_ready(model_size):
+            return "whisper_cpp"
+        if importlib.util.find_spec("faster_whisper") is not None:
+            return "faster_whisper"
+        return "placeholder"
+    if requested in {"whisper_cpp", "whisper.cpp", "cpp"}:
+        return "whisper_cpp" if whisper_cpp_ready(model_size) else "missing_whisper_cpp"
+    if requested in {"faster_whisper", "faster-whisper", "fw"}:
+        return "faster_whisper" if importlib.util.find_spec("faster_whisper") is not None else "missing_faster_whisper"
+    return f"unknown:{requested}"
+
+
+def asr_prompt() -> str:
+    configured = os.getenv("DSO_WHISPER_PROMPT")
+    if configured is not None:
+        return configured.strip()
+    extra = os.getenv("DSO_WHISPER_HOTWORDS", "").strip()
+    if extra:
+        return f"{DEFAULT_ASR_PROMPT} 额外热词：{extra}"
+    return DEFAULT_ASR_PROMPT
+
+
+def _mark_transcribed(transcript_path: Path, video_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE source_videos SET transcript_path = ?, status = ?, updated_at = ? WHERE id = ?",
+            [str(transcript_path), "transcribed", utc_now(), video_id],
+        )
+        conn.commit()
+
+
+def _try_configured_asr(
+    audio_path: Path,
+    transcript_dir: Path,
+    model_size: str,
+    *,
+    backend: str | None = None,
+) -> tuple[list[dict], str]:
+    backend = (backend or os.getenv("DSO_ASR_BACKEND", "auto")).strip().lower() or "auto"
+    if backend == "auto":
+        if whisper_cpp_ready(model_size):
+            segments, source = _try_whisper_cpp(audio_path, transcript_dir, model_size)
+            if segments:
+                return segments, source
+        return _try_faster_whisper(audio_path, model_size)
+    if backend in {"whisper_cpp", "whisper.cpp", "cpp"}:
+        return _try_whisper_cpp(audio_path, transcript_dir, model_size)
+    if backend in {"faster_whisper", "faster-whisper", "fw"}:
+        return _try_faster_whisper(audio_path, model_size)
+    return [], f"unknown_asr_backend:{backend}"
+
+
+def _try_faster_whisper(audio_path: Path, model_size: str) -> tuple[list[dict], str]:
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except Exception:
+        return [], "missing_faster_whisper"
+
+    device = os.getenv("DSO_WHISPER_DEVICE", "auto")
+    compute_type = os.getenv("DSO_WHISPER_COMPUTE_TYPE", "int8")
+    model_kwargs: dict[str, int | str] = {"device": device, "compute_type": compute_type}
+    cpu_threads = _optional_int_env("DSO_WHISPER_CPU_THREADS")
+    num_workers = _optional_int_env("DSO_WHISPER_NUM_WORKERS")
+    if cpu_threads:
+        model_kwargs["cpu_threads"] = cpu_threads
+    if num_workers:
+        model_kwargs["num_workers"] = num_workers
+    model = WhisperModel(model_size, **model_kwargs)
+    prompt = asr_prompt()
+    segments_iter, _ = model.transcribe(str(audio_path), vad_filter=True, initial_prompt=prompt or None)
+    segments: list[dict] = []
+    for index, seg in enumerate(segments_iter, start=1):
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        segments.append(
+            {"index": index, "start": float(seg.start), "end": float(seg.end), "text": text}
+        )
+    return segments, f"faster_whisper:{model_size}:{device}:{compute_type}"
+
+
+def _try_whisper_cpp(audio_path: Path, transcript_dir: Path, model_size: str | None = None) -> tuple[list[dict], str]:
+    binary = whisper_cpp_binary()
+    model = whisper_cpp_model(model_size)
+    if not binary:
+        return [], "missing_whisper_cpp_binary"
+    if not model:
+        return [], "missing_whisper_cpp_model"
+
+    output_prefix = transcript_dir / "whisper_cpp"
+    language = whisper_cpp_language()
+    command = [
+        binary,
+        "-m",
+        model,
+        "-f",
+        str(audio_path),
+        "-oj",
+        "-of",
+        str(output_prefix),
+    ]
+    if language:
+        command.extend(["-l", language])
+    vad_model = whisper_cpp_vad_model()
+    if whisper_cpp_vad_enabled() and vad_model:
+        command.extend(["--vad", "-vm", vad_model])
+    prompt = asr_prompt()
+    if prompt:
+        command.extend(["--prompt", prompt])
+    extra_args = os.getenv("DSO_WHISPER_CPP_EXTRA_ARGS")
+    if extra_args:
+        command.extend(shlex.split(extra_args))
+    try:
+        run_cmd(command)
+    except Exception as exc:
+        return [], f"whisper_cpp_failed:{type(exc).__name__}"
+
+    json_path = output_prefix.with_suffix(".json")
+    if not json_path.exists():
+        return [], "missing_whisper_cpp_json"
+    segments = _parse_whisper_cpp_json(json_path)
+    return segments, f"whisper_cpp:{model_size or 'base'}"
+
+
+def _asr_cache_key(audio_path: Path, model_size: str, profile_name: str, backend: str | None = None) -> dict:
+    backend_preference = (backend or os.getenv("DSO_ASR_BACKEND", "auto")).strip().lower() or "auto"
+    return {
+        "audio_sha256": _file_sha256(audio_path),
+        "profile": profile_name,
+        "model_size": model_size,
+        "backend_preference": backend_preference,
+        "active_backend": active_asr_backend(backend, model_size=model_size, asr_profile=profile_name),
+        "whisper_cpp": {
+            "binary": whisper_cpp_binary(),
+            "model": whisper_cpp_model(model_size),
+            "model_name": model_size,
+            "language": whisper_cpp_language(),
+            "vad_enabled": whisper_cpp_vad_enabled(),
+            "vad_model": whisper_cpp_vad_model(),
+            "extra_args": os.getenv("DSO_WHISPER_CPP_EXTRA_ARGS"),
+        },
+        "faster_whisper": {
+            "model_size": model_size,
+            "device": os.getenv("DSO_WHISPER_DEVICE", "auto"),
+            "compute_type": os.getenv("DSO_WHISPER_COMPUTE_TYPE", "int8"),
+            "cpu_threads": os.getenv("DSO_WHISPER_CPU_THREADS"),
+            "num_workers": os.getenv("DSO_WHISPER_NUM_WORKERS"),
+        },
+        "prompt": asr_prompt(),
+        "postprocess_version": POSTPROCESS_VERSION,
+    }
+
+
+def _cached_transcript(transcript_path: Path, cache_key: dict, *, force: bool) -> dict | None:
+    if force:
+        return None
+    data = read_json(transcript_path, default=None)
+    if not isinstance(data, dict):
+        return None
+    metadata = data.get("metadata") or {}
+    if metadata.get("cache_key") != cache_key:
+        return None
+    data["metadata"] = {**metadata, "cache_hit": True}
+    data["cache_hit"] = True
+    return data
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _parse_whisper_cpp_json(path: Path) -> list[dict]:
+    data = read_json(path, default={}) or {}
+    rows = data.get("transcription") or data.get("segments") or []
+    segments: list[dict] = []
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        start, end = _whisper_cpp_times(row)
+        if end <= start:
+            end = start + 0.3
+        segments.append(
+            {
+                "index": len(segments) + 1,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": text,
+            }
+        )
+    return segments
+
+
+def post_process_segments(segments: list[dict]) -> list[dict]:
+    cleaned: list[dict] = []
+    for segment in segments:
+        text = _normalize_transcript_text(str(segment.get("text") or ""))
+        if not text:
+            continue
+        if _is_repetitive_hallucination(text):
+            continue
+        start = _safe_float(segment.get("start"), 0.0)
+        end = max(start + 0.3, _safe_float(segment.get("end"), start + 0.3))
+        row = {
+            "index": len(cleaned) + 1,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+        }
+        tags = []
+        if _ad_noise_score(text) >= 2:
+            tags.append("ad_read")
+        if _is_mostly_english_lyrics(text):
+            tags.append("english_lyrics")
+        if tags:
+            row["tags"] = tags
+        cleaned.append(row)
+
+    merged: list[dict] = []
+    for segment in cleaned:
+        if not merged:
+            merged.append(segment)
+            continue
+        previous = merged[-1]
+        gap = float(segment["start"]) - float(previous["end"])
+        previous_text = str(previous.get("text") or "")
+        current_text = str(segment.get("text") or "")
+        can_merge = (
+            gap <= 0.75
+            and (len(previous_text) < 10 or len(current_text) < 10)
+            and float(segment["end"]) - float(previous["start"]) <= 8.0
+            and previous.get("tags") == segment.get("tags")
+        )
+        if can_merge:
+            previous["end"] = segment["end"]
+            previous["text"] = _normalize_transcript_text(f"{previous_text}{current_text}")
+            continue
+        merged.append(segment)
+
+    for index, segment in enumerate(merged, start=1):
+        segment["index"] = index
+    return merged
+
+
+def _normalize_transcript_text(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text.replace("\u3000", " ")).strip()
+    normalized = re.sub(r"\s+([，。！？、,.!?])", r"\1", normalized)
+    normalized = to_zh_hans(normalized)
+    for wrong, right in _zh_hans_hotword_replacements():
+        normalized = normalized.replace(wrong, right)
+    return to_zh_hans(normalized)
+
+
+@lru_cache(maxsize=1)
+def _zh_hans_hotword_replacements() -> tuple[tuple[str, str], ...]:
+    return tuple((to_zh_hans(wrong), to_zh_hans(right)) for wrong, right in HOTWORD_REPLACEMENTS.items())
+
+
+def _ad_noise_score(text: str) -> int:
+    return sum(1 for word in AD_KEYWORDS if word.lower() in text.lower())
+
+
+def _is_repetitive_hallucination(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if len(compact) < 32:
+        return False
+    most_common = max((compact.count(char) for char in set(compact)), default=0)
+    if most_common / len(compact) >= 0.42:
+        return True
+    for size in (1, 2, 3, 4):
+        chunks = [compact[index : index + size] for index in range(0, len(compact) - size + 1, size)]
+        if not chunks:
+            continue
+        repeated = max((chunks.count(chunk) for chunk in set(chunks)), default=0)
+        if repeated >= 8 and repeated / len(chunks) >= 0.55:
+            return True
+    return False
+
+
+def _is_mostly_english_lyrics(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if len(compact) < 24:
+        return False
+    ascii_letters = sum(1 for char in compact if char.isascii() and char.isalpha())
+    cjk = sum(1 for char in compact if "\u4e00" <= char <= "\u9fff")
+    return ascii_letters / max(1, len(compact)) >= 0.55 and cjk < 8
+
+
+def _safe_float(value: object, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _whisper_cpp_times(row: dict) -> tuple[float, float]:
+    if isinstance(row.get("offsets"), dict):
+        offsets = row["offsets"]
+        start = _milliseconds_to_seconds(offsets.get("from"))
+        end = _milliseconds_to_seconds(offsets.get("to"))
+        if end > start:
+            return start, end
+    if isinstance(row.get("timestamps"), dict):
+        timestamps = row["timestamps"]
+        return _timestamp_to_seconds(timestamps.get("from")), _timestamp_to_seconds(timestamps.get("to"))
+    return _offset_to_seconds(row.get("start")), _offset_to_seconds(row.get("end"))
+
+
+def _milliseconds_to_seconds(value: object) -> float:
+    try:
+        return float(value or 0) / 1000.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _offset_to_seconds(value: object) -> float:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return number / 1000.0 if number > 10000 else number
+
+
+def _timestamp_to_seconds(value: object) -> float:
+    if value is None:
+        return 0.0
+    text = str(value).strip().replace(",", ".")
+    if not text:
+        return 0.0
+    try:
+        if ":" in text:
+            parts = [float(part) for part in text.split(":")]
+            if len(parts) == 3:
+                return parts[0] * 3600 + parts[1] * 60 + parts[2]
+            if len(parts) == 2:
+                return parts[0] * 60 + parts[1]
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _find_sidecar_transcript(video_path: Path) -> Path | None:
+    for suffix in [".srt", ".SRT"]:
+        candidate = video_path.with_suffix(suffix)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _parse_srt(path: Path) -> list[dict]:
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    blocks = re.split(r"\n\s*\n", content.strip())
+    segments = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 2:
+            continue
+        time_line = next((line for line in lines if "-->" in line), "")
+        if not time_line:
+            continue
+        start_s, end_s = [part.strip() for part in time_line.split("-->", 1)]
+        text = " ".join(line for line in lines if "-->" not in line and not line.isdigit())
+        segments.append(
+            {
+                "index": len(segments) + 1,
+                "start": _srt_time_to_seconds(start_s),
+                "end": _srt_time_to_seconds(end_s),
+                "text": text,
+            }
+        )
+    return segments
+
+
+def _srt_time_to_seconds(value: str) -> float:
+    value = value.replace(",", ".")
+    h, m, s = value.split(":")
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
+def _placeholder_segments(duration: float) -> list[dict]:
+    if duration <= 0:
+        return []
+    segments = []
+    step = 20.0
+    index = 1
+    start = 0.0
+    while start < duration:
+        end = min(duration, start + step)
+        segments.append(
+            {
+                "index": index,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": f"未转写片段 {index}",
+            }
+        )
+        index += 1
+        start = end
+    return segments
+
+
+def write_srt(segments: list[dict], path: Path, *, offset: float = 0.0) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for i, seg in enumerate(segments, start=1):
+        start = max(0.0, float(seg["start"]) - offset)
+        end = max(start + 0.3, float(seg["end"]) - offset)
+        lines.extend(
+            [
+                str(i),
+                f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}",
+                str(seg.get("text") or "").strip(),
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path

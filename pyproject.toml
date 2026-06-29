@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "douyin-slice-optimizer"
+version = "0.1.0"
+description = "Local-first MVP for music-variety short-video slice discovery, scoring, export, and feedback."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "typer>=0.12",
+  "python-multipart>=0.0.9"
+]
+
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.0"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+dso = "dso.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"dso.api" = ["static/dashboard/index.html", "static/dashboard/assets/*"]
