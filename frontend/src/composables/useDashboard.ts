@@ -23,6 +23,9 @@ import type {
   MemoryBuildResult,
   ModuleStatus,
   ModuleStatusKey,
+  MultimodalCollectionPlan,
+  MultimodalFeatureExperimentResult,
+  MultimodalValidationResult,
   PreviewState,
   PrototypeBankResult,
   QualityReport,
@@ -31,8 +34,11 @@ import type {
   SegmentHistoryResult,
   SemanticCalibrationQueue,
   SemanticCalibrationSample,
+  SemanticFeatureBackfillResult,
+  SemanticFeatureExperiment,
   SimulationRow,
   SimulationSummary,
+  SliceStructureEvaluation,
   TrainingSample,
   VariantRow,
   VideoRow,
@@ -105,6 +111,12 @@ export interface DashboardStore {
   buildMemoryBank: () => Promise<void>;
   rebuildInterestClock: () => Promise<void>;
   runBacktest: () => Promise<void>;
+  backfillSemanticFeatures: () => Promise<void>;
+  runSemanticFeatureExperiment: () => Promise<void>;
+  runSliceStructureEvaluation: () => Promise<void>;
+  buildMultimodalCollectionPlan: () => Promise<void>;
+  runMultimodalValidation: () => Promise<void>;
+  runMultimodalFeatureExperiment: () => Promise<void>;
   loadSemanticCalibrationQueue: (notify?: boolean) => Promise<void>;
   saveCalibrationLabels: (sampleId: string) => Promise<void>;
   reopenCalibrationSample: (sampleId: string) => Promise<void>;
@@ -143,6 +155,12 @@ export interface DashboardState {
   historicalImport: HistoricalSampleImportResult | null;
   historicalSummary: HistoricalSampleSummary | null;
   semanticCalibrationQueue: SemanticCalibrationQueue | null;
+  semanticFeatureExperiment: SemanticFeatureExperiment | null;
+  semanticFeatureBackfill: SemanticFeatureBackfillResult | null;
+  sliceStructureEvaluation: SliceStructureEvaluation | null;
+  multimodalCollectionPlan: MultimodalCollectionPlan | null;
+  multimodalValidation: MultimodalValidationResult | null;
+  multimodalFeatureExperiment: MultimodalFeatureExperimentResult | null;
   calibrationDrafts: Record<string, CalibrationDraft>;
   rankerTuning: RankerTuningResult | null;
   prototypeBank: PrototypeBankResult | null;
@@ -205,6 +223,12 @@ export function useDashboard(): DashboardStore {
     historicalImport: null,
     historicalSummary: null,
     semanticCalibrationQueue: null,
+    semanticFeatureExperiment: null,
+    semanticFeatureBackfill: null,
+    sliceStructureEvaluation: null,
+    multimodalCollectionPlan: null,
+    multimodalValidation: null,
+    multimodalFeatureExperiment: null,
     calibrationDrafts: {},
     rankerTuning: null,
     prototypeBank: null,
@@ -324,6 +348,11 @@ export function useDashboard(): DashboardStore {
 
   function statCount(key: keyof DashboardStats): number {
     return Number(state.stats[key] || 0);
+  }
+
+  function percentText(value: number): string {
+    if (!Number.isFinite(value)) return "-";
+    return `${(Math.max(0, Math.min(1, value)) * 100).toFixed(0)}%`;
   }
 
   function toast(message: string): void {
@@ -634,7 +663,7 @@ export function useDashboard(): DashboardStore {
     params.set("limit", String(limit));
     params.set("min_priority", "0");
     params.set("queue_type", "mixed");
-    params.set("strategy", "research_ranker_v2_2");
+    params.set("strategy", "research_ranker_v2_4");
     params.set("min_disagreement", "0");
     return `/learning/semantic-calibration/queue?${params.toString()}`;
   }
@@ -934,12 +963,124 @@ export function useDashboard(): DashboardStore {
 
   async function runBacktest(): Promise<void> {
     const account = state.feedbackAccount.trim();
-    const report = await api<BacktestReport>("/learning/backtest", jsonBody({ account_id: account || null, k: 10, strategy: "research_ranker_v2_2", holdout_policy: "time" }));
+    const report = await api<BacktestReport>("/learning/backtest", jsonBody({ account_id: account || null, k: 10, strategy: "research_ranker_v2_4", holdout_policy: "time" }));
     state.backtestReports = [report, ...state.backtestReports].slice(0, 3);
     const metrics = report.metrics || {};
     const gate = metrics.promotion_gate || {};
     state.learningResult = `回测 ${report.status || "ready"} / lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / 高互动 ${Number(metrics.high_interaction_hit_rate || 0).toFixed(2)} / ${Boolean(gate.passed) ? "可提升权重" : "研究证据"}`;
     toast("离线回测已生成");
+  }
+
+  async function backfillSemanticFeatures(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const result = await api<SemanticFeatureBackfillResult>("/learning/semantic-features/backfill", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 0,
+      force: true
+    }));
+    state.semanticFeatureBackfill = result;
+    const structureRate = Number(result.coverage?.slice_structure?.rate || 0);
+    const entityRate = Number(result.coverage?.entity_signal?.rate || 0);
+    state.learningResult = `语义回填 ${result.status || "ready"} / 更新 ${Number(result.updated || 0)} / 结构 ${percentText(structureRate)} / 实体 ${percentText(entityRate)}`;
+    await loadLearningDatasets();
+    toast("语义特征已回填");
+  }
+
+  async function runSemanticFeatureExperiment(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const result = await api<SemanticFeatureExperiment>("/learning/semantic-feature-experiment/run", jsonBody({
+      account_id: account || null,
+      k: 10,
+      holdout_policy: "time",
+      include_field_masks: false
+    }));
+    state.semanticFeatureExperiment = result;
+    const metrics = result.base_metrics || {};
+    const noisy = result.diagnosis?.possibly_noisy_fields || [];
+    state.learningResult = `语义实验 ${result.status || "ready"} / lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / 噪声字段 ${noisy.length}`;
+    toast("语义特征实验已生成");
+  }
+
+  async function runSliceStructureEvaluation(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const result = await api<SliceStructureEvaluation>("/learning/slice-structure/evaluate", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 0,
+      min_confidence: 0
+    }));
+    state.sliceStructureEvaluation = result;
+    const coverage = result.coverage || {};
+    const evaluatorRate = Number(coverage.evaluator_known_rate || 0);
+    const conflictRate = Number(coverage.conflict_rate || 0);
+    const queueCount = Array.isArray(result.review_queue) ? result.review_queue.length : 0;
+    state.learningResult = `结构评估 ${result.status || "ready"} / 可判定 ${percentText(evaluatorRate)} / 冲突 ${percentText(conflictRate)} / 待复核 ${queueCount}`;
+    toast("切片结构评估已生成");
+  }
+
+  async function buildMultimodalCollectionPlan(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const result = await api<MultimodalCollectionPlan>("/learning/multimodal/collection-plan", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 120,
+      stage: "beta_d1",
+      include_ready: false
+    }));
+    state.multimodalCollectionPlan = result;
+    const summary = result.summary || {};
+    const missing = summary.missing_assets && typeof summary.missing_assets === "object"
+      ? Object.entries(summary.missing_assets as Record<string, unknown>).slice(0, 2).map(([key, value]) => `${key} ${Number(value || 0)}`).join(" / ")
+      : "";
+    state.learningResult = `多模态采集计划 ${result.status || "ready"} / 待采 ${Number(result.sample_count || 0)} / 候选 ${Number(result.candidate_count || 0)}${missing ? ` / 缺 ${missing}` : ""}`;
+    toast("多模态采集计划已生成");
+  }
+
+  async function runMultimodalValidation(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const result = await api<MultimodalValidationResult>("/learning/multimodal-validation/run", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 300,
+      k: 10,
+      min_samples: 100,
+      min_asset_coverage: 0.7
+    }));
+    state.multimodalValidation = result;
+    const readiness = result.asset_readiness || {};
+    const coverage = readiness.coverage || {};
+    const readyRate = Number(coverage.ready_for_multimodal?.rate || 0);
+    const proxy = result.proxy_signal_experiment || {};
+    const gate = result.promotion_gate || {};
+    state.learningResult = `多模态验证 ${result.status || "research_only"} / 素材 ${percentText(readyRate)} / 代理 lift ${Number(proxy.lift_delta || 0).toFixed(2)} / ${gate.decision || "research_only"}`;
+    toast("多模态验证已生成");
+  }
+
+  async function runMultimodalFeatureExperiment(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const result = await api<MultimodalFeatureExperimentResult>("/learning/multimodal-feature-experiment/run", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 300,
+      k: 10,
+      min_feature_samples: 60,
+      audio_window_seconds: 10
+    }));
+    state.multimodalFeatureExperiment = result;
+    const coverage = result.feature_coverage || {};
+    const strategies = result.strategy_comparison || {};
+    const combined = strategies.semantic_plus_audio_visual || {};
+    const readyRate = Number(coverage.feature_ready_rate || 0);
+    const liftDelta = Number(combined.lift_delta_vs_semantic || 0);
+    const gate = result.promotion_gate || {};
+    state.learningResult = `真实特征实验 ${result.status || "research_only"} / 覆盖 ${percentText(readyRate)} / 语义增益 ${liftDelta >= 0 ? "+" : ""}${liftDelta.toFixed(2)} / ${gate.decision || "research_only"}`;
+    toast("真实多模态特征实验已生成");
   }
 
   async function loadSemanticCalibrationQueue(notify = true): Promise<void> {
@@ -1039,7 +1180,7 @@ export function useDashboard(): DashboardStore {
     const report = await api<BacktestReport>("/learning/backtest", jsonBody({
       account_id: account || null,
       k: 10,
-      strategy: "research_ranker_v2_2",
+      strategy: "research_ranker_v2_4",
       holdout_policy: "time"
     }));
     state.prototypeBank = prototypes;
@@ -1047,9 +1188,9 @@ export function useDashboard(): DashboardStore {
     state.backtestReports = [report, ...state.backtestReports].slice(0, 3);
     const metrics = report.metrics || {};
     const gate = metrics.promotion_gate || {};
-    state.learningResult = `重建 ${Number(labelResult.updated || 0)} 条标签 / v2.2 lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / ${Boolean(gate.passed) ? "通过门控" : "研究证据"}`;
+    state.learningResult = `重建 ${Number(labelResult.updated || 0)} 条标签 / v2.4 lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / ${Boolean(gate.passed) ? "通过门控" : "研究证据"}`;
     await loadSemanticCalibrationQueue(false);
-    toast("标签、原型库和 v2.2 回测已更新");
+    toast("标签、原型库和 v2.4 回测已更新");
   }
 
   async function importHistoricalSamples(): Promise<void> {
@@ -1203,6 +1344,12 @@ export function useDashboard(): DashboardStore {
     buildMemoryBank,
     rebuildInterestClock,
     runBacktest,
+    backfillSemanticFeatures,
+    runSemanticFeatureExperiment,
+    runSliceStructureEvaluation,
+    buildMultimodalCollectionPlan,
+    runMultimodalValidation,
+    runMultimodalFeatureExperiment,
     loadSemanticCalibrationQueue,
     saveCalibrationLabels,
     reopenCalibrationSample,

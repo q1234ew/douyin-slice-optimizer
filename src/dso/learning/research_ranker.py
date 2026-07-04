@@ -20,7 +20,8 @@ def research_learning_signals(segment: dict) -> dict:
     target_tokens = _research_tokens(target_text)
     matches = []
     for sample in samples:
-        similarity = _research_similarity(target_tokens, _sample_research_text(sample), segment, sample)
+        gated_sample = _signal_gated_sample(sample)
+        similarity = _research_similarity(target_tokens, _sample_research_text(gated_sample), segment, gated_sample)
         if similarity <= 0:
             continue
         reward = float(sample.get("normalized_reward") or sample.get("reward_proxy") or 0.0)
@@ -36,15 +37,18 @@ def research_learning_signals(segment: dict) -> dict:
                 "normalized_reward": round(reward, 4),
                 "performance_label": label,
                 "match_type": label if label in {"high", "low"} else "neutral",
-                "content_category": sample.get("content_category") or "",
-                "hook_type": sample.get("hook_type") or "",
-                "slice_structure": sample.get("slice_structure") or "",
+                "content_category": gated_sample.get("content_category") or "",
+                "hook_type": gated_sample.get("hook_type") or "",
+                "slice_structure": gated_sample.get("slice_structure") or "",
                 "program_name": sample.get("program_name") or "",
-                "artist_names": sample.get("artist_names") or "",
-                "song_title": sample.get("song_title") or "",
+                "artist_names": gated_sample.get("artist_names") or "",
+                "song_title": gated_sample.get("song_title") or "",
+                "original_sound_owner": gated_sample.get("original_sound_owner") or "",
+                "entity_signal": gated_sample.get("entity_signal") or "",
                 "tags": sample.get("tags") or "",
                 "classification_confidence": sample.get("classification_confidence") or "",
                 "research_label_version": sample.get("research_label_version") or "",
+                "signal_gate_policy": gated_sample.get("signal_gate_policy") or "",
             }
         )
     matches.sort(key=lambda row: (row["similarity"], row["normalized_reward"]), reverse=True)
@@ -68,6 +72,7 @@ def research_learning_signals(segment: dict) -> dict:
         low_risks=low_risks,
         semantic_confidence=semantic_confidence,
     )
+    component_scores.update(_signal_gate_component_scores(selected))
     history_score = _history_score(component_scores)
     status = "ready" if len(samples) >= 50 and selected else "low_confidence"
     if not selected:
@@ -106,6 +111,7 @@ def research_learning_signals(segment: dict) -> dict:
             "sample_count": len(samples),
             "matched_count": len(selected),
             "semantic_confidence": round(semantic_confidence, 4),
+            "signal_trust_gate": round(float(component_scores.get("signal_trust_gate") or 0.0), 4),
         },
         "ranker_reason": reason,
         "ranker_advice": advice,
@@ -206,8 +212,9 @@ def _fetch_research_samples(conn, account_id: str | None) -> list[dict]:
         f"""
         SELECT id, account_id, platform_item_id, title, reward_proxy, normalized_reward,
                performance_label, content_category, hook_type, slice_structure,
-               program_name, artist_names, song_title, tags, classification_confidence,
-               research_label_version
+               program_name, artist_names, song_title, original_sound_owner,
+               is_original_sound, entity_signal, structure_confidence,
+               structure_evidence, tags, classification_confidence, research_label_version
         FROM historical_capture_samples
         WHERE {' AND '.join(clauses)}
         ORDER BY updated_at DESC
@@ -241,12 +248,79 @@ def _sample_research_text(row: dict) -> str:
             "tags",
             "artist_names",
             "song_title",
+            "original_sound_owner",
+            "entity_signal",
             "program_name",
             "content_category",
             "hook_type",
             "slice_structure",
         ]
     )
+
+
+def _signal_gated_sample(row: dict) -> dict:
+    sample = dict(row)
+    manual_verified = str(sample.get("classification_confidence") or "").strip().lower() == "manual_verified"
+    quarantined = []
+    if not manual_verified:
+        if _known_signal_value(sample.get("hook_type")):
+            sample["hook_type"] = ""
+            quarantined.append("hook_type")
+        if _known_signal_value(sample.get("slice_structure")):
+            sample["slice_structure"] = ""
+            quarantined.append("slice_structure")
+    if _untrusted_song_title(sample):
+        sample["song_title"] = ""
+        quarantined.append("song_title")
+    sample["signal_gate_policy"] = ",".join(quarantined) if quarantined else "trusted"
+    return sample
+
+
+def _untrusted_song_title(row: dict) -> bool:
+    title = str(row.get("song_title") or "").strip()
+    if not _known_signal_value(title):
+        return False
+    owner = str(row.get("original_sound_owner") or "").strip()
+    if _truthy_flag(row.get("is_original_sound")):
+        return True
+    if "原声" in title or "創作的原聲" in title or "创作的原声" in title:
+        return True
+    return bool(owner and owner.lower() in title.lower() and len(title) <= len(owner) + 8)
+
+
+def _signal_gate_component_scores(selected: list[dict]) -> dict:
+    if not selected:
+        return {
+            "signal_trust_gate": 0.0,
+            "trusted_signal_count": 0.0,
+            "quarantined_signal_count": 0.0,
+        }
+    trusted = 0
+    quarantined = 0
+    for row in selected:
+        trusted += sum(1 for field in ["content_category", "artist_names", "original_sound_owner", "entity_signal"] if _known_signal_value(row.get(field)))
+        policy = str(row.get("signal_gate_policy") or "")
+        if policy and policy != "trusted":
+            quarantined += len([item for item in policy.split(",") if item])
+    avg_trusted = trusted / max(1, len(selected))
+    avg_quarantined = quarantined / max(1, len(selected))
+    gate_score = clamp(32.0 + avg_trusted * 14.0 - avg_quarantined * 4.0)
+    return {
+        "signal_trust_gate": round(gate_score, 4),
+        "trusted_signal_count": round(avg_trusted, 4),
+        "quarantined_signal_count": round(avg_quarantined, 4),
+    }
+
+
+def _known_signal_value(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text and text not in {"unknown", "none", "null", "其他", "其它", "0"})
+
+
+def _truthy_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _research_similarity(target_tokens: set[str], sample_text: str, segment: dict, sample: dict) -> float:
@@ -264,6 +338,10 @@ def _research_similarity(target_tokens: set[str], sample_text: str, segment: dic
         semantic_bonus += 0.08
     if str(sample.get("song_title") or "") and str(sample.get("song_title")) in _research_text(segment):
         semantic_bonus += 0.05
+    if str(sample.get("entity_signal") or "") and str(sample.get("entity_signal")) in _research_text(segment):
+        semantic_bonus += 0.05
+    if str(sample.get("original_sound_owner") or "") and str(sample.get("original_sound_owner")) in _research_text(segment):
+        semantic_bonus += 0.04
     return min(1.0, token_score + semantic_bonus)
 
 
@@ -312,6 +390,9 @@ def _zero_component_scores() -> dict:
         "semantic_label_trust": 0.0,
         "long_tail_novelty": 0.0,
         "best_similarity": 0.0,
+        "signal_trust_gate": 0.0,
+        "trusted_signal_count": 0.0,
+        "quarantined_signal_count": 0.0,
     }
 
 

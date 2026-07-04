@@ -148,12 +148,15 @@ def classify_published_work(
     tag_items = _split_tags(tags)
     text = _clean_text(" ".join([str(title or ""), *tag_items]))
     tag_names = [tag.lstrip("#") for tag in tag_items]
-    song_title = _text(existing.get("song_title")) or _extract_song_title(text)
+    title_song = _extract_song_title(text)
+    song_signal = _song_signal(_text(existing.get("song_title") or existing.get("music_title") or existing.get("api_music_title")), title_song=title_song)
+    song_title = song_signal["song_title"] or title_song
     artist_names = _text(existing.get("artist_names")) or "|".join(_extract_artist_names(tag_names, song_title, text))
-    content_category = _text(existing.get("content_category")) or _content_category(text, song_title)
-    hook_type = _text(existing.get("hook_type")) or _hook_type(text, _split_pipe(artist_names))
+    content_category = _existing_semantic_value(existing, "content_category") or _content_category(text, song_title)
+    hook_type = _existing_semantic_value(existing, "hook_type") or _hook_type(text, _split_pipe(artist_names))
     program_name = _text(existing.get("program_name")) or _program_name(text, account_id)
-    slice_structure = _text(existing.get("slice_structure")) or _slice_structure(text)
+    structure_signal = _slice_structure_signal(text)
+    slice_structure = _existing_semantic_value(existing, "slice_structure") or structure_signal["slice_structure"]
     commercial_intent = _text(existing.get("commercial_intent")) or _commercial_intent(text)
     rights_risk = _text(existing.get("rights_risk")) or "unknown"
     confidence = _text(existing.get("classification_confidence")) or _classification_confidence(
@@ -178,8 +181,15 @@ def classify_published_work(
         "program_name": program_name,
         "artist_names": artist_names,
         "song_title": song_title,
+        "original_sound_owner": song_signal["original_sound_owner"],
+        "is_original_sound": "1" if song_signal["is_original_sound"] else "0",
+        "entity_signal": _entity_signal(artist_names, song_title, song_signal["original_sound_owner"], tag_names),
         "hook_type": semantic["hook_type"],
         "slice_structure": semantic["slice_structure"],
+        "structure_confidence": _structure_confidence(existing, structure_signal, semantic["slice_structure"]),
+        "structure_evidence": _text(existing.get("structure_evidence")) or structure_signal["structure_evidence"],
+        "structure_unknown_reason": _text(existing.get("structure_unknown_reason"))
+        or (structure_signal["structure_unknown_reason"] if semantic["slice_structure"] == "unknown" else ""),
         "semantic_unknown_reason": semantic["semantic_unknown_reason"],
         "commercial_intent": commercial_intent,
         "rights_risk": rights_risk,
@@ -198,9 +208,55 @@ def _program_name(text: str, account_id: str | None) -> str:
     return ""
 
 
+def _existing_semantic_value(existing: dict[str, Any], field: str) -> str:
+    value = _text(existing.get(field))
+    if not value:
+        return ""
+    if value.lower() == "unknown" and _text(existing.get("classification_confidence")).lower() != "manual_verified":
+        return ""
+    return value
+
+
 def _extract_song_title(text: str) -> str:
     match = re.search(r"《([^》]{1,40})》", text)
     return _clean_text(match.group(1)) if match else ""
+
+
+def _song_signal(raw_song_title: str, *, title_song: str = "") -> dict[str, Any]:
+    raw = _clean_text(raw_song_title).strip()
+    title_value = _clean_text(title_song).strip()
+    owner = ""
+    is_original = False
+    if raw:
+        match = re.match(r"^@?(.{1,40})创作的原声$", raw)
+        if not match:
+            match = re.match(r"^@?(.{1,40})的原声$", raw)
+        if match:
+            owner = _clean_text(match.group(1)).strip("@# ")
+            is_original = True
+        elif "创作的原声" in raw:
+            owner = _clean_text(raw.replace("创作的原声", "")).strip("@# ")
+            is_original = True
+    return {
+        "song_title": title_value or raw,
+        "original_sound_owner": owner,
+        "is_original_sound": is_original,
+    }
+
+
+def _entity_signal(artist_names: str, song_title: str, original_sound_owner: str, tag_names: list[str]) -> str:
+    artists = [item for item in _split_pipe(artist_names) if item]
+    if artists:
+        return "artist:" + "|".join(artists[:4])
+    if _text(original_sound_owner):
+        return "original_sound_owner:" + _text(original_sound_owner)
+    for tag in tag_names:
+        clean = _clean_text(tag).strip("#@ ")
+        if clean and not _is_generic_artist_token(clean):
+            return "tag:" + clean
+    if _text(song_title):
+        return "song:" + _text(song_title)
+    return ""
 
 
 def _extract_artist_names(tag_names: list[str], song_title: str = "", text: str = "") -> list[str]:
@@ -343,16 +399,98 @@ def _hook_type(text: str, artist_names: list[str]) -> str:
 
 
 def _slice_structure(text: str) -> str:
+    return _slice_structure_signal(text)["slice_structure"]
+
+
+def _slice_structure_signal(text: str) -> dict[str, str]:
     lower = text.lower()
-    if any(word in text for word in ["清唱", "无伴奏"]):
-        return "pure_highlight"
-    if any(word in lower for word in ["reaction", "反应", "全场"]):
-        return "reaction_first"
-    if any(word in text for word in ["副歌", "爆发", "直击", "听不够", "高音"]):
-        return "pure_highlight"
-    if any(word in text for word in ["导师", "点评", "晋级", "淘汰"]):
-        return "setup_to_payoff"
-    return "unknown"
+    checks = [
+        (
+            "climax_first",
+            "opening_climax_keyword",
+            ["一开口", "刚开口", "刚唱", "第一句", "开场", "上来就", "开口跪", "开头"],
+            ["高音", "爆发", "炸", "燃", "惊艳", "封神"],
+            "high",
+        ),
+        (
+            "reaction_first",
+            "reaction_keyword",
+            ["reaction", "反应", "全场", "观众", "导师表情", "现场沸腾", "泪目"],
+            [],
+            "medium",
+        ),
+        (
+            "quote_first",
+            "quote_keyword",
+            ["这句话", "一句话", "金句", "名句", "说出", "喊话"],
+            [],
+            "medium",
+        ),
+        (
+            "setup_to_payoff",
+            "setup_payoff_keyword",
+            ["没想到", "直到", "最后", "反转", "铺垫", "导师", "点评", "晋级", "淘汰"],
+            [],
+            "medium",
+        ),
+        (
+            "context_first",
+            "context_keyword",
+            ["第一次", "原因", "为什么", "如何", "故事", "背景", "解析", "复盘", "教程"],
+            [],
+            "medium",
+        ),
+        (
+            "pure_highlight",
+            "highlight_keyword",
+            ["清唱", "无伴奏", "副歌", "爆发", "直击", "听不够", "高音", "直拍", "名场面", "舞台燃炸"],
+            [],
+            "medium",
+        ),
+        (
+            "linear",
+            "linear_keyword",
+            ["vlog", "日常", "记录", "过程", "合集", "盘点"],
+            [],
+            "low",
+        ),
+    ]
+    for value, reason, primary, secondary, confidence in checks:
+        hit = _first_keyword(text, lower, primary)
+        if not hit:
+            continue
+        if secondary and not _first_keyword(text, lower, secondary):
+            continue
+        return {
+            "slice_structure": value,
+            "structure_confidence": confidence,
+            "structure_evidence": hit,
+            "structure_unknown_reason": "",
+            "structure_reason": reason,
+        }
+    return {
+        "slice_structure": "unknown",
+        "structure_confidence": "low",
+        "structure_evidence": "",
+        "structure_unknown_reason": "no_structure_keyword_evidence",
+        "structure_reason": "unknown",
+    }
+
+
+def _first_keyword(text: str, lower: str, keywords: list[str]) -> str:
+    for keyword in keywords:
+        if (keyword.lower() if re.search(r"[A-Za-z]", keyword) else keyword) in (lower if re.search(r"[A-Za-z]", keyword) else text):
+            return keyword
+    return ""
+
+
+def _structure_confidence(existing: dict[str, Any], signal: dict[str, str], slice_structure: str) -> str:
+    existing_confidence = _text(existing.get("structure_confidence"))
+    if existing_confidence:
+        return existing_confidence
+    if _text(existing.get("slice_structure")) and slice_structure != "unknown":
+        return "high"
+    return signal["structure_confidence"]
 
 
 def _has_pairing_hook(text: str, artist_names: list[str]) -> bool:

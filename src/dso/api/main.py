@@ -38,12 +38,13 @@ from dso.feedback.platform import (
     upsert_platform_account,
 )
 from dso.media.ingest import ingest_video, list_videos
-from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning
+from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
 from dso.learning.historical_samples import (
     douyin_history_baselines,
     export_douyin_history_assets,
     import_douyin_history,
     import_historical_samples,
+    backfill_semantic_features,
     historical_sample_summary,
     list_historical_samples,
     rebuild_research_labels,
@@ -54,7 +55,14 @@ from dso.learning.historical_samples import (
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
+from dso.learning.multimodal_validation import (
+    build_multimodal_collection_plan,
+    collect_multimodal_assets,
+    run_multimodal_feature_experiment,
+    run_multimodal_validation,
+)
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.quality.insights import quality_insights
 from dso.review import list_change_events, list_review_events, mark_candidate_review
 from dso.runtime import runtime_diagnostics
@@ -654,7 +662,7 @@ def post_backtest(payload: dict = Body(default_factory=dict)) -> dict:
     return backtest_rule_ranker(
         account_id=payload.get("account_id"),
         k=int(payload.get("k") or 10),
-        strategy=payload.get("strategy") or "research_ranker_v2_2",
+        strategy=payload.get("strategy") or "research_ranker_v2_4",
         holdout_policy=payload.get("holdout_policy") or "time",
         label_version=payload.get("label_version"),
     )
@@ -702,6 +710,16 @@ def get_research_coverage(account_id: str | None = None, dataset_id: str | None 
     return research_field_coverage(account_id=account_id, dataset_id=dataset_id)
 
 
+@app.post("/learning/semantic-features/backfill")
+def post_semantic_features_backfill(payload: dict = Body(default_factory=dict)) -> dict:
+    return backfill_semantic_features(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 0),
+        force=bool(payload.get("force", False)),
+    )
+
+
 @app.get("/learning/semantic-calibration/queue")
 def get_semantic_calibration_queue(
     account_id: str | None = None,
@@ -710,7 +728,7 @@ def get_semantic_calibration_queue(
     min_priority: float = 0,
     label: str | None = None,
     queue_type: str = "mixed",
-    strategy: str = "research_ranker_v2_2",
+    strategy: str = "research_ranker_v2_4",
     min_disagreement: float = 0,
 ) -> dict:
     return semantic_calibration_queue(
@@ -762,6 +780,83 @@ def post_ranker_tuning(payload: dict = Body(default_factory=dict)) -> dict:
         holdout_policy=payload.get("holdout_policy") or "time",
         max_trials=int(payload.get("max_trials") or 12),
         label_version=payload.get("label_version"),
+    )
+
+
+@app.post("/learning/semantic-feature-experiment/run")
+def post_semantic_feature_experiment(payload: dict = Body(default_factory=dict)) -> dict:
+    return semantic_feature_experiment(
+        account_id=payload.get("account_id"),
+        k=int(payload.get("k") or 10),
+        holdout_policy=payload.get("holdout_policy") or "time",
+        label_version=payload.get("label_version"),
+        include_field_masks=bool(payload.get("include_field_masks", True)),
+    )
+
+
+@app.post("/learning/slice-structure/evaluate")
+def post_slice_structure_evaluate(payload: dict = Body(default_factory=dict)) -> dict:
+    return evaluate_slice_structure(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 0),
+        min_confidence=float(payload.get("min_confidence") or 0.0),
+    )
+
+
+@app.post("/learning/multimodal/collection-plan")
+def post_multimodal_collection_plan(payload: dict = Body(default_factory=dict)) -> dict:
+    return build_multimodal_collection_plan(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 120),
+        stage=payload.get("stage") or "beta_d1",
+        output_path=payload.get("output_path"),
+        include_ready=bool(payload.get("include_ready", False)),
+    )
+
+
+@app.post("/learning/multimodal/collect")
+def post_multimodal_collect(payload: dict = Body(default_factory=dict)) -> dict:
+    return collect_multimodal_assets(
+        plan_path=payload.get("plan_path"),
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 30),
+        stage=payload.get("stage") or "beta_d1",
+        output_root=payload.get("output_root"),
+        report_dir=payload.get("report_dir"),
+        run_id=payload.get("run_id") or "",
+        page_delay_seconds=int(payload.get("page_delay_seconds") or 14),
+        extra_wait_seconds=int(payload.get("extra_wait_seconds") or 5),
+        extract_audio=bool(payload.get("extract_audio", True)),
+        dry_run=bool(payload.get("dry_run", True)),
+        max_storage_bytes=int(payload.get("max_storage_bytes") or int(float(payload.get("max_storage_gb") or 3.0) * 1024 * 1024 * 1024)),
+    )
+
+
+@app.post("/learning/multimodal-validation/run")
+def post_multimodal_validation(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_multimodal_validation(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 300),
+        k=int(payload.get("k") or 10),
+        min_samples=int(payload.get("min_samples") or 100),
+        min_asset_coverage=float(payload.get("min_asset_coverage") or 0.7),
+    )
+
+
+@app.post("/learning/multimodal-feature-experiment/run")
+def post_multimodal_feature_experiment(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_multimodal_feature_experiment(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 300),
+        k=int(payload.get("k") or 10),
+        min_feature_samples=int(payload.get("min_feature_samples") or 60),
+        audio_window_seconds=float(payload.get("audio_window_seconds") or 10.0),
+        force=bool(payload.get("force", False)),
     )
 
 

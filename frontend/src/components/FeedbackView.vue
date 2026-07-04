@@ -252,6 +252,30 @@
                 <span v-if="state.busyKey === 'backtest'" class="spinner"></span>
                 <Icon v-else name="radar" />运行回测
               </button>
+              <button id="semantic-backfill-btn" type="button" :disabled="state.busyKey === 'semantic-backfill'" @click="withBusy('semantic-backfill', backfillSemanticFeatures)">
+                <span v-if="state.busyKey === 'semantic-backfill'" class="spinner"></span>
+                <Icon v-else name="database" />语义回填
+              </button>
+              <button id="semantic-experiment-btn" type="button" :disabled="state.busyKey === 'semantic-experiment'" @click="withBusy('semantic-experiment', runSemanticFeatureExperiment)">
+                <span v-if="state.busyKey === 'semantic-experiment'" class="spinner"></span>
+                <Icon v-else name="radar" />语义实验
+              </button>
+              <button id="slice-structure-eval-btn" type="button" :disabled="state.busyKey === 'slice-structure-eval'" @click="withBusy('slice-structure-eval', runSliceStructureEvaluation)">
+                <span v-if="state.busyKey === 'slice-structure-eval'" class="spinner"></span>
+                <Icon v-else name="list-checks" />结构评估
+              </button>
+              <button id="multimodal-plan-btn" type="button" :disabled="state.busyKey === 'multimodal-plan'" @click="withBusy('multimodal-plan', buildMultimodalCollectionPlan)">
+                <span v-if="state.busyKey === 'multimodal-plan'" class="spinner"></span>
+                <Icon v-else name="download" />采集计划
+              </button>
+              <button id="multimodal-validation-btn" type="button" :disabled="state.busyKey === 'multimodal-validation'" @click="withBusy('multimodal-validation', runMultimodalValidation)">
+                <span v-if="state.busyKey === 'multimodal-validation'" class="spinner"></span>
+                <Icon v-else name="scan-line" />多模态验证
+              </button>
+              <button id="multimodal-feature-btn" type="button" :disabled="state.busyKey === 'multimodal-feature'" @click="withBusy('multimodal-feature', runMultimodalFeatureExperiment)">
+                <span v-if="state.busyKey === 'multimodal-feature'" class="spinner"></span>
+                <Icon v-else name="audio-lines" />真实特征实验
+              </button>
             </div>
             <div id="learning-result" class="meta" style="margin-top:10px;">{{ state.learningResult }}</div>
             <div class="detail-metrics" style="margin-top:8px;">
@@ -265,6 +289,30 @@
               <span>NDCG@K<strong>{{ ndcgText }}</strong></span>
             </div>
             <div class="learning-count-note">{{ learningCountCaption }}</div>
+            <div v-if="semanticFeatureText" class="quality-row" style="margin-top:8px;">
+              <span class="status neutral">语义特征</span>
+              <span>{{ semanticFeatureText }}</span>
+            </div>
+            <div v-if="semanticNoisyText" class="quality-row" style="margin-top:8px;">
+              <span class="status warn">噪声观察</span>
+              <span>{{ semanticNoisyText }}</span>
+            </div>
+            <div v-if="sliceStructureEvaluationText" class="quality-row" style="margin-top:8px;">
+              <span class="status" :class="sliceStructureEvaluationClass">结构评估</span>
+              <span>{{ sliceStructureEvaluationText }}</span>
+            </div>
+            <div v-if="multimodalPlanText" class="quality-row" style="margin-top:8px;">
+              <span class="status neutral">采集计划</span>
+              <span>{{ multimodalPlanText }}</span>
+            </div>
+            <div v-if="multimodalValidationText" class="quality-row" style="margin-top:8px;">
+              <span class="status" :class="multimodalValidationClass">Beta-D-1</span>
+              <span>{{ multimodalValidationText }}</span>
+            </div>
+            <div v-if="multimodalFeatureText" class="quality-row" style="margin-top:8px;">
+              <span class="status" :class="multimodalFeatureClass">Beta-D-2</span>
+              <span>{{ multimodalFeatureText }}</span>
+            </div>
             <div class="calibration-toolbar">
               <div>
                 <strong>语义校准队列</strong>
@@ -382,12 +430,16 @@
               <span>{{ backtestText }}</span>
             </div>
             <div v-if="v21ReportText" class="quality-row" style="margin-top:8px;">
-              <span class="status neutral">v2.2</span>
+              <span class="status neutral">v2.4</span>
               <span>{{ v21ReportText }}</span>
             </div>
             <div v-if="semanticGapText" class="quality-row" style="margin-top:8px;">
               <span class="status" :class="semanticGapClass">{{ semanticGapStatus }}</span>
               <span>{{ semanticGapText }}</span>
+            </div>
+            <div v-if="diversityText" class="quality-row" style="margin-top:8px;">
+              <span class="status neutral">多样性</span>
+              <span>{{ diversityText }}</span>
             </div>
             <div v-if="backtestStrategyRows.length" class="insight-grid" style="margin-top:8px;">
               <div v-for="item in backtestStrategyRows" :key="item.strategy" class="insight-card">
@@ -500,6 +552,12 @@ const {
   buildMemoryBank,
   rebuildInterestClock,
   runBacktest,
+  backfillSemanticFeatures,
+  runSemanticFeatureExperiment,
+  runSliceStructureEvaluation,
+  buildMultimodalCollectionPlan,
+  runMultimodalValidation,
+  runMultimodalFeatureExperiment,
   loadSemanticCalibrationQueue,
   saveCalibrationLabels,
   reopenCalibrationSample,
@@ -660,6 +718,101 @@ const topHour = computed(() => {
 const ndcgText = computed(() => latestBacktest.value ? Number(latestMetrics.value.ndcg_at_k || 0).toFixed(2) : "-");
 const backtestClass = computed(() => latestBacktest.value?.status === "ready" ? "ok" : (latestBacktest.value?.status === "low_confidence" ? "warn" : "neutral"));
 const backtestText = computed(() => `验证样本 ${countLabel(Number(latestMetrics.value.sample_count || 0))} / NDCG ${Number(latestMetrics.value.ndcg_at_k || 0).toFixed(2)} / 相对随机 ${Number(latestMetrics.value.topk_lift_vs_random || 0).toFixed(2)}x / ${sampleSourceLabel(String(latestMetrics.value.sample_source || "training_samples"))}`);
+const semanticFeatureExperiment = computed<Record<string, unknown>>(() => state.semanticFeatureExperiment || {});
+const semanticFeatureCoverage = computed<Record<string, Record<string, unknown>>>(() => {
+  const experimentCoverage = semanticFeatureExperiment.value.coverage;
+  const backfillCoverage = state.semanticFeatureBackfill?.coverage;
+  return (experimentCoverage && typeof experimentCoverage === "object"
+    ? experimentCoverage
+    : backfillCoverage && typeof backfillCoverage === "object"
+      ? backfillCoverage
+      : {}) as Record<string, Record<string, unknown>>;
+});
+const semanticFeatureText = computed(() => {
+  const coverage = semanticFeatureCoverage.value;
+  if (!Object.keys(coverage).length && !state.semanticFeatureExperiment) return "";
+  const metrics = (semanticFeatureExperiment.value.base_metrics && typeof semanticFeatureExperiment.value.base_metrics === "object"
+    ? semanticFeatureExperiment.value.base_metrics
+    : {}) as Record<string, unknown>;
+  const structure = coverage.slice_structure;
+  const entity = coverage.entity_signal;
+  const lift = Number(metrics.topk_lift_vs_random || 0);
+  const liftText = lift ? ` / lift ${lift.toFixed(2)}x` : "";
+  return `结构覆盖 ${percent(Number(structure?.rate || 0))} / 实体覆盖 ${percent(Number(entity?.rate || 0))}${liftText}`;
+});
+const semanticNoisyText = computed(() => {
+  const diagnosis = semanticFeatureExperiment.value.diagnosis as Record<string, unknown> | undefined;
+  const rows = Array.isArray(diagnosis?.possibly_noisy_fields) ? diagnosis.possibly_noisy_fields : [];
+  if (!rows.length) return "";
+  return rows.slice(0, 2).map((item) => {
+    const row = item as Record<string, unknown>;
+    const fields = Array.isArray(row.fields) ? row.fields.join("+") : row.name || "field";
+    return `${fields} 遮蔽 +${Number(row.lift_gain_when_masked || 0).toFixed(2)}`;
+  }).join(" / ");
+});
+const sliceStructureEvaluation = computed<Record<string, unknown>>(() => state.sliceStructureEvaluation || {});
+const sliceStructureEvaluationText = computed(() => {
+  const report = sliceStructureEvaluation.value;
+  if (!Object.keys(report).length) return "";
+  const coverage = report.coverage && typeof report.coverage === "object" ? report.coverage as Record<string, unknown> : {};
+  const queue = Array.isArray(report.review_queue) ? report.review_queue : [];
+  return `样本 ${countLabel(Number(report.evaluated_count || report.sample_count || 0))} / 可判定 ${percent(Number(coverage.evaluator_known_rate || 0))} / 一致 ${percent(Number(coverage.agreement_rate || 0))} / 冲突 ${percent(Number(coverage.conflict_rate || 0))} / 队列 ${queue.length}`;
+});
+const sliceStructureEvaluationClass = computed(() => {
+  const coverage = sliceStructureEvaluation.value.coverage && typeof sliceStructureEvaluation.value.coverage === "object"
+    ? sliceStructureEvaluation.value.coverage as Record<string, unknown>
+    : {};
+  const conflictRate = Number(coverage.conflict_rate || 0);
+  const trustedRate = Number(coverage.trusted_rate || 0);
+  return conflictRate > 0.08 ? "warn" : trustedRate >= 0.5 ? "ok" : "neutral";
+});
+const multimodalCollectionPlan = computed<Record<string, unknown>>(() => state.multimodalCollectionPlan || {});
+const multimodalValidation = computed<Record<string, unknown>>(() => state.multimodalValidation || {});
+const multimodalFeatureExperiment = computed<Record<string, unknown>>(() => state.multimodalFeatureExperiment || {});
+const multimodalPlanText = computed(() => {
+  const plan = multimodalCollectionPlan.value;
+  if (!Object.keys(plan).length) return "";
+  const summary = plan.summary && typeof plan.summary === "object" ? plan.summary as Record<string, unknown> : {};
+  const missing = summary.missing_assets && typeof summary.missing_assets === "object"
+    ? Object.entries(summary.missing_assets as Record<string, unknown>).slice(0, 3).map(([key, value]) => `${key} ${Number(value || 0)}`).join(" / ")
+    : "";
+  return `待采集 ${countLabel(Number(plan.sample_count || 0))} / 候选 ${countLabel(Number(plan.candidate_count || 0))}${missing ? ` / 缺 ${missing}` : ""}`;
+});
+const multimodalValidationText = computed(() => {
+  const report = multimodalValidation.value;
+  if (!Object.keys(report).length) return "";
+  const readiness = report.asset_readiness && typeof report.asset_readiness === "object" ? report.asset_readiness as Record<string, unknown> : {};
+  const coverage = readiness.coverage && typeof readiness.coverage === "object" ? readiness.coverage as Record<string, Record<string, unknown>> : {};
+  const proxy = report.proxy_signal_experiment && typeof report.proxy_signal_experiment === "object" ? report.proxy_signal_experiment as Record<string, unknown> : {};
+  const gate = report.promotion_gate && typeof report.promotion_gate === "object" ? report.promotion_gate as Record<string, unknown> : {};
+  return `样本 ${countLabel(Number(report.evaluated_count || report.sample_count || 0))} / 素材 ready ${percent(Number(coverage.ready_for_multimodal?.rate || 0))} / 代理 lift ${Number(proxy.lift_delta || 0) >= 0 ? "+" : ""}${Number(proxy.lift_delta || 0).toFixed(2)} / ${gate.decision || report.status || "research_only"}`;
+});
+const multimodalValidationClass = computed(() => {
+  const gate = multimodalValidation.value.promotion_gate && typeof multimodalValidation.value.promotion_gate === "object"
+    ? multimodalValidation.value.promotion_gate as Record<string, unknown>
+    : {};
+  if (Boolean(gate.passed)) return "ok";
+  const decision = String(gate.decision || "");
+  return decision === "collect_assets_first" || decision === "expand_validation_cohort" ? "warn" : "neutral";
+});
+const multimodalFeatureText = computed(() => {
+  const report = multimodalFeatureExperiment.value;
+  if (!Object.keys(report).length) return "";
+  const coverage = report.feature_coverage && typeof report.feature_coverage === "object" ? report.feature_coverage as Record<string, unknown> : {};
+  const strategies = report.strategy_comparison && typeof report.strategy_comparison === "object" ? report.strategy_comparison as Record<string, Record<string, unknown>> : {};
+  const combined = strategies.semantic_plus_audio_visual || {};
+  const gate = report.promotion_gate && typeof report.promotion_gate === "object" ? report.promotion_gate as Record<string, unknown> : {};
+  const liftDelta = Number(combined.lift_delta_vs_semantic || 0);
+  return `可用 ${countLabel(Number(report.feature_ready_count || 0))}/${countLabel(Number(report.sample_count || 0))} / 覆盖 ${percent(Number(coverage.feature_ready_rate || 0))} / 语义增益 ${liftDelta >= 0 ? "+" : ""}${liftDelta.toFixed(2)} / ${gate.decision || report.status || "research_only"}`;
+});
+const multimodalFeatureClass = computed(() => {
+  const gate = multimodalFeatureExperiment.value.promotion_gate && typeof multimodalFeatureExperiment.value.promotion_gate === "object"
+    ? multimodalFeatureExperiment.value.promotion_gate as Record<string, unknown>
+    : {};
+  if (Boolean(gate.passed)) return "ok";
+  const decision = String(gate.decision || "");
+  return decision === "collect_or_extract_more_features" ? "warn" : "neutral";
+});
 const calibrationQueueText = computed(() => {
   const total = Number(calibrationQueue.value.total_candidates ?? calibrationQueue.value.count ?? calibrationSamples.value.length);
   const visible = calibrationSamples.value.length;
@@ -715,13 +868,21 @@ const semanticGapStatus = computed(() => Boolean(semanticGap.value.passed) ? "�
 const semanticGapClass = computed(() => Boolean(semanticGap.value.passed) ? "ok" : "warn");
 const semanticGapText = computed(() => {
   if (!latestBacktest.value || !Object.keys(semanticGap.value).length) return "";
-  return `v2.2 较语义基线 lift ${Number(semanticGap.value.lift_gap || 0) >= 0 ? "+" : ""}${Number(semanticGap.value.lift_gap || 0).toFixed(2)} / 目标 +${Number(semanticGap.value.required_lift_gap || 0).toFixed(2)}`;
+  return `v2.4 较语义基线 lift ${Number(semanticGap.value.lift_gap || 0) >= 0 ? "+" : ""}${Number(semanticGap.value.lift_gap || 0).toFixed(2)} / 目标 +${Number(semanticGap.value.required_lift_gap || 0).toFixed(2)}`;
+});
+const diversitySummary = computed<Record<string, unknown>>(() => {
+  const value = latestMetrics.value.diversity_summary;
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+});
+const diversityText = computed(() => {
+  if (!latestBacktest.value || !Object.keys(diversitySummary.value).length) return "";
+  return `TopK 近重复：标题 ${Number(diversitySummary.value.duplicate_title_groups || 0)} / 歌曲 ${Number(diversitySummary.value.duplicate_song_groups || 0)} / 艺人 ${Number(diversitySummary.value.duplicate_artist_groups || 0)}，已惩罚 ${Number(diversitySummary.value.penalized_topk_count || 0)} 条，最大 ${Number(diversitySummary.value.max_diversity_penalty || 0).toFixed(1)}`;
 });
 const strategyComparison = computed<Record<string, Record<string, unknown>>>(() => {
   const value = latestMetrics.value.strategy_comparison;
   return value && typeof value === "object" ? value as Record<string, Record<string, unknown>> : {};
 });
-const backtestStrategyRows = computed(() => ["research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
+const backtestStrategyRows = computed(() => ["research_ranker_v2_4", "research_ranker_v2_3", "research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
   const item = strategyComparison.value[strategy] || {};
   return {
     strategy,
@@ -738,7 +899,8 @@ const diagnosticRows = computed(() => {
   const groups: Array<[string, string, string]> = [
     ["missed_high_interaction", "高互动漏召", "高互动历史样本未进入当前 TopK，优先校准 hook/结构。"],
     ["low_interaction_false_positive", "低互动误推", "TopK 命中低互动样本，优先复核风险和上下文差异。"],
-    ["semantic_disagreements", "语义分歧", "v2.2 与语义基线排序分歧较大，适合进入下一批校准。"]
+    ["semantic_disagreements", "语义分歧", "v2.4 与语义基线排序分歧较大，适合进入下一批校准。"],
+    ["diversity_limited_duplicates", "近重复复核", "TopK 近重复样本已被多样性约束处理，适合复核标题/歌曲/艺人字段。"]
   ];
   const rows: Array<Record<string, string>> = [];
   for (const [key, label, reason] of groups) {
@@ -870,6 +1032,8 @@ function sampleSourceLabel(value: string): string {
 
 function strategyLabel(value: string): string {
   const labels: Record<string, string> = {
+    research_ranker_v2_4: "历史证据 v2.4",
+    research_ranker_v2_3: "历史证据 v2.3",
     research_ranker_v2_2: "历史证据 v2.2",
     research_ranker_v2_1: "历史证据 v2.1",
     research_ranker_v2: "历史证据 v2",
@@ -941,7 +1105,8 @@ function queueReasonLabel(value?: unknown): string {
     low_interaction_risk: "低互动风险",
     semantic_ranker_disagreement: "排序分歧",
     high_interaction_missed_by_ranker: "高互动漏召",
-    low_interaction_false_positive: "低互动误推"
+    low_interaction_false_positive: "低互动误推",
+    near_duplicate_diversity_review: "近重复复核"
   };
   return labels[key] || key || "校准";
 }

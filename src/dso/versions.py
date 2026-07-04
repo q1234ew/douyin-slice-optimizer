@@ -17,13 +17,16 @@ PLATFORM_SYNC_VERSION = "platform_sync.v1"
 MEMORY_BANK_VERSION = "memory_bank.v1"
 HISTORY_CALIBRATION_VERSION = "history_calibration.v1"
 INTEREST_CLOCK_VERSION = "interest_clock.v1"
-BACKTEST_VERSION = "backtest.v2.2"
+BACKTEST_VERSION = "backtest.v2.4"
 PROTOTYPE_BANK_VERSION = "prototype_bank.v1"
 HISTORICAL_CAPTURE_VERSION = "historical_capture.v1"
 DOUYIN_HISTORY_VERSION = "douyin_history.v1"
-SEMANTIC_FEATURE_VERSION = "semantic_features.research_v2"
+SEMANTIC_FEATURE_VERSION = "semantic_features.research_v3"
+SLICE_STRUCTURE_EVALUATOR_VERSION = "slice_structure_evaluator.v1"
+MULTIMODAL_VALIDATION_VERSION = "multimodal_validation.v1"
+MULTIMODAL_FEATURE_VERSION = "multimodal_features.lightweight_v1"
 RESEARCH_LABEL_VERSION = "research_labels.visible_engagement_v2"
-RESEARCH_RANKER_VERSION = "historical_research_ranker.v2.2"
+RESEARCH_RANKER_VERSION = "historical_research_ranker.v2.4"
 SEGMENTER_VERSION = "music_variety_segmenter.v1"
 SCORER_VERSION = "music_variety_rules.v1"
 
@@ -51,6 +54,9 @@ def component_versions() -> dict[str, str]:
         "historical_capture": HISTORICAL_CAPTURE_VERSION,
         "douyin_history": DOUYIN_HISTORY_VERSION,
         "semantic_features": SEMANTIC_FEATURE_VERSION,
+        "slice_structure_evaluator": SLICE_STRUCTURE_EVALUATOR_VERSION,
+        "multimodal_validation": MULTIMODAL_VALIDATION_VERSION,
+        "multimodal_features": MULTIMODAL_FEATURE_VERSION,
         "research_labels": RESEARCH_LABEL_VERSION,
         "research_ranker": RESEARCH_RANKER_VERSION,
         "segmenter": SEGMENTER_VERSION,

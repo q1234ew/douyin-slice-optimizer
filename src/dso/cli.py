@@ -19,12 +19,13 @@ from dso.features.audio import extract_audio_features
 from dso.feedback.douyin import douyin_sync_summary, register_douyin_account, sync_douyin_feedback
 from dso.feedback.douyin_auth import complete_douyin_qr_login, douyin_oauth_status, start_douyin_qr_login
 from dso.feedback.importer import account_baselines, account_insights, import_metrics, list_training_samples, rebuild_feedback_state
-from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning
+from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
 from dso.learning.historical_samples import (
     douyin_history_baselines,
     export_douyin_history_assets,
     import_douyin_history,
     import_historical_samples,
+    backfill_semantic_features,
     historical_sample_summary,
     list_historical_samples,
     rebuild_research_labels,
@@ -34,7 +35,14 @@ from dso.learning.historical_samples import (
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
+from dso.learning.multimodal_validation import (
+    build_multimodal_collection_plan,
+    collect_multimodal_assets,
+    run_multimodal_feature_experiment,
+    run_multimodal_validation,
+)
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.media.ingest import ingest_video, list_videos
 from dso.review import mark_candidate_review
 from dso.runtime import runtime_diagnostics
@@ -289,6 +297,7 @@ def cmd_douyin_media_collect(
     extra_wait_seconds: int = 5,
     extract_audio: bool = True,
     dry_run: bool = False,
+    max_storage_gb: float = 0.0,
 ) -> dict:
     return collect_douyin_media(
         plan_path,
@@ -302,6 +311,7 @@ def cmd_douyin_media_collect(
         extra_wait_seconds=extra_wait_seconds,
         extract_audio=extract_audio,
         dry_run=dry_run,
+        max_storage_bytes=int(float(max_storage_gb or 0.0) * 1024 * 1024 * 1024),
     )
 
 
@@ -322,7 +332,7 @@ def cmd_interest_clock(account: str, content_type: str | None, duration: float |
     return recommend_publish_hours(account, content_type=content_type, duration_seconds=duration, limit=limit)
 
 
-def cmd_backtest(account: str | None, k: int, strategy: str = "research_ranker_v2_2", holdout_policy: str = "time", label_version: str | None = None) -> dict:
+def cmd_backtest(account: str | None, k: int, strategy: str = "research_ranker_v2_4", holdout_policy: str = "time", label_version: str | None = None) -> dict:
     init_db()
     return backtest_rule_ranker(account_id=account, k=k, strategy=strategy, holdout_policy=holdout_policy, label_version=label_version)
 
@@ -335,6 +345,118 @@ def cmd_ranker_tuning(account: str | None, k: int, holdout_policy: str, max_tria
         holdout_policy=holdout_policy,
         max_trials=max_trials,
         label_version=label_version,
+    )
+
+
+def cmd_semantic_feature_experiment(
+    account: str | None,
+    k: int,
+    holdout_policy: str,
+    label_version: str | None = None,
+    include_field_masks: bool = True,
+) -> dict:
+    init_db()
+    return semantic_feature_experiment(
+        account_id=account,
+        k=k,
+        holdout_policy=holdout_policy,
+        label_version=label_version,
+        include_field_masks=include_field_masks,
+    )
+
+
+def cmd_slice_structure_evaluate(account: str | None, dataset: str | None, limit: int, min_confidence: float = 0.0) -> dict:
+    init_db()
+    return evaluate_slice_structure(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        min_confidence=min_confidence,
+    )
+
+
+def cmd_multimodal_collection_plan(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    stage: str = "beta_d1",
+    output_path: str | None = None,
+    include_ready: bool = False,
+) -> dict:
+    init_db()
+    return build_multimodal_collection_plan(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        stage=stage,
+        output_path=output_path,
+        include_ready=include_ready,
+    )
+
+
+def cmd_multimodal_collect(
+    plan_path: str | None,
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    stage: str = "beta_d1",
+    output_root: str | None = None,
+    report_dir: str | None = None,
+    run_id: str = "",
+    page_delay_seconds: int = 14,
+    extra_wait_seconds: int = 5,
+    extract_audio: bool = True,
+    dry_run: bool = True,
+    max_storage_gb: float = 3.0,
+) -> dict:
+    init_db()
+    return collect_multimodal_assets(
+        plan_path=plan_path,
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        stage=stage,
+        output_root=output_root,
+        report_dir=report_dir,
+        run_id=run_id,
+        page_delay_seconds=page_delay_seconds,
+        extra_wait_seconds=extra_wait_seconds,
+        extract_audio=extract_audio,
+        dry_run=dry_run,
+        max_storage_bytes=int(float(max_storage_gb or 0.0) * 1024 * 1024 * 1024),
+    )
+
+
+def cmd_multimodal_validation(account: str | None, dataset: str | None, limit: int, k: int, min_samples: int, min_asset_coverage: float) -> dict:
+    init_db()
+    return run_multimodal_validation(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        k=k,
+        min_samples=min_samples,
+        min_asset_coverage=min_asset_coverage,
+    )
+
+
+def cmd_multimodal_feature_experiment(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    k: int,
+    min_feature_samples: int,
+    audio_window_seconds: float,
+    force: bool = False,
+) -> dict:
+    init_db()
+    return run_multimodal_feature_experiment(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        k=k,
+        min_feature_samples=min_feature_samples,
+        audio_window_seconds=audio_window_seconds,
+        force=force,
     )
 
 
@@ -403,6 +525,11 @@ def cmd_research_coverage(account: str | None, dataset: str | None) -> dict:
     return research_field_coverage(account_id=account, dataset_id=dataset)
 
 
+def cmd_semantic_features_backfill(account: str | None, dataset: str | None, limit: int, force: bool = False) -> dict:
+    init_db()
+    return backfill_semantic_features(account_id=account, dataset_id=dataset, limit=limit, force=force)
+
+
 def cmd_semantic_calibration_queue(
     account: str | None,
     dataset: str | None,
@@ -410,7 +537,7 @@ def cmd_semantic_calibration_queue(
     min_priority: float = 0.0,
     label: str | None = None,
     queue_type: str = "mixed",
-    strategy: str = "research_ranker_v2_2",
+    strategy: str = "research_ranker_v2_4",
     min_disagreement: float = 0.0,
 ) -> dict:
     init_db()
@@ -776,6 +903,7 @@ def _typer_main(typer_module: Any) -> None:
         extra_wait_seconds: int = typer_module.Option(5, "--extra-wait-seconds"),
         extract_audio: bool = typer_module.Option(True, "--extract-audio/--no-extract-audio"),
         dry_run: bool = typer_module.Option(False, "--dry-run"),
+        max_storage_gb: float = typer_module.Option(0.0, "--max-storage-gb"),
     ) -> None:
         _print(
             cmd_douyin_media_collect(
@@ -790,6 +918,7 @@ def _typer_main(typer_module: Any) -> None:
                 extra_wait_seconds,
                 extract_audio,
                 dry_run,
+                max_storage_gb,
             )
         )
 
@@ -822,7 +951,7 @@ def _typer_main(typer_module: Any) -> None:
     def backtest_command(
         account: str | None = typer_module.Option(None, "--account"),
         k: int = typer_module.Option(10, "--k"),
-        strategy: str = typer_module.Option("research_ranker_v2_2", "--strategy"),
+        strategy: str = typer_module.Option("research_ranker_v2_4", "--strategy"),
         holdout_policy: str = typer_module.Option("time", "--holdout-policy"),
         label_version: str | None = typer_module.Option(None, "--label-version"),
     ) -> None:
@@ -837,6 +966,102 @@ def _typer_main(typer_module: Any) -> None:
         label_version: str | None = typer_module.Option(None, "--label-version"),
     ) -> None:
         _print(cmd_ranker_tuning(account, k, holdout_policy, max_trials, label_version))
+
+    @app.command("semantic-feature-experiment")
+    def semantic_feature_experiment_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        k: int = typer_module.Option(10, "--k"),
+        holdout_policy: str = typer_module.Option("time", "--holdout-policy"),
+        label_version: str | None = typer_module.Option(None, "--label-version"),
+        skip_field_masks: bool = typer_module.Option(False, "--skip-field-masks"),
+    ) -> None:
+        _print(cmd_semantic_feature_experiment(account, k, holdout_policy, label_version, not skip_field_masks))
+
+    @app.command("semantic-features-backfill")
+    def semantic_features_backfill_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(0, "--limit"),
+        force: bool = typer_module.Option(False, "--force"),
+    ) -> None:
+        _print(cmd_semantic_features_backfill(account, dataset, limit, force))
+
+    @app.command("slice-structure-evaluate")
+    def slice_structure_evaluate_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(0, "--limit"),
+        min_confidence: float = typer_module.Option(0.0, "--min-confidence"),
+    ) -> None:
+        _print(cmd_slice_structure_evaluate(account, dataset, limit, min_confidence))
+
+    @app.command("multimodal-collection-plan")
+    def multimodal_collection_plan_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(120, "--limit"),
+        stage: str = typer_module.Option("beta_d1", "--stage"),
+        output_path: str | None = typer_module.Option(None, "--output-path"),
+        include_ready: bool = typer_module.Option(False, "--include-ready"),
+    ) -> None:
+        _print(cmd_multimodal_collection_plan(account, dataset, limit, stage, output_path, include_ready))
+
+    @app.command("multimodal-collect")
+    def multimodal_collect_command(
+        plan_path: str | None = typer_module.Option(None, "--plan-path"),
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(30, "--limit"),
+        stage: str = typer_module.Option("beta_d1", "--stage"),
+        output_root: str | None = typer_module.Option(None, "--output-root"),
+        report_dir: str | None = typer_module.Option(None, "--report-dir"),
+        run_id: str = typer_module.Option("", "--run-id"),
+        page_delay_seconds: int = typer_module.Option(14, "--page-delay-seconds"),
+        extra_wait_seconds: int = typer_module.Option(5, "--extra-wait-seconds"),
+        extract_audio: bool = typer_module.Option(True, "--extract-audio/--no-extract-audio"),
+        dry_run: bool = typer_module.Option(True, "--dry-run/--download"),
+        max_storage_gb: float = typer_module.Option(3.0, "--max-storage-gb"),
+    ) -> None:
+        _print(
+            cmd_multimodal_collect(
+                plan_path,
+                account,
+                dataset,
+                limit,
+                stage,
+                output_root,
+                report_dir,
+                run_id,
+                page_delay_seconds,
+                extra_wait_seconds,
+                extract_audio,
+                dry_run,
+                max_storage_gb,
+            )
+        )
+
+    @app.command("multimodal-validation")
+    def multimodal_validation_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(300, "--limit"),
+        k: int = typer_module.Option(10, "--k"),
+        min_samples: int = typer_module.Option(100, "--min-samples"),
+        min_asset_coverage: float = typer_module.Option(0.7, "--min-asset-coverage"),
+    ) -> None:
+        _print(cmd_multimodal_validation(account, dataset, limit, k, min_samples, min_asset_coverage))
+
+    @app.command("multimodal-feature-experiment")
+    def multimodal_feature_experiment_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(300, "--limit"),
+        k: int = typer_module.Option(10, "--k"),
+        min_feature_samples: int = typer_module.Option(60, "--min-feature-samples"),
+        audio_window_seconds: float = typer_module.Option(10.0, "--audio-window-seconds"),
+        force: bool = typer_module.Option(False, "--force"),
+    ) -> None:
+        _print(cmd_multimodal_feature_experiment(account, dataset, limit, k, min_feature_samples, audio_window_seconds, force))
 
     @app.command("backtest-reports")
     def backtest_reports_command(
@@ -928,7 +1153,7 @@ def _typer_main(typer_module: Any) -> None:
         min_priority: float = typer_module.Option(0.0, "--min-priority"),
         label: str | None = typer_module.Option(None, "--label"),
         queue_type: str = typer_module.Option("mixed", "--queue-type"),
-        strategy: str = typer_module.Option("research_ranker_v2_2", "--strategy"),
+        strategy: str = typer_module.Option("research_ranker_v2_4", "--strategy"),
         min_disagreement: float = typer_module.Option(0.0, "--min-disagreement"),
     ) -> None:
         _print(cmd_semantic_calibration_queue(account, dataset, limit, min_priority, label, queue_type, strategy, min_disagreement))
@@ -1103,6 +1328,7 @@ def _argparse_main() -> None:
     douyin_media.add_argument("--extra-wait-seconds", type=int, default=5)
     douyin_media.add_argument("--no-extract-audio", action="store_true")
     douyin_media.add_argument("--dry-run", action="store_true")
+    douyin_media.add_argument("--max-storage-gb", type=float, default=0.0)
     memory_build = sub.add_parser("memory-build")
     memory_build.add_argument("--account")
     memory_build.add_argument("--force", action="store_true")
@@ -1119,7 +1345,7 @@ def _argparse_main() -> None:
     backtest = sub.add_parser("backtest")
     backtest.add_argument("--account")
     backtest.add_argument("--k", type=int, default=10)
-    backtest.add_argument("--strategy", default="research_ranker_v2_2")
+    backtest.add_argument("--strategy", default="research_ranker_v2_4")
     backtest.add_argument("--holdout-policy", default="time")
     backtest.add_argument("--label-version")
     ranker_tuning = sub.add_parser("ranker-tuning-run")
@@ -1128,6 +1354,58 @@ def _argparse_main() -> None:
     ranker_tuning.add_argument("--holdout-policy", default="time")
     ranker_tuning.add_argument("--max-trials", type=int, default=12)
     ranker_tuning.add_argument("--label-version")
+    semantic_experiment = sub.add_parser("semantic-feature-experiment")
+    semantic_experiment.add_argument("--account")
+    semantic_experiment.add_argument("--k", type=int, default=10)
+    semantic_experiment.add_argument("--holdout-policy", default="time")
+    semantic_experiment.add_argument("--label-version")
+    semantic_experiment.add_argument("--skip-field-masks", action="store_true")
+    semantic_backfill = sub.add_parser("semantic-features-backfill")
+    semantic_backfill.add_argument("--account")
+    semantic_backfill.add_argument("--dataset")
+    semantic_backfill.add_argument("--limit", type=int, default=0)
+    semantic_backfill.add_argument("--force", action="store_true")
+    slice_structure_eval = sub.add_parser("slice-structure-evaluate")
+    slice_structure_eval.add_argument("--account")
+    slice_structure_eval.add_argument("--dataset")
+    slice_structure_eval.add_argument("--limit", type=int, default=0)
+    slice_structure_eval.add_argument("--min-confidence", type=float, default=0.0)
+    multimodal_plan = sub.add_parser("multimodal-collection-plan")
+    multimodal_plan.add_argument("--account")
+    multimodal_plan.add_argument("--dataset")
+    multimodal_plan.add_argument("--limit", type=int, default=120)
+    multimodal_plan.add_argument("--stage", default="beta_d1")
+    multimodal_plan.add_argument("--output-path")
+    multimodal_plan.add_argument("--include-ready", action="store_true")
+    multimodal_collect = sub.add_parser("multimodal-collect")
+    multimodal_collect.add_argument("--plan-path")
+    multimodal_collect.add_argument("--account")
+    multimodal_collect.add_argument("--dataset")
+    multimodal_collect.add_argument("--limit", type=int, default=30)
+    multimodal_collect.add_argument("--stage", default="beta_d1")
+    multimodal_collect.add_argument("--output-root")
+    multimodal_collect.add_argument("--report-dir")
+    multimodal_collect.add_argument("--run-id", default="")
+    multimodal_collect.add_argument("--page-delay-seconds", type=int, default=14)
+    multimodal_collect.add_argument("--extra-wait-seconds", type=int, default=5)
+    multimodal_collect.add_argument("--no-extract-audio", action="store_true")
+    multimodal_collect.add_argument("--download", action="store_true")
+    multimodal_collect.add_argument("--max-storage-gb", type=float, default=3.0)
+    multimodal_validation = sub.add_parser("multimodal-validation")
+    multimodal_validation.add_argument("--account")
+    multimodal_validation.add_argument("--dataset")
+    multimodal_validation.add_argument("--limit", type=int, default=300)
+    multimodal_validation.add_argument("--k", type=int, default=10)
+    multimodal_validation.add_argument("--min-samples", type=int, default=100)
+    multimodal_validation.add_argument("--min-asset-coverage", type=float, default=0.7)
+    multimodal_feature = sub.add_parser("multimodal-feature-experiment")
+    multimodal_feature.add_argument("--account")
+    multimodal_feature.add_argument("--dataset")
+    multimodal_feature.add_argument("--limit", type=int, default=300)
+    multimodal_feature.add_argument("--k", type=int, default=10)
+    multimodal_feature.add_argument("--min-feature-samples", type=int, default=60)
+    multimodal_feature.add_argument("--audio-window-seconds", type=float, default=10.0)
+    multimodal_feature.add_argument("--force", action="store_true")
     backtest_reports = sub.add_parser("backtest-reports")
     backtest_reports.add_argument("--account")
     backtest_reports.add_argument("--limit", type=int, default=10)
@@ -1167,7 +1445,7 @@ def _argparse_main() -> None:
     calibration_queue.add_argument("--min-priority", type=float, default=0.0)
     calibration_queue.add_argument("--label")
     calibration_queue.add_argument("--queue-type", default="mixed")
-    calibration_queue.add_argument("--strategy", default="research_ranker_v2_2")
+    calibration_queue.add_argument("--strategy", default="research_ranker_v2_4")
     calibration_queue.add_argument("--min-disagreement", type=float, default=0.0)
     calibration_reopen = sub.add_parser("semantic-calibration-reopen")
     calibration_reopen.add_argument("sample_id")
@@ -1288,6 +1566,7 @@ def _argparse_main() -> None:
                 args.extra_wait_seconds,
                 not args.no_extract_audio,
                 args.dry_run,
+                args.max_storage_gb,
             )
         )
     elif args.command == "memory-build":
@@ -1300,6 +1579,54 @@ def _argparse_main() -> None:
         _print(cmd_backtest(args.account, args.k, args.strategy, args.holdout_policy, args.label_version))
     elif args.command == "ranker-tuning-run":
         _print(cmd_ranker_tuning(args.account, args.k, args.holdout_policy, args.max_trials, args.label_version))
+    elif args.command == "semantic-feature-experiment":
+        _print(
+            cmd_semantic_feature_experiment(
+                args.account,
+                args.k,
+                args.holdout_policy,
+                args.label_version,
+                include_field_masks=not args.skip_field_masks,
+            )
+        )
+    elif args.command == "semantic-features-backfill":
+        _print(cmd_semantic_features_backfill(args.account, args.dataset, args.limit, args.force))
+    elif args.command == "slice-structure-evaluate":
+        _print(cmd_slice_structure_evaluate(args.account, args.dataset, args.limit, args.min_confidence))
+    elif args.command == "multimodal-collection-plan":
+        _print(cmd_multimodal_collection_plan(args.account, args.dataset, args.limit, args.stage, args.output_path, args.include_ready))
+    elif args.command == "multimodal-collect":
+        _print(
+            cmd_multimodal_collect(
+                args.plan_path,
+                args.account,
+                args.dataset,
+                args.limit,
+                args.stage,
+                args.output_root,
+                args.report_dir,
+                args.run_id,
+                args.page_delay_seconds,
+                args.extra_wait_seconds,
+                not args.no_extract_audio,
+                not args.download,
+                args.max_storage_gb,
+            )
+        )
+    elif args.command == "multimodal-validation":
+        _print(cmd_multimodal_validation(args.account, args.dataset, args.limit, args.k, args.min_samples, args.min_asset_coverage))
+    elif args.command == "multimodal-feature-experiment":
+        _print(
+            cmd_multimodal_feature_experiment(
+                args.account,
+                args.dataset,
+                args.limit,
+                args.k,
+                args.min_feature_samples,
+                args.audio_window_seconds,
+                args.force,
+            )
+        )
     elif args.command == "backtest-reports":
         _print(cmd_backtest_reports(args.account, args.limit))
     elif args.command == "datasets":

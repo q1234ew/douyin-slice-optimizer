@@ -19,11 +19,15 @@ BACKTEST_STRATEGIES = {
     "research_ranker_v2",
     "research_ranker_v2_1",
     "research_ranker_v2_2",
+    "research_ranker_v2_3",
+    "research_ranker_v2_4",
     "ranker_without_prototypes",
     "ranker_without_low_risk",
 }
 RESEARCH_RANKER_V21_STRATEGY = "research_ranker_v2_1"
 RESEARCH_RANKER_V22_STRATEGY = "research_ranker_v2_2"
+RESEARCH_RANKER_V23_STRATEGY = "research_ranker_v2_3"
+RESEARCH_RANKER_V24_STRATEGY = "research_ranker_v2_4"
 RESEARCH_RANKER_V21_WEIGHT_CONFIG = {
     "name": "semantic_guardrail_v2_1",
     "semantic_weight": 1.0,
@@ -36,15 +40,39 @@ RESEARCH_RANKER_V21_WEIGHT_CONFIG = {
 }
 RESEARCH_RANKER_V22_WEIGHT_CONFIG = {
     "name": "evidence_quality_dynamic_v2_2",
-    "semantic_floor_weight": 1.0,
-    "semantic_strong_weight": 1.0,
-    "high_similarity_weight": 0.0,
-    "low_risk_weight": 0.1,
-    "prototype_weight": 0.0,
+    "semantic_floor_weight": 0.955,
+    "semantic_strong_weight": 0.84,
+    "high_similarity_weight": 0.075,
+    "low_risk_weight": 0.038,
+    "prototype_weight": 0.026,
     "semantic_trust_weight": 0.0,
     "novelty_weight": 0.0,
     "evidence_threshold": 0.35,
+    "risk_activation_threshold": 45.0,
+    "risk_high_similarity_margin": 0.72,
     "bias": 0.0,
+}
+RESEARCH_RANKER_V23_WEIGHT_CONFIG = {
+    **RESEARCH_RANKER_V22_WEIGHT_CONFIG,
+    "name": "diagnostic_diversity_v2_3",
+    "account_ready_sample_threshold": 50,
+    "account_high_similarity_bonus": 0.0,
+    "account_low_risk_guard": 0.0,
+    "account_semantic_trust_bonus": 0.0,
+    "unknown_core_semantic_penalty": 0.0,
+    "title_diversity_penalty": 4.0,
+    "song_diversity_penalty": 1.2,
+    "artist_diversity_penalty": 0.0,
+    "category_diversity_penalty": 0.0,
+}
+RESEARCH_RANKER_V24_WEIGHT_CONFIG = {
+    **RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+    "name": "signal_trust_gate_v2_4",
+    "title_diversity_penalty": 5.5,
+    "song_diversity_penalty": 1.8,
+    "trusted_signal_bonus": 0.16,
+    "weak_signal_penalty": 0.04,
+    "semantic_fallback_floor": 0.82,
 }
 RANKER_TUNING_CANDIDATES = [
     RESEARCH_RANKER_V21_WEIGHT_CONFIG,
@@ -110,13 +138,50 @@ RANKER_TUNING_CANDIDATES_V22 = [
         "semantic_trust_weight": 0.01,
     },
 ]
+RANKER_TUNING_CANDIDATES_V23 = [
+    RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+    {
+        **RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+        "name": "diagnostic_diversity_light",
+        "title_diversity_penalty": 2.0,
+        "song_diversity_penalty": 0.8,
+        "artist_diversity_penalty": 0.0,
+        "category_diversity_penalty": 0.0,
+    },
+    {
+        **RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+        "name": "diagnostic_diversity_strict",
+        "title_diversity_penalty": 5.5,
+        "song_diversity_penalty": 1.8,
+        "artist_diversity_penalty": 0.0,
+        "category_diversity_penalty": 0.0,
+    },
+]
+RANKER_TUNING_CANDIDATES_V24 = [
+    RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+    {
+        **RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+        "name": "signal_trust_gate_balanced",
+        "title_diversity_penalty": 4.5,
+        "song_diversity_penalty": 1.4,
+        "trusted_signal_bonus": 0.12,
+    },
+    {
+        **RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+        "name": "signal_trust_gate_strict",
+        "title_diversity_penalty": 6.5,
+        "song_diversity_penalty": 2.2,
+        "trusted_signal_bonus": 0.18,
+        "weak_signal_penalty": 0.06,
+    },
+]
 
 
 def backtest_rule_ranker(
     account_id: str | None = None,
     *,
     k: int = 10,
-    strategy: str = RESEARCH_RANKER_V22_STRATEGY,
+    strategy: str = RESEARCH_RANKER_V24_STRATEGY,
     holdout_policy: str = "time",
     label_version: str | None = None,
 ) -> dict:
@@ -188,6 +253,7 @@ def backtest_rule_ranker(
         "baseline_gap": historical_dataset.get("baseline_gap") or _baseline_gap(strategy_comparison, selected_strategy),
         "semantic_gap_analysis": historical_dataset.get("semantic_gap_analysis") or _semantic_gap_analysis(strategy_comparison, selected_strategy),
         "diagnostic_samples": historical_dataset.get("diagnostic_samples") or {},
+        "diversity_summary": historical_dataset.get("diversity_summary") or _diversity_summary(rows, selected_strategy, k=k),
         "leakage_guard_summary": historical_dataset.get("leakage_guard_summary") or {},
         "next_calibration_queue": historical_dataset.get("next_calibration_queue") or [],
         "calibration_summary": historical_dataset.get("calibration_summary")
@@ -250,7 +316,7 @@ def run_ranker_tuning(
     k = max(1, int(k or 10))
     dataset = _historical_backtest_dataset(
         account_id,
-        strategy=RESEARCH_RANKER_V22_STRATEGY,
+        strategy=RESEARCH_RANKER_V24_STRATEGY,
         holdout_policy=holdout_policy,
         label_version=label_version,
         k=k,
@@ -261,20 +327,20 @@ def run_ranker_tuning(
             "contract_version": BACKTEST_VERSION,
             "status": "insufficient_samples",
             "account_id": account_id or "all",
-            "strategy": RESEARCH_RANKER_V22_STRATEGY,
+            "strategy": RESEARCH_RANKER_V24_STRATEGY,
             "trials": [],
             "best": None,
             "generated_at": utc_now(),
         }
     trials = []
-    for config in RANKER_TUNING_CANDIDATES_V22[: max(1, int(max_trials or 1))]:
-        trial_rows = _rows_with_v22_config(rows, config)
-        metrics = _strategy_metrics(trial_rows, RESEARCH_RANKER_V22_STRATEGY, k=k)
-        per_account = _per_account_metrics(trial_rows, RESEARCH_RANKER_V22_STRATEGY)
+    for config in RANKER_TUNING_CANDIDATES_V24[: max(1, int(max_trials or 1))]:
+        trial_rows = _rows_with_v24_config(rows, config)
+        metrics = _strategy_metrics(trial_rows, RESEARCH_RANKER_V24_STRATEGY, k=k)
+        per_account = _per_account_metrics(trial_rows, RESEARCH_RANKER_V24_STRATEGY)
         gate = _promotion_gate(
-            {RESEARCH_RANKER_V22_STRATEGY: metrics},
+            {RESEARCH_RANKER_V24_STRATEGY: metrics},
             per_account,
-            strategy=RESEARCH_RANKER_V22_STRATEGY,
+            strategy=RESEARCH_RANKER_V24_STRATEGY,
         )
         trials.append(
             {
@@ -289,12 +355,12 @@ def run_ranker_tuning(
     best = trials[0] if trials else None
     strategy_comparison = dict(dataset.get("strategy_comparison") or {})
     if best:
-        strategy_comparison[RESEARCH_RANKER_V22_STRATEGY] = best["metrics"]
+        strategy_comparison[RESEARCH_RANKER_V24_STRATEGY] = best["metrics"]
     return {
         "contract_version": BACKTEST_VERSION,
         "status": "ready" if best else "empty",
         "account_id": account_id or "all",
-        "strategy": RESEARCH_RANKER_V22_STRATEGY,
+        "strategy": RESEARCH_RANKER_V24_STRATEGY,
         "holdout_policy": dataset.get("holdout_policy_key") or holdout_policy,
         "sample_count": len(rows),
         "k": k,
@@ -303,8 +369,86 @@ def run_ranker_tuning(
         "best_weight_config": (best or {}).get("weight_config") if best else None,
         "strategy_comparison": strategy_comparison,
         "per_account_metrics": (best or {}).get("per_account_metrics") if best else [],
-        "promotion_gate": (best or {}).get("promotion_gate") if best else _promotion_gate({}, [], strategy=RESEARCH_RANKER_V22_STRATEGY),
-        "baseline_gap": _baseline_gap(strategy_comparison, RESEARCH_RANKER_V22_STRATEGY),
+        "promotion_gate": (best or {}).get("promotion_gate") if best else _promotion_gate({}, [], strategy=RESEARCH_RANKER_V24_STRATEGY),
+        "baseline_gap": _baseline_gap(strategy_comparison, RESEARCH_RANKER_V24_STRATEGY),
+        "generated_at": utc_now(),
+    }
+
+
+def semantic_feature_experiment(
+    account_id: str | None = None,
+    *,
+    k: int = 10,
+    holdout_policy: str = "time",
+    label_version: str | None = None,
+    include_field_masks: bool = True,
+) -> dict:
+    k = max(1, int(k or 10))
+    base = _historical_backtest_dataset(
+        account_id,
+        strategy=RESEARCH_RANKER_V24_STRATEGY,
+        holdout_policy=holdout_policy,
+        label_version=label_version,
+        k=k,
+    )
+    rows = base.get("rows") or []
+    if not rows:
+        return {
+            "contract_version": BACKTEST_VERSION,
+            "status": "insufficient_samples",
+            "account_id": account_id or "all",
+            "strategy": RESEARCH_RANKER_V24_STRATEGY,
+            "sample_count": 0,
+            "generated_at": utc_now(),
+        }
+    base_metrics = _strategy_metrics(rows, RESEARCH_RANKER_V24_STRATEGY, k=k)
+    masks = [
+        ("mask_content_category", ["content_category"]),
+        ("mask_slice_structure", ["slice_structure"]),
+        ("mask_artist_names", ["artist_names"]),
+        ("mask_song_title", ["song_title"]),
+        ("mask_artist_and_song", ["artist_names", "song_title", "original_sound_owner", "entity_signal"]),
+        ("mask_core_semantics", ["content_category", "hook_type", "slice_structure"]),
+        ("mask_all_semantic_fields", ["content_category", "hook_type", "slice_structure", "artist_names", "song_title", "original_sound_owner", "entity_signal"]),
+    ]
+    mask_results = []
+    if include_field_masks:
+        for name, fields in masks:
+            masked = _historical_backtest_dataset(
+                account_id,
+                strategy=RESEARCH_RANKER_V24_STRATEGY,
+                holdout_policy=holdout_policy,
+                label_version=label_version,
+                k=k,
+                field_mask=fields,
+            )
+            metrics = (masked.get("strategy_comparison") or {}).get(RESEARCH_RANKER_V24_STRATEGY) or {}
+            mask_results.append(
+                {
+                    "name": name,
+                    "fields": fields,
+                    "metrics": metrics,
+                    "lift_delta_vs_full": round(
+                        float(metrics.get("topk_lift_vs_random") or 0.0)
+                        - float(base_metrics.get("topk_lift_vs_random") or 0.0),
+                        4,
+                    ),
+                }
+            )
+    return {
+        "contract_version": BACKTEST_VERSION,
+        "status": "ready",
+        "account_id": account_id or "all",
+        "strategy": RESEARCH_RANKER_V24_STRATEGY,
+        "sample_count": len(rows),
+        "k": k,
+        "holdout_policy": base.get("holdout_policy_key") or holdout_policy,
+        "split_summary": base.get("split_summary") or {},
+        "coverage": _semantic_feature_coverage(rows),
+        "base_metrics": base_metrics,
+        "strategy_comparison": base.get("strategy_comparison") or {},
+        "field_mask_ablation": mask_results,
+        "diagnosis": _semantic_feature_diagnosis(base_metrics, mask_results, rows),
         "generated_at": utc_now(),
     }
 
@@ -331,8 +475,8 @@ def _backtest_rows(account_id: str | None) -> list[dict]:
 
 
 def _normalize_strategy(strategy: str | None) -> str:
-    value = str(strategy or RESEARCH_RANKER_V22_STRATEGY).strip()
-    return value if value in BACKTEST_STRATEGIES else RESEARCH_RANKER_V22_STRATEGY
+    value = str(strategy or RESEARCH_RANKER_V24_STRATEGY).strip()
+    return value if value in BACKTEST_STRATEGIES else RESEARCH_RANKER_V24_STRATEGY
 
 
 def _historical_backtest_dataset(
@@ -342,6 +486,7 @@ def _historical_backtest_dataset(
     holdout_policy: str,
     label_version: str | None,
     k: int = 10,
+    field_mask: list[str] | None = None,
 ) -> dict:
     all_rows = _historical_rows(account_id, label_version=label_version)
     if not all_rows:
@@ -359,15 +504,51 @@ def _historical_backtest_dataset(
     if not eval_rows:
         eval_rows = all_rows
     train_rows, leakage_summary = _apply_leakage_guard(train_rows or all_rows, eval_rows)
+    if field_mask:
+        train_rows = _masked_history_rows(train_rows, field_mask)
+        eval_rows = _masked_history_rows(eval_rows, field_mask)
     split_summary = {**split_summary, "train_count_after_leakage_guard": len(train_rows)}
     train_basis = _prepare_history_tokens(train_rows or all_rows)
     history_index = _history_candidate_index(train_basis)
     eval_basis = _prepare_history_tokens(eval_rows)
     baselines = _historical_group_baselines(train_basis)
+    interaction_thresholds = _interaction_thresholds(train_basis)
+    account_profiles = _account_ranker_profiles(train_basis, thresholds=interaction_thresholds)
     scored = []
     for row in eval_basis:
         reward = float(row.get("normalized_reward") or row.get("reward_proxy") or 0)
-        strategy_scores, component_scores = _historical_strategy_scores(row, train_basis, baselines, history_index=history_index)
+        strategy_scores, component_scores = _historical_strategy_scores(
+            row,
+            train_basis,
+            baselines,
+            history_index=history_index,
+            thresholds=interaction_thresholds,
+            account_profiles=account_profiles,
+        )
+        v24_row = _v24_reliable_signal_row(row)
+        v24_signal_quality = _v24_signal_quality(row, v24_row, component_scores)
+        gated_v24_score = _score_v24_from_components(
+            component_scores,
+            row=row,
+            account_profiles=account_profiles,
+            config=RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+            signal_quality=v24_signal_quality,
+        )
+        strategy_scores[RESEARCH_RANKER_V24_STRATEGY] = _select_v24_signal_gate_score(
+            raw_score=float(strategy_scores.get(RESEARCH_RANKER_V23_STRATEGY) or 0.0),
+            gated_score=gated_v24_score,
+            raw_components=component_scores,
+            gated_components=component_scores,
+            signal_quality=v24_signal_quality,
+        )
+        component_scores = {
+            **component_scores,
+            **v24_signal_quality,
+            "v24_account_baseline_position": float(component_scores.get("account_baseline_position") or 0.0),
+            "v24_high_similarity": float(component_scores.get("high_similarity") or 0.0),
+            "v24_low_interaction_risk": float(component_scores.get("low_interaction_risk") or 0.0),
+            "v24_prototype_fit": float(component_scores.get("prototype_fit") or 0.0),
+        }
         predicted = float(strategy_scores.get(strategy) or strategy_scores["research_ranker_v2"])
         scored.append(
             {
@@ -385,6 +566,7 @@ def _historical_backtest_dataset(
                 "final_score": predicted,
                 "strategy_scores": strategy_scores,
                 "component_scores": component_scores,
+                "v24_component_scores": component_scores,
                 "rights_risk_score": 0,
                 "low_originality_score": 0,
                 "account_id": row.get("account_id") or "",
@@ -394,9 +576,15 @@ def _historical_backtest_dataset(
                 "content_category": row.get("content_category") or "",
                 "hook_type": row.get("hook_type") or "",
                 "slice_structure": row.get("slice_structure") or "",
+                "structure_confidence": row.get("structure_confidence") or "",
+                "structure_evidence": row.get("structure_evidence") or "",
+                "structure_unknown_reason": row.get("structure_unknown_reason") or "",
                 "program_name": row.get("program_name") or "",
                 "artist_names": row.get("artist_names") or "",
                 "song_title": row.get("song_title") or "",
+                "original_sound_owner": row.get("original_sound_owner") or "",
+                "is_original_sound": bool(row.get("is_original_sound")),
+                "entity_signal": row.get("entity_signal") or "",
                 "tags": row.get("tags") or "",
                 "classification_confidence": row.get("classification_confidence") or "",
                 "semantic_unknown_reason": row.get("semantic_unknown_reason") or "",
@@ -406,6 +594,16 @@ def _historical_backtest_dataset(
                 "holdout_policy": actual_policy,
             }
         )
+    scored = _apply_v23_diversity(scored, config=RESEARCH_RANKER_V23_WEIGHT_CONFIG)
+    scored = _apply_v24_diversity(scored, config=RESEARCH_RANKER_V24_WEIGHT_CONFIG)
+    if strategy == RESEARCH_RANKER_V23_STRATEGY:
+        for row in scored:
+            scores = row.get("strategy_scores") if isinstance(row.get("strategy_scores"), dict) else {}
+            row["final_score"] = float(scores.get(RESEARCH_RANKER_V23_STRATEGY, row.get("final_score") or 0.0))
+    if strategy == RESEARCH_RANKER_V24_STRATEGY:
+        for row in scored:
+            scores = row.get("strategy_scores") if isinstance(row.get("strategy_scores"), dict) else {}
+            row["final_score"] = float(scores.get(RESEARCH_RANKER_V24_STRATEGY, row.get("final_score") or 0.0))
     strategy_comparison = {
         name: _strategy_metrics(scored, name, k=k)
         for name in [
@@ -414,6 +612,8 @@ def _historical_backtest_dataset(
             "research_ranker_v2",
             RESEARCH_RANKER_V21_STRATEGY,
             RESEARCH_RANKER_V22_STRATEGY,
+            RESEARCH_RANKER_V23_STRATEGY,
+            RESEARCH_RANKER_V24_STRATEGY,
             "ranker_without_prototypes",
             "ranker_without_low_risk",
         ]
@@ -433,6 +633,7 @@ def _historical_backtest_dataset(
         "baseline_gap": _baseline_gap(strategy_comparison, strategy),
         "semantic_gap_analysis": _semantic_gap_analysis(strategy_comparison, strategy),
         "diagnostic_samples": _diagnostic_samples(scored, strategy, k=k),
+        "diversity_summary": _diversity_summary(scored, strategy, k=k),
         "leakage_guard_summary": leakage_summary,
         "next_calibration_queue": _next_calibration_queue(scored, strategy, k=k),
         "calibration_summary": _calibration_summary(
@@ -450,7 +651,7 @@ def _historical_backtest_dataset(
 def _historical_backtest_rows(account_id: str | None) -> list[dict]:
     return _historical_backtest_dataset(
         account_id,
-        strategy=RESEARCH_RANKER_V22_STRATEGY,
+        strategy=RESEARCH_RANKER_V24_STRATEGY,
         holdout_policy="time",
         label_version=None,
         k=10,
@@ -488,17 +689,115 @@ def _prepare_history_tokens(rows: list[dict]) -> list[dict]:
     for row in rows:
         item = dict(row)
         text = _history_text(item)
+        tokens = _history_tokens(text)
         item["_history_text"] = text
-        item["_history_tokens"] = _history_tokens(text)
+        item["_history_tokens"] = tokens
+        item["_history_token_count"] = len(tokens)
+        for field in ["content_category", "hook_type", "slice_structure", "artist_names", "song_title", "original_sound_owner", "entity_signal"]:
+            item[f"_norm_{field}"] = _index_key(item.get(field))
         prepared.append(item)
     return prepared
+
+
+def _masked_history_rows(rows: list[dict], fields: list[str]) -> list[dict]:
+    masked = []
+    for row in rows:
+        item = dict(row)
+        for field in fields:
+            if field in {"content_category", "hook_type", "slice_structure"}:
+                item[field] = "unknown"
+            elif field == "is_original_sound":
+                item[field] = 0
+            else:
+                item[field] = ""
+        masked.append(item)
+    return masked
+
+
+def _v24_reliable_signal_rows(rows: list[dict]) -> list[dict]:
+    return [_v24_reliable_signal_row(row) for row in rows]
+
+
+def _v24_reliable_signal_row(row: dict) -> dict:
+    item = dict(row)
+    manual_verified = str(item.get("classification_confidence") or "").strip().lower() == "manual_verified"
+    if not manual_verified:
+        if _known_feature_value(item.get("hook_type")):
+            item["hook_type"] = "unknown"
+        if _known_feature_value(item.get("slice_structure")):
+            item["slice_structure"] = "unknown"
+            item["structure_evidence"] = ""
+            item["structure_confidence"] = "low"
+            item["structure_unknown_reason"] = "quarantined_by_signal_trust_gate_v2_4"
+    if _v24_song_title_untrusted(item):
+        item["song_title"] = ""
+    for key in list(item.keys()):
+        if key.startswith("_history_") or key.startswith("_norm_"):
+            item.pop(key, None)
+    return item
+
+
+def _v24_song_title_untrusted(row: dict) -> bool:
+    title = str(row.get("song_title") or "").strip()
+    if not _known_feature_value(title):
+        return False
+    owner = str(row.get("original_sound_owner") or "").strip()
+    normalized_title = title.lower()
+    normalized_owner = owner.lower()
+    if _truthy_flag(row.get("is_original_sound")):
+        return True
+    if "原声" in title or "創作的原聲" in title or "创作的原声" in title:
+        return True
+    if normalized_owner and (normalized_title == normalized_owner or normalized_owner in normalized_title and len(title) <= len(owner) + 8):
+        return True
+    return False
+
+
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _v24_signal_quality(raw_row: dict, gated_row: dict, components: dict[str, float]) -> dict[str, float]:
+    stable_fields = ["content_category", "artist_names", "original_sound_owner", "entity_signal"]
+    trusted = sum(1 for field in stable_fields if _known_feature_value(gated_row.get(field)))
+    manual_verified = str(raw_row.get("classification_confidence") or "").strip().lower() == "manual_verified"
+    if manual_verified:
+        trusted += sum(1 for field in ["hook_type", "slice_structure"] if _known_feature_value(gated_row.get(field)))
+    quarantined_hook = 1.0 if _known_feature_value(raw_row.get("hook_type")) and not _known_feature_value(gated_row.get("hook_type")) else 0.0
+    quarantined_slice = 1.0 if _known_feature_value(raw_row.get("slice_structure")) and not _known_feature_value(gated_row.get("slice_structure")) else 0.0
+    quarantined_song = 1.0 if _known_feature_value(raw_row.get("song_title")) and not _known_feature_value(gated_row.get("song_title")) else 0.0
+    quarantined = quarantined_hook + quarantined_slice + quarantined_song
+    evidence = _evidence_quality_from_components(components)
+    trust_score = clamp(32.0 + trusted * 14.0 + (18.0 if manual_verified else 0.0) + evidence * 18.0 - quarantined * 4.0)
+    return {
+        "v24_signal_trust": round(trust_score, 4),
+        "v24_trusted_signal_count": float(trusted),
+        "v24_quarantined_signal_count": round(quarantined, 4),
+        "v24_quarantined_hook_type": quarantined_hook,
+        "v24_quarantined_slice_structure": quarantined_slice,
+        "v24_quarantined_song_title": quarantined_song,
+        "v24_evidence_quality": float(evidence),
+        "v24_manual_verified": 1.0 if manual_verified else 0.0,
+    }
 
 
 def _history_candidate_index(rows: list[dict]) -> dict[str, Any]:
     token_index: dict[str, list[int]] = defaultdict(list)
     field_index: dict[str, dict[str, list[int]]] = {
         field: defaultdict(list)
-        for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title"]
+        for field in [
+            "account_id",
+            "content_category",
+            "hook_type",
+            "slice_structure",
+            "artist_names",
+            "song_title",
+            "original_sound_owner",
+            "entity_signal",
+        ]
     }
     for index, row in enumerate(rows):
         tokens = row.get("_history_tokens")
@@ -634,7 +933,7 @@ def _holdout_bucket(row: dict) -> int:
 def _historical_group_baselines(rows: list[dict]) -> dict:
     global_rewards = [float(row.get("normalized_reward") or row.get("reward_proxy") or 0) for row in rows]
     baselines: dict[str, dict[str, float]] = {"global": {"all": sum(global_rewards) / max(1, len(global_rewards))}}
-    for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title"]:
+    for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title", "original_sound_owner", "entity_signal"]:
         groups: dict[str, list[float]] = {}
         for row in rows:
             key = str(row.get(field) or "")
@@ -643,6 +942,40 @@ def _historical_group_baselines(rows: list[dict]) -> dict:
             groups.setdefault(key, []).append(float(row.get("normalized_reward") or row.get("reward_proxy") or 0))
         baselines[field] = {key: sum(values) / max(1, len(values)) for key, values in groups.items() if values}
     return baselines
+
+
+def _account_ranker_profiles(rows: list[dict], *, thresholds: tuple[float, float] | None = None) -> dict[str, dict[str, float]]:
+    threshold_values = thresholds or _interaction_thresholds(rows)
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        account = str(row.get("account_id") or "").strip()
+        if account:
+            grouped[account].append(row)
+    profiles: dict[str, dict[str, float]] = {}
+    for account, items in grouped.items():
+        sample_count = len(items)
+        if not sample_count:
+            continue
+        labels = Counter(_interaction_label(row, threshold_values) for row in items)
+        unknown_count = sum(
+            1
+            for row in items
+            if any(
+                str(row.get(field) or "").strip().lower() in {"", "unknown", "none", "null"}
+                for field in ["content_category", "hook_type", "slice_structure"]
+            )
+        )
+        manual_count = sum(1 for row in items if str(row.get("classification_confidence") or "").strip().lower() == "manual_verified")
+        rewards = [float(row.get("normalized_reward") or row.get("reward_proxy") or 0.0) for row in items]
+        profiles[account] = {
+            "sample_count": float(sample_count),
+            "high_rate": labels["high"] / sample_count,
+            "low_rate": labels["low"] / sample_count,
+            "unknown_rate": unknown_count / sample_count,
+            "manual_rate": manual_count / sample_count,
+            "avg_reward": sum(rewards) / max(1, sample_count),
+        }
+    return profiles
 
 
 def _historical_predicted_score(row: dict, baselines: dict) -> float:
@@ -667,13 +1000,27 @@ def _historical_strategy_scores(
     baselines: dict,
     *,
     history_index: dict[str, Any] | None = None,
+    thresholds: tuple[float, float] | None = None,
+    account_profiles: dict[str, dict[str, float]] | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     current = _historical_predicted_score(row, baselines)
     semantic = _semantic_baseline_v2(row, baselines)
-    components = _historical_research_ranker_components(row, train_rows, semantic, history_index=history_index)
+    components = _historical_research_ranker_components(
+        row,
+        train_rows,
+        semantic,
+        history_index=history_index,
+        thresholds=thresholds,
+    )
     ranker = _score_from_components(components, semantic, use_prototypes=True, use_low_risk=True)
     ranker_v21 = _score_v21_from_components(components, config=RESEARCH_RANKER_V21_WEIGHT_CONFIG)
     ranker_v22 = _score_v22_from_components(components, config=RESEARCH_RANKER_V22_WEIGHT_CONFIG)
+    ranker_v23 = _score_v23_from_components(
+        components,
+        row=row,
+        account_profiles=account_profiles,
+        config=RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+    )
     no_prototypes = _score_from_components(components, semantic, use_prototypes=False, use_low_risk=True)
     no_low_risk = _score_from_components(components, semantic, use_prototypes=True, use_low_risk=False)
     return (
@@ -683,6 +1030,7 @@ def _historical_strategy_scores(
             "research_ranker_v2": ranker,
             RESEARCH_RANKER_V21_STRATEGY: ranker_v21,
             RESEARCH_RANKER_V22_STRATEGY: ranker_v22,
+            RESEARCH_RANKER_V23_STRATEGY: ranker_v23,
             "ranker_without_prototypes": no_prototypes,
             "ranker_without_low_risk": no_low_risk,
         },
@@ -721,8 +1069,15 @@ def _historical_research_ranker_score(
     use_prototypes: bool,
     use_low_risk: bool,
     history_index: dict[str, Any] | None = None,
+    thresholds: tuple[float, float] | None = None,
 ) -> tuple[float, dict[str, float]]:
-    components = _historical_research_ranker_components(row, train_rows, semantic_score, history_index=history_index)
+    components = _historical_research_ranker_components(
+        row,
+        train_rows,
+        semantic_score,
+        history_index=history_index,
+        thresholds=thresholds,
+    )
     return _score_from_components(components, semantic_score, use_prototypes=use_prototypes, use_low_risk=use_low_risk), components
 
 
@@ -732,6 +1087,7 @@ def _historical_research_ranker_components(
     semantic_score: float,
     *,
     history_index: dict[str, Any] | None = None,
+    thresholds: tuple[float, float] | None = None,
 ) -> dict[str, float]:
     cached_tokens = row.get("_history_tokens")
     target_tokens = cached_tokens if isinstance(cached_tokens, set) else _history_tokens(_history_text(row))
@@ -741,13 +1097,13 @@ def _historical_research_ranker_components(
     best_similarity = 0.0
     high_matches: list[tuple[float, float, dict]] = []
     low_matches: list[tuple[float, float, dict]] = []
-    thresholds = _interaction_thresholds(train_rows)
+    threshold_values = thresholds or _interaction_thresholds(train_rows)
     for sample in candidate_rows:
         similarity = _history_similarity(target_tokens, row, sample)
         if similarity <= 0:
             continue
         reward = float(sample.get("normalized_reward") or sample.get("reward_proxy") or 0)
-        label = _interaction_label(sample, thresholds)
+        label = _interaction_label(sample, threshold_values)
         best_similarity = max(best_similarity, similarity)
         if label == "high":
             high_score = max(high_score, similarity * reward)
@@ -819,18 +1175,111 @@ def _score_v22_from_components(components: dict[str, float], *, config: dict[str
     trust = float(components.get("semantic_label_trust") or 0.0)
     novelty = max(0.0, float(components.get("long_tail_novelty") or 0.0) - 35.0)
     threshold = float(weights.get("evidence_threshold") or 0.35)
+    semantic_weight = (
+        float(weights.get("semantic_strong_weight") or 0.0)
+        if evidence >= threshold
+        else float(weights.get("semantic_floor_weight") or 0.0)
+    )
+    semantic_base = 50.0 + (semantic - 50.0) * semantic_weight
     positive_gate = evidence if evidence >= threshold else evidence * 0.25
-    risk_gate = 1.0 if risk > 0.0 else 0.0
+    risk_floor = float(weights.get("risk_activation_threshold") or 0.0)
+    risk_margin = float(weights.get("risk_high_similarity_margin") or 0.0)
+    risk_excess = max(0.0, risk - max(risk_floor, high * risk_margin))
+    risk_gate = evidence if evidence >= threshold else evidence * 0.5
     score = (
-        semantic
+        semantic_base
         + high * float(weights.get("high_similarity_weight") or 0.0) * positive_gate
-        - risk * float(weights.get("low_risk_weight") or 0.0) * risk_gate
+        - risk_excess * float(weights.get("low_risk_weight") or 0.0) * risk_gate
         + prototype * float(weights.get("prototype_weight") or 0.0) * positive_gate
         + (trust - 50.0) * float(weights.get("semantic_trust_weight") or 0.0)
         + novelty * float(weights.get("novelty_weight") or 0.0)
         + float(weights.get("bias") or 0.0)
     )
     return round(clamp(score), 4)
+
+
+def _score_v23_from_components(
+    components: dict[str, float],
+    *,
+    row: dict | None = None,
+    account_profiles: dict[str, dict[str, float]] | None = None,
+    config: dict[str, Any] | None = None,
+) -> float:
+    weights = dict(RESEARCH_RANKER_V23_WEIGHT_CONFIG)
+    if config:
+        weights.update(config)
+    base = _score_v22_from_components(components, config=weights)
+    profile = (account_profiles or {}).get(str((row or {}).get("account_id") or ""))
+    if not profile or float(profile.get("sample_count") or 0.0) < float(weights.get("account_ready_sample_threshold") or 50):
+        return base
+    confidence = min(1.0, max(0.0, float(profile.get("sample_count") or 0.0) / 500.0))
+    high = float(components.get("high_similarity") or 0.0)
+    risk = float(components.get("low_interaction_risk") or 0.0)
+    trust = float(components.get("semantic_label_trust") or 0.0)
+    high_rate = float(profile.get("high_rate") or 0.0)
+    low_rate = float(profile.get("low_rate") or 0.0)
+    unknown_rate = float(profile.get("unknown_rate") or 0.0)
+    adjustment = 0.0
+    if high > 55.0:
+        adjustment += (high - 55.0) * float(weights.get("account_high_similarity_bonus") or 0.0) * (0.65 + high_rate) * confidence
+    if risk > 60.0 and high < 55.0:
+        adjustment -= (risk - 60.0) * float(weights.get("account_low_risk_guard") or 0.0) * (0.65 + low_rate) * confidence
+    if trust > 60.0 and unknown_rate < 0.35:
+        adjustment += (trust - 60.0) * float(weights.get("account_semantic_trust_bonus") or 0.0) * confidence
+    unknown_core_count = _unknown_core_semantic_count(row or {})
+    if unknown_core_count >= 3:
+        adjustment -= (unknown_core_count - 2) * float(weights.get("unknown_core_semantic_penalty") or 0.0) * (1.0 + min(1.0, high / 100.0) * 0.45)
+    return round(clamp(base + adjustment), 4)
+
+
+def _score_v24_from_components(
+    components: dict[str, float],
+    *,
+    row: dict | None = None,
+    account_profiles: dict[str, dict[str, float]] | None = None,
+    config: dict[str, Any] | None = None,
+    signal_quality: dict[str, float] | None = None,
+) -> float:
+    weights = dict(RESEARCH_RANKER_V24_WEIGHT_CONFIG)
+    if config:
+        weights.update(config)
+    base = _score_v23_from_components(components, row=row, account_profiles=account_profiles, config=weights)
+    evidence = _evidence_quality_from_components(components)
+    semantic = float(components.get("account_baseline_position") or 50.0)
+    if evidence < 0.28:
+        floor = clamp(float(weights.get("semantic_fallback_floor") or 0.82), 0.0, 1.0)
+        base = semantic * floor + base * (1.0 - floor)
+    quality = signal_quality or {}
+    trusted = float(quality.get("v24_trusted_signal_count") or 0.0)
+    quarantined = float(quality.get("v24_quarantined_signal_count") or 0.0)
+    signal_trust = float(quality.get("v24_signal_trust") or 50.0)
+    adjustment = (
+        trusted * float(weights.get("trusted_signal_bonus") or 0.0)
+        + max(0.0, signal_trust - 62.0) * 0.006
+        - quarantined * float(weights.get("weak_signal_penalty") or 0.0)
+    )
+    return round(clamp(base + adjustment), 4)
+
+
+def _select_v24_signal_gate_score(
+    *,
+    raw_score: float,
+    gated_score: float,
+    raw_components: dict[str, float],
+    gated_components: dict[str, float],
+    signal_quality: dict[str, float],
+) -> float:
+    raw_evidence = _evidence_quality_from_components(raw_components)
+    gated_evidence = _evidence_quality_from_components(gated_components)
+    quarantined = float(signal_quality.get("v24_quarantined_signal_count") or 0.0)
+    trust = float(signal_quality.get("v24_signal_trust") or 0.0)
+    if gated_score >= raw_score:
+        return round(clamp(gated_score), 4)
+    if quarantined <= 0 or gated_evidence >= raw_evidence * 0.88 or trust >= 76.0:
+        return round(clamp(max(gated_score, raw_score - quarantined * 0.04)), 4)
+    evidence_gap = max(0.0, raw_evidence - gated_evidence - 0.08)
+    penalty = min(0.45, quarantined * 0.08 + evidence_gap * 0.35)
+    return round(clamp(raw_score - penalty), 4)
 
 
 def _evidence_quality_from_components(components: dict[str, float]) -> float:
@@ -843,6 +1292,10 @@ def _evidence_quality_from_components(components: dict[str, float]) -> float:
 
 
 def _weight_config_for_strategy(strategy: str) -> dict[str, Any]:
+    if strategy == RESEARCH_RANKER_V24_STRATEGY:
+        return RESEARCH_RANKER_V24_WEIGHT_CONFIG
+    if strategy == RESEARCH_RANKER_V23_STRATEGY:
+        return RESEARCH_RANKER_V23_WEIGHT_CONFIG
     if strategy == RESEARCH_RANKER_V22_STRATEGY:
         return RESEARCH_RANKER_V22_WEIGHT_CONFIG
     if strategy == RESEARCH_RANKER_V21_STRATEGY:
@@ -856,7 +1309,7 @@ def _candidate_history_rows(
     train_rows: list[dict],
     history_index: dict[str, Any] | None,
     *,
-    limit: int = 520,
+    limit: int = 360,
 ) -> list[dict]:
     if len(train_rows) <= limit or not history_index or not target_tokens:
         return train_rows
@@ -864,19 +1317,23 @@ def _candidate_history_rows(
     token_index = history_index.get("token_index") if isinstance(history_index.get("token_index"), dict) else {}
     field_index = history_index.get("field_index") if isinstance(history_index.get("field_index"), dict) else {}
     counts: Counter[int] = Counter()
+    max_token_postings = max(80, min(420, len(indexed_rows) // 8))
     for token in target_tokens:
-        for index in token_index.get(token, []):
+        postings = token_index.get(token, [])
+        if len(postings) > max_token_postings:
+            continue
+        for index in postings:
             counts[int(index)] += 1
-    for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title"]:
+    for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title", "original_sound_owner", "entity_signal"]:
         key = _index_key(row.get(field))
         if not key:
             continue
-        bonus = 3 if field in {"account_id", "content_category"} else 2
+        bonus = 3 if field in {"account_id", "content_category", "entity_signal"} else 2
         for index in (field_index.get(field) or {}).get(key, []):
             counts[int(index)] += bonus
     if not counts:
         return []
-    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[: max(1, int(limit))]
+    ranked = counts.most_common(max(1, int(limit)))
     return [indexed_rows[index] for index, _ in ranked if 0 <= index < len(indexed_rows)]
 
 
@@ -890,7 +1347,19 @@ def _history_text(row: dict) -> str:
         return cached
     return " ".join(
         str(row.get(key) or "")
-        for key in ["title", "tags", "artist_names", "song_title", "program_name", "content_category", "hook_type", "slice_structure"]
+        for key in [
+            "title",
+            "tags",
+            "artist_names",
+            "song_title",
+            "original_sound_owner",
+            "entity_signal",
+            "program_name",
+            "content_category",
+            "hook_type",
+            "slice_structure",
+            "structure_evidence",
+        ]
     )
 
 
@@ -900,10 +1369,23 @@ def _history_similarity(target_tokens: set[str], row: dict, sample: dict) -> flo
     if not target_tokens or not sample_tokens:
         token_score = 0.0
     else:
-        token_score = len(target_tokens & sample_tokens) / max(1, len(target_tokens | sample_tokens))
+        overlap = len(target_tokens & sample_tokens)
+        target_count = int(row.get("_history_token_count") or len(target_tokens))
+        sample_count = int(sample.get("_history_token_count") or len(sample_tokens))
+        token_score = overlap / max(1, target_count + sample_count - overlap)
     semantic_bonus = 0.0
-    for field, bonus in [("content_category", 0.09), ("hook_type", 0.08), ("slice_structure", 0.07), ("artist_names", 0.05), ("song_title", 0.04)]:
-        if row.get(field) and sample.get(field) and str(row.get(field)).strip().lower() == str(sample.get(field)).strip().lower():
+    for field, bonus in [
+        ("content_category", 0.09),
+        ("hook_type", 0.08),
+        ("slice_structure", 0.07),
+        ("artist_names", 0.05),
+        ("song_title", 0.04),
+        ("entity_signal", 0.045),
+        ("original_sound_owner", 0.035),
+    ]:
+        row_key = row.get(f"_norm_{field}") or _index_key(row.get(field))
+        sample_key = sample.get(f"_norm_{field}") or _index_key(sample.get(field))
+        if row_key and sample_key and row_key == sample_key:
             semantic_bonus += bonus
     return min(1.0, token_score + semantic_bonus)
 
@@ -1020,6 +1502,164 @@ def _rows_with_v22_config(rows: list[dict], config: dict[str, Any]) -> list[dict
     return cloned
 
 
+def _rows_with_v23_config(rows: list[dict], config: dict[str, Any]) -> list[dict]:
+    cloned = []
+    for row in rows:
+        item = dict(row)
+        scores = dict(item.get("strategy_scores") if isinstance(item.get("strategy_scores"), dict) else {})
+        components = item.get("component_scores") if isinstance(item.get("component_scores"), dict) else {}
+        scores[RESEARCH_RANKER_V23_STRATEGY] = _score_v23_from_components(components, row=item, config=config)
+        item["strategy_scores"] = scores
+        item["final_score"] = scores[RESEARCH_RANKER_V23_STRATEGY]
+        cloned.append(item)
+    tuned = _apply_v23_diversity(cloned, config=config)
+    for item in tuned:
+        scores = item.get("strategy_scores") if isinstance(item.get("strategy_scores"), dict) else {}
+        item["final_score"] = float(scores.get(RESEARCH_RANKER_V23_STRATEGY, item.get("final_score") or 0.0))
+    return tuned
+
+
+def _rows_with_v24_config(rows: list[dict], config: dict[str, Any]) -> list[dict]:
+    cloned = []
+    for row in rows:
+        item = dict(row)
+        scores = dict(item.get("strategy_scores") if isinstance(item.get("strategy_scores"), dict) else {})
+        components = item.get("v24_component_scores") if isinstance(item.get("v24_component_scores"), dict) else {}
+        if not components:
+            components = item.get("component_scores") if isinstance(item.get("component_scores"), dict) else {}
+        signal_quality = {
+            key: float((item.get("component_scores") or {}).get(key) or 0.0)
+            for key in [
+                "v24_signal_trust",
+                "v24_trusted_signal_count",
+                "v24_quarantined_signal_count",
+                "v24_evidence_quality",
+            ]
+        }
+        gated_score = _score_v24_from_components(
+            components,
+            row=item,
+            config=config,
+            signal_quality=signal_quality,
+        )
+        raw_components = item.get("component_scores") if isinstance(item.get("component_scores"), dict) else {}
+        scores[RESEARCH_RANKER_V24_STRATEGY] = _select_v24_signal_gate_score(
+            raw_score=float(scores.get(RESEARCH_RANKER_V23_STRATEGY) or item.get("final_score") or 0.0),
+            gated_score=gated_score,
+            raw_components=raw_components,
+            gated_components=components,
+            signal_quality=signal_quality,
+        )
+        item["strategy_scores"] = scores
+        item["final_score"] = scores[RESEARCH_RANKER_V24_STRATEGY]
+        cloned.append(item)
+    tuned = _apply_v24_diversity(cloned, config=config)
+    for item in tuned:
+        scores = item.get("strategy_scores") if isinstance(item.get("strategy_scores"), dict) else {}
+        item["final_score"] = float(scores.get(RESEARCH_RANKER_V24_STRATEGY, item.get("final_score") or 0.0))
+    return tuned
+
+
+def _apply_v23_diversity(rows: list[dict], *, config: dict[str, Any] | None = None) -> list[dict]:
+    return _apply_strategy_diversity(
+        rows,
+        strategy=RESEARCH_RANKER_V23_STRATEGY,
+        default_config=RESEARCH_RANKER_V23_WEIGHT_CONFIG,
+        component_key="v23_diversity_penalty",
+        config=config,
+    )
+
+
+def _apply_v24_diversity(rows: list[dict], *, config: dict[str, Any] | None = None) -> list[dict]:
+    return _apply_strategy_diversity(
+        rows,
+        strategy=RESEARCH_RANKER_V24_STRATEGY,
+        default_config=RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+        component_key="v24_diversity_penalty",
+        config=config,
+    )
+
+
+def _apply_strategy_diversity(
+    rows: list[dict],
+    *,
+    strategy: str,
+    default_config: dict[str, Any],
+    component_key: str,
+    config: dict[str, Any] | None = None,
+) -> list[dict]:
+    weights = dict(default_config)
+    if config:
+        weights.update(config)
+    ordered = sorted(
+        rows,
+        key=lambda row: float((row.get("strategy_scores") or {}).get(strategy, row.get("final_score") or 0.0)),
+        reverse=True,
+    )
+    title_seen: Counter[str] = Counter()
+    song_seen: Counter[str] = Counter()
+    artist_seen: Counter[str] = Counter()
+    category_seen: Counter[str] = Counter()
+    adjusted_by_id: dict[str, tuple[float, float]] = {}
+    for row in ordered:
+        scores = row.get("strategy_scores") if isinstance(row.get("strategy_scores"), dict) else {}
+        base = float(scores.get(strategy, row.get("final_score") or 0.0))
+        title_key = _stable_title_key(row.get("title"))
+        song_key = _diversity_key(row.get("song_title"))
+        artist_key = _diversity_key(row.get("artist_names"))
+        category_key = _diversity_key(row.get("content_category"))
+        penalty = 0.0
+        if title_key:
+            penalty += title_seen[title_key] * float(weights.get("title_diversity_penalty") or 0.0)
+        if song_key:
+            penalty += min(3, song_seen[song_key]) * float(weights.get("song_diversity_penalty") or 0.0)
+        if artist_key:
+            penalty += min(3, artist_seen[artist_key]) * float(weights.get("artist_diversity_penalty") or 0.0)
+        if category_key:
+            penalty += min(4, category_seen[category_key]) * float(weights.get("category_diversity_penalty") or 0.0)
+        key = str(row.get("training_sample_id") or row.get("candidate_segment_id") or id(row))
+        adjusted_by_id[key] = (round(clamp(base - penalty), 4), round(penalty, 4))
+        if title_key:
+            title_seen[title_key] += 1
+        if song_key:
+            song_seen[song_key] += 1
+        if artist_key:
+            artist_seen[artist_key] += 1
+        if category_key:
+            category_seen[category_key] += 1
+    adjusted_rows = []
+    for row in rows:
+        item = dict(row)
+        key = str(item.get("training_sample_id") or item.get("candidate_segment_id") or id(row))
+        adjusted, penalty = adjusted_by_id.get(key, (float((item.get("strategy_scores") or {}).get(strategy, item.get("final_score") or 0.0)), 0.0))
+        scores = dict(item.get("strategy_scores") if isinstance(item.get("strategy_scores"), dict) else {})
+        scores[strategy] = adjusted
+        item["strategy_scores"] = scores
+        if isinstance(item.get("component_scores"), dict):
+            item["component_scores"] = {
+                **item["component_scores"],
+                component_key: penalty,
+            }
+        adjusted_rows.append(item)
+    return adjusted_rows
+
+
+def _diversity_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text or text in {"unknown", "none", "null"}:
+        return ""
+    parts = [part.strip() for part in re.split(r"[|,，/、\s]+", text) if part.strip()]
+    return "|".join(sorted(set(parts)))[:100] if parts else text[:100]
+
+
+def _unknown_core_semantic_count(row: dict) -> int:
+    return sum(
+        1
+        for field in ["content_category", "hook_type", "slice_structure"]
+        if str(row.get(field) or "").strip().lower() in {"", "unknown", "none", "null"}
+    )
+
+
 def _per_account_metrics(rows: list[dict], strategy: str) -> list[dict]:
     grouped: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -1051,7 +1691,7 @@ def _promotion_gate(
     strategy_comparison: dict,
     per_account_metrics: list[dict],
     *,
-    strategy: str = RESEARCH_RANKER_V22_STRATEGY,
+    strategy: str = RESEARCH_RANKER_V24_STRATEGY,
 ) -> dict:
     target = strategy_comparison.get(strategy) or strategy_comparison.get("research_ranker_v2") or {}
     ready_improved = [
@@ -1062,7 +1702,7 @@ def _promotion_gate(
     topk_lift = float(target.get("topk_lift_vs_random") or 0.0)
     high_hit = float(target.get("high_interaction_hit_rate") or 0.0)
     low_avoidance = float(target.get("low_interaction_avoidance_rate") or 0.0)
-    if strategy == RESEARCH_RANKER_V22_STRATEGY:
+    if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY}:
         required_lift = 1.85
         required_high_hit = 0.90
         required_low_avoidance = 0.95
@@ -1133,9 +1773,9 @@ def _calibration_summary(strategy_comparison: dict, promotion_gate: dict, strate
         "semantic_baseline_ahead": float(semantic.get("topk_lift_vs_random") or 0) > float(target.get("topk_lift_vs_random") or 0),
         "target_topk_lift_vs_random": float(target.get("topk_lift_vs_random") or 0),
         "target_high_interaction_hit_rate": float(target.get("high_interaction_hit_rate") or 0),
-        "required_topk_lift_vs_random": 1.85 if strategy == RESEARCH_RANKER_V22_STRATEGY else 1.70 if strategy == RESEARCH_RANKER_V21_STRATEGY else 1.10,
-        "required_high_interaction_hit_rate": 0.90 if strategy == RESEARCH_RANKER_V22_STRATEGY else 0.70 if strategy == RESEARCH_RANKER_V21_STRATEGY else 0.0,
-        "required_low_interaction_avoidance_rate": 0.95 if strategy == RESEARCH_RANKER_V22_STRATEGY else 0.0,
+        "required_topk_lift_vs_random": 1.85 if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY} else 1.70 if strategy == RESEARCH_RANKER_V21_STRATEGY else 1.10,
+        "required_high_interaction_hit_rate": 0.90 if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY} else 0.70 if strategy == RESEARCH_RANKER_V21_STRATEGY else 0.0,
+        "required_low_interaction_avoidance_rate": 0.95 if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY} else 0.0,
     }
 
 
@@ -1143,7 +1783,7 @@ def _semantic_gap_analysis(strategy_comparison: dict, strategy: str) -> dict:
     gap = _baseline_gap(strategy_comparison, strategy)
     target = strategy_comparison.get(strategy) or {}
     semantic = strategy_comparison.get("semantic_baseline_v2") or {}
-    required_gap = 0.03 if strategy == RESEARCH_RANKER_V22_STRATEGY else 0.0
+    required_gap = 0.03 if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY} else 0.0
     lift_gap = float(gap.get("lift_vs_semantic_baseline") or 0.0)
     return {
         "strategy": strategy,
@@ -1156,12 +1796,85 @@ def _semantic_gap_analysis(strategy_comparison: dict, strategy: str) -> dict:
     }
 
 
+def _semantic_feature_coverage(rows: list[dict]) -> dict[str, dict[str, Any]]:
+    fields = [
+        "content_category",
+        "hook_type",
+        "slice_structure",
+        "artist_names",
+        "song_title",
+        "original_sound_owner",
+        "entity_signal",
+        "structure_confidence",
+    ]
+    coverage = {}
+    total = len(rows)
+    for field in fields:
+        known = sum(1 for row in rows if _known_feature_value(row.get(field)))
+        coverage[field] = {
+            "count": known,
+            "total": total,
+            "rate": round(known / max(1, total), 4),
+        }
+    return coverage
+
+
+def _semantic_feature_diagnosis(base_metrics: dict, mask_results: list[dict], rows: list[dict]) -> dict:
+    lift = float(base_metrics.get("topk_lift_vs_random") or 0.0)
+    strongest = sorted(
+        mask_results,
+        key=lambda item: float(item.get("lift_delta_vs_full") or 0.0),
+    )[:3]
+    noisy = sorted(
+        [
+            item
+            for item in mask_results
+            if float(item.get("lift_delta_vs_full") or 0.0) > 0
+        ],
+        key=lambda item: float(item.get("lift_delta_vs_full") or 0.0),
+        reverse=True,
+    )
+    weak_fields = [
+        field
+        for field, item in _semantic_feature_coverage(rows).items()
+        if field in {"hook_type", "slice_structure", "content_category"} and float(item.get("rate") or 0.0) < 0.5
+    ]
+    return {
+        "promotion_gap_to_1_85": round(1.85 - lift, 4),
+        "strongest_positive_evidence_fields": [
+            {
+                "name": item.get("name"),
+                "fields": item.get("fields") or [],
+                "lift_loss_when_masked": round(abs(float(item.get("lift_delta_vs_full") or 0.0)), 4),
+            }
+            for item in strongest
+            if float(item.get("lift_delta_vs_full") or 0.0) < 0
+        ],
+        "possibly_noisy_fields": [
+            {
+                "name": item.get("name"),
+                "fields": item.get("fields") or [],
+                "lift_gain_when_masked": round(float(item.get("lift_delta_vs_full") or 0.0), 4),
+            }
+            for item in noisy[:3]
+        ],
+        "low_coverage_core_fields": weak_fields,
+        "recommendation": "prioritize fields that lose lift when masked; quarantine fields that gain lift when masked until manual calibration proves them reliable.",
+    }
+
+
+def _known_feature_value(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text and text not in {"unknown", "none", "null", "其他", "其它", "0"})
+
+
 def _diagnostic_samples(rows: list[dict], strategy: str, *, k: int) -> dict:
     if not rows:
         return {
             "missed_high_interaction": [],
             "low_interaction_false_positive": [],
             "semantic_disagreements": [],
+            "diversity_limited_duplicates": [],
         }
     thresholds = _interaction_thresholds(rows)
     ranked = _rows_for_strategy(rows, strategy)
@@ -1187,6 +1900,7 @@ def _diagnostic_samples(rows: list[dict], strategy: str, *, k: int) -> dict:
         "missed_high_interaction": [_diagnostic_row(row, strategy) for row in high_rows[:12]],
         "low_interaction_false_positive": [_diagnostic_row(row, strategy) for row in low_false[:12]],
         "semantic_disagreements": [_diagnostic_row(row, strategy) for row in disagreement_rows[:12]],
+        "diversity_limited_duplicates": _diversity_diagnostic_rows(ranked, strategy, k=k),
     }
 
 
@@ -1219,6 +1933,7 @@ def _next_calibration_queue(rows: list[dict], strategy: str, *, k: int) -> list[
         ("missed_high_interaction", "high_interaction_missed_by_ranker"),
         ("low_interaction_false_positive", "low_interaction_false_positive"),
         ("semantic_disagreements", "semantic_ranker_disagreement"),
+        ("diversity_limited_duplicates", "near_duplicate_diversity_review"),
     ]:
         for row in diagnostics.get(queue_type) or []:
             sample_id = row.get("sample_id") or row.get("platform_item_id") or row.get("title")
@@ -1244,6 +1959,62 @@ def _next_calibration_queue(rows: list[dict], strategy: str, *, k: int) -> list[
             if len(queue) >= 30:
                 return queue
     return queue
+
+
+def _diversity_summary(rows: list[dict], strategy: str, *, k: int) -> dict:
+    ranked = _rows_for_strategy(rows, strategy)
+    ranked.sort(key=lambda row: float(row.get("final_score") or 0.0), reverse=True)
+    top = ranked[: max(1, int(k or 10))]
+    duplicate_keys = _duplicate_key_counts(top)
+    penalty_key = "v24_diversity_penalty" if strategy == RESEARCH_RANKER_V24_STRATEGY else "v23_diversity_penalty"
+    penalties = [
+        float((row.get("component_scores") or {}).get(penalty_key) or 0.0)
+        for row in top
+    ]
+    return {
+        "strategy": strategy,
+        "topk": len(top),
+        "duplicate_title_groups": duplicate_keys["title"],
+        "duplicate_song_groups": duplicate_keys["song"],
+        "duplicate_artist_groups": duplicate_keys["artist"],
+        "penalized_topk_count": sum(1 for value in penalties if value > 0),
+        "max_diversity_penalty": round(max(penalties, default=0.0), 4),
+        "policy": "limit near-duplicate title, song, artist, and broad category concentration before promotion-gate evaluation.",
+    }
+
+
+def _duplicate_key_counts(rows: list[dict]) -> dict[str, int]:
+    counters = {
+        "title": Counter(_stable_title_key(row.get("title")) for row in rows if _stable_title_key(row.get("title"))),
+        "song": Counter(_diversity_key(row.get("song_title")) for row in rows if _diversity_key(row.get("song_title"))),
+        "artist": Counter(_diversity_key(row.get("artist_names")) for row in rows if _diversity_key(row.get("artist_names"))),
+    }
+    return {key: sum(1 for count in counter.values() if count > 1) for key, counter in counters.items()}
+
+
+def _diversity_diagnostic_rows(rows: list[dict], strategy: str, *, k: int) -> list[dict]:
+    top = rows[: max(10, int(k or 10) * 2)]
+    diagnostics = []
+    penalty_key = "v24_diversity_penalty" if strategy == RESEARCH_RANKER_V24_STRATEGY else "v23_diversity_penalty"
+    seen_titles: Counter[str] = Counter()
+    seen_songs: Counter[str] = Counter()
+    for row in top:
+        title_key = _stable_title_key(row.get("title"))
+        song_key = _diversity_key(row.get("song_title"))
+        penalty = float((row.get("component_scores") or {}).get(penalty_key) or 0.0)
+        if penalty > 0 or (title_key and seen_titles[title_key]) or (song_key and seen_songs[song_key]):
+            item = _diagnostic_row(row, strategy)
+            item["diversity_penalty"] = round(penalty, 4)
+            item["duplicate_title_seen"] = int(seen_titles[title_key]) if title_key else 0
+            item["duplicate_song_seen"] = int(seen_songs[song_key]) if song_key else 0
+            diagnostics.append(item)
+        if title_key:
+            seen_titles[title_key] += 1
+        if song_key:
+            seen_songs[song_key] += 1
+        if len(diagnostics) >= 12:
+            break
+    return diagnostics
 
 
 def _diagnostic_recommended_fields(row: dict) -> list[str]:
@@ -1410,7 +2181,7 @@ def _report_payload(
         "metrics": metrics or {
             "sample_count": 0,
             "k": k,
-            "strategy": RESEARCH_RANKER_V22_STRATEGY,
+            "strategy": RESEARCH_RANKER_V24_STRATEGY,
             "ndcg_at_k": 0.0,
             "topk_hit_rate": 0.0,
             "topk_lift_vs_random": 0.0,
@@ -1431,14 +2202,15 @@ def _report_payload(
             "strategy_comparison": {},
             "per_account_metrics": [],
             "component_ablation": {},
-            "promotion_gate": _promotion_gate({}, [], strategy=RESEARCH_RANKER_V22_STRATEGY),
-            "weight_config": RESEARCH_RANKER_V22_WEIGHT_CONFIG,
-            "baseline_gap": _baseline_gap({}, RESEARCH_RANKER_V22_STRATEGY),
-            "semantic_gap_analysis": _semantic_gap_analysis({}, RESEARCH_RANKER_V22_STRATEGY),
+            "promotion_gate": _promotion_gate({}, [], strategy=RESEARCH_RANKER_V24_STRATEGY),
+            "weight_config": RESEARCH_RANKER_V24_WEIGHT_CONFIG,
+            "baseline_gap": _baseline_gap({}, RESEARCH_RANKER_V24_STRATEGY),
+            "semantic_gap_analysis": _semantic_gap_analysis({}, RESEARCH_RANKER_V24_STRATEGY),
             "diagnostic_samples": {},
+            "diversity_summary": {},
             "leakage_guard_summary": {},
             "next_calibration_queue": [],
-            "calibration_summary": _calibration_summary({}, _promotion_gate({}, [], strategy=RESEARCH_RANKER_V22_STRATEGY), RESEARCH_RANKER_V22_STRATEGY),
+            "calibration_summary": _calibration_summary({}, _promotion_gate({}, [], strategy=RESEARCH_RANKER_V24_STRATEGY), RESEARCH_RANKER_V24_STRATEGY),
         },
         "top_rows": rows,
     }

@@ -465,6 +465,18 @@ class WebApiTest(unittest.TestCase):
             "/learning/ranker-tuning/run",
             json={"account_id": "sixuweilive", "k": 1, "holdout_policy": "time", "max_trials": 2},
         ).json()
+        multimodal_plan = self.client.post(
+            "/learning/multimodal/collection-plan",
+            json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "limit": 1},
+        ).json()
+        multimodal_validation = self.client.post(
+            "/learning/multimodal-validation/run",
+            json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "limit": 10, "min_samples": 1},
+        ).json()
+        multimodal_feature = self.client.post(
+            "/learning/multimodal-feature-experiment/run",
+            json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "limit": 10, "min_feature_samples": 1},
+        ).json()
 
         self.assertEqual(imported["contract_version"], DOUYIN_HISTORY_VERSION)
         self.assertEqual(imported["inserted"], 2)
@@ -503,6 +515,13 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(labels["research_label_version"], RESEARCH_LABEL_VERSION)
         self.assertEqual(tuning["strategy"], "research_ranker_v2_2")
         self.assertTrue(tuning["trials"])
+        self.assertEqual(multimodal_plan["status"], "ready")
+        self.assertEqual(multimodal_plan["sample_count"], 1)
+        self.assertIn("plan_path", multimodal_plan)
+        self.assertIn("asset_readiness", multimodal_validation)
+        self.assertIn("promotion_gate", multimodal_validation)
+        self.assertIn("feature_coverage", multimodal_feature)
+        self.assertIn("strategy_comparison", multimodal_feature)
         self.assertIn("promotion_gate", tuning)
 
 

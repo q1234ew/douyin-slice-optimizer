@@ -77,6 +77,7 @@ def collect_douyin_media(
     extra_wait_seconds: int = 5,
     extract_audio: bool = True,
     dry_run: bool = False,
+    max_storage_bytes: int = 0,
 ) -> dict:
     """Collect Douyin video media from a test/pilot plan using Chrome Apple Events.
 
@@ -91,11 +92,25 @@ def collect_douyin_media(
     asset_root = Path(output_root) if output_root else settings.data_dir / "douyin_media_assets"
     reports = Path(report_dir) if report_dir else settings.root / "outputs" / "v0.7_media_collection_test"
     reports.mkdir(parents=True, exist_ok=True)
+    storage_limit = max(0, int(max_storage_bytes or 0))
 
     results: list[dict[str, Any]] = []
+    stopped_for_storage = False
     for item in samples:
         row = _initial_result(item)
         paths = _asset_paths(asset_root, item["account_id"], run_id, item["aweme_id"])
+        if storage_limit and _directory_size(asset_root) >= storage_limit:
+            row.update(
+                {
+                    "status": "skipped_storage_limit",
+                    "storage_limit_bytes": storage_limit,
+                    "storage_used_bytes": _directory_size(asset_root),
+                    "errors": ["storage_limit_reached_before_sample"],
+                }
+            )
+            results.append(row)
+            stopped_for_storage = True
+            break
         if dry_run:
             row.update(
                 {
@@ -115,10 +130,23 @@ def collect_douyin_media(
                 page_delay_seconds=page_delay_seconds,
                 extra_wait_seconds=extra_wait_seconds,
                 extract_audio=extract_audio,
+                storage_root=asset_root,
+                max_storage_bytes=storage_limit,
             )
         )
+        if storage_limit and _directory_size(asset_root) >= storage_limit:
+            stopped_for_storage = True
+            break
 
     summary = _summary(results, source_plan=str(plan_path), run_id=run_id, dry_run=dry_run)
+    summary["storage"] = {
+        "root": str(asset_root),
+        "used_bytes": _directory_size(asset_root),
+        "limit_bytes": storage_limit,
+        "used_gb": round(_directory_size(asset_root) / (1024**3), 4),
+        "limit_gb": round(storage_limit / (1024**3), 4) if storage_limit else 0,
+        "stopped_for_storage": stopped_for_storage,
+    }
     report = {"summary": summary, "results": results}
     suffix = _report_suffix(stage=stage, account=account, dry_run=dry_run)
     json_path = reports / f"media_collection_{suffix}_report.json"
@@ -140,6 +168,8 @@ def _collect_one(
     page_delay_seconds: int,
     extra_wait_seconds: int,
     extract_audio: bool,
+    storage_root: Path | None = None,
+    max_storage_bytes: int = 0,
 ) -> dict:
     row = _initial_result(item)
     _ensure_asset_dirs(paths)
@@ -166,7 +196,13 @@ def _collect_one(
         ok = False
         last_error = ""
         for candidate in candidates[:5]:
-            ok, last_error = _download(candidate, video_path, referer=info.get("href") or item["source_url"])
+            ok, last_error = _download(
+                candidate,
+                video_path,
+                referer=info.get("href") or item["source_url"],
+                storage_root=storage_root,
+                max_storage_bytes=max_storage_bytes,
+            )
             if ok and video_path.stat().st_size > 1024:
                 row["download_url"] = candidate
                 break
@@ -175,7 +211,13 @@ def _collect_one(
         if not row["video_downloaded"]:
             row["errors"].append("video_download_failed: " + last_error)
         if info.get("cover_url"):
-            cover_ok, cover_error = _download(info["cover_url"], cover_path, referer=info.get("href") or item["source_url"])
+            cover_ok, cover_error = _download(
+                info["cover_url"],
+                cover_path,
+                referer=info.get("href") or item["source_url"],
+                storage_root=storage_root,
+                max_storage_bytes=max_storage_bytes,
+            )
             row["cover_path"] = str(cover_path) if cover_ok and cover_path.exists() else ""
             row["cover_downloaded"] = bool(cover_ok and cover_path.exists())
             if not cover_ok:
@@ -189,12 +231,20 @@ def _collect_one(
             row["ffprobe"] = _ffprobe(video_path)
             row["duration_seconds"] = float((row["ffprobe"].get("format") or {}).get("duration") or 0)
             frame_ok, frame_error = _extract_frame(video_path, frame_path)
+            if frame_ok and _storage_over_limit(storage_root, max_storage_bytes):
+                frame_path.unlink(missing_ok=True)
+                frame_ok = False
+                frame_error = "storage_limit_exceeded_after_frame_extract"
             row["frame_path"] = str(frame_path) if frame_ok else ""
             row["frame_extracted"] = bool(frame_ok)
             if not frame_ok:
                 row["errors"].append("frame_extract_failed: " + frame_error)
             if extract_audio:
                 audio_ok, audio_error = _extract_audio(video_path, audio_path)
+                if audio_ok and _storage_over_limit(storage_root, max_storage_bytes):
+                    audio_path.unlink(missing_ok=True)
+                    audio_ok = False
+                    audio_error = "storage_limit_exceeded_after_audio_extract"
                 row["audio_path"] = str(audio_path) if audio_ok else ""
                 row["audio_extracted"] = bool(audio_ok)
                 if not audio_ok:
@@ -202,6 +252,7 @@ def _collect_one(
         has_media = row.get("video_downloaded") and row.get("duration_seconds", 0) > 0
         has_visual = row.get("cover_downloaded") or row.get("frame_extracted")
         row["status"] = "success" if has_media and has_visual else "partial"
+        row["storage_used_bytes"] = _directory_size(storage_root) if storage_root else 0
     except Exception as exc:
         row["status"] = "failed"
         row["errors"].append(str(exc))
@@ -280,19 +331,64 @@ end tell
     return json.loads(text)
 
 
-def _download(url: str, path: Path, *, referer: str) -> tuple[bool, str]:
+def _download(
+    url: str,
+    path: Path,
+    *,
+    referer: str,
+    storage_root: Path | None = None,
+    max_storage_bytes: int = 0,
+) -> tuple[bool, str]:
     if not url:
         return False, "missing_url"
+    if _storage_over_limit(storage_root, max_storage_bytes):
+        return False, "storage_limit_reached"
     headers = {"User-Agent": DEFAULT_USER_AGENT, "Referer": referer}
+    temp_path = path.with_name(path.name + ".part")
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=90) as resp:
-            data = resp.read()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+            current = _directory_size(storage_root) if storage_root else 0
+            content_length = int(resp.headers.get("Content-Length") or 0)
+            if max_storage_bytes and content_length and current + content_length > max_storage_bytes:
+                return False, "storage_limit_would_exceed"
+            downloaded = 0
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with temp_path.open("wb") as handle:
+                while True:
+                    chunk = resp.read(1024 * 512)
+                    if not chunk:
+                        break
+                    downloaded += len(chunk)
+                    if max_storage_bytes and current + downloaded > max_storage_bytes:
+                        handle.close()
+                        temp_path.unlink(missing_ok=True)
+                        return False, "storage_limit_would_exceed"
+                    handle.write(chunk)
+        temp_path.replace(path)
         return True, ""
     except Exception as exc:
+        temp_path.unlink(missing_ok=True)
         return False, str(exc)
+
+
+def _directory_size(path: Path | None) -> int:
+    if not path or not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            try:
+                total += child.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _storage_over_limit(storage_root: Path | None, max_storage_bytes: int) -> bool:
+    return bool(storage_root and max_storage_bytes and _directory_size(storage_root) >= max_storage_bytes)
 
 
 def _ffprobe(path: Path) -> dict[str, Any]:

@@ -378,6 +378,9 @@ def research_field_coverage(account_id: str | None = None, *, dataset_id: str | 
         "program_name",
         "artist_names",
         "song_title",
+        "original_sound_owner",
+        "entity_signal",
+        "structure_confidence",
         "tags",
         "published_at",
         "duration_seconds",
@@ -386,7 +389,19 @@ def research_field_coverage(account_id: str | None = None, *, dataset_id: str | 
     label_counts = Counter(row.get("performance_label") or "unlabeled" for row in rows)
     usable_dimensions = [
         field
-        for field in ["account_id", "content_category", "hook_type", "slice_structure", "artist_names", "song_title", "tags", "published_at", "duration_seconds"]
+        for field in [
+            "account_id",
+            "content_category",
+            "hook_type",
+            "slice_structure",
+            "artist_names",
+            "song_title",
+            "original_sound_owner",
+            "entity_signal",
+            "tags",
+            "published_at",
+            "duration_seconds",
+        ]
         if field == "account_id" or coverage.get(field, {}).get("rate", 0) >= 0.5
     ]
     play_missing_count = sum(1 for row in rows if _is_play_missing(row))
@@ -412,6 +427,103 @@ def research_field_coverage(account_id: str | None = None, *, dataset_id: str | 
     }
 
 
+def backfill_semantic_features(
+    account_id: str | None = None,
+    *,
+    dataset_id: str | None = None,
+    limit: int = 0,
+    force: bool = False,
+) -> dict:
+    rows = _fetch_douyin_history_rows(account_id=account_id, dataset_id=dataset_id, limit=0)
+    cap = int(limit or 0)
+    if cap > 0:
+        rows = rows[:cap]
+    updated = 0
+    unchanged = 0
+    skipped_current = 0
+    manual_verified = 0
+    now = utc_now()
+    with connect() as conn:
+        for row in rows:
+            if _text(row.get("classification_confidence")) == "manual_verified":
+                manual_verified += 1
+            if not force and _semantic_features_current(row):
+                skipped_current += 1
+                continue
+            raw = _json(row.get("raw_json"), {})
+            api = raw.get("api") if isinstance(raw.get("api"), dict) else {}
+            classification = classify_published_work(
+                title=row.get("title") or "",
+                tags=row.get("tags") or "",
+                aweme_id=row.get("platform_item_id") or "",
+                visible_count="",
+                account_id=row.get("account_id") or account_id,
+                existing={**row, "api_music_title": api.get("music_title")},
+            )
+            raw["classification"] = classification
+            updates = {
+                "content_category": classification["content_category"],
+                "hook_type": classification["hook_type"],
+                "slice_structure": classification["slice_structure"],
+                "structure_confidence": classification.get("structure_confidence") or "",
+                "structure_evidence": classification.get("structure_evidence") or "",
+                "structure_unknown_reason": classification.get("structure_unknown_reason") or "",
+                "program_name": classification["program_name"],
+                "artist_names": classification["artist_names"],
+                "song_title": classification["song_title"],
+                "original_sound_owner": classification.get("original_sound_owner") or "",
+                "is_original_sound": int(classification.get("is_original_sound") == "1"),
+                "entity_signal": classification.get("entity_signal") or "",
+                "commercial_intent": classification["commercial_intent"],
+                "rights_risk": classification["rights_risk"],
+                "classification_confidence": classification["classification_confidence"],
+                "semantic_unknown_reason": classification.get("semantic_unknown_reason") or "",
+                "semantic_feature_version": SEMANTIC_FEATURE_VERSION,
+                "raw_json": json.dumps(raw, ensure_ascii=False),
+                "updated_at": now,
+            }
+            changed = any(_db_compare_value(row.get(key), value) != _db_compare_value(value, value) for key, value in updates.items())
+            if not changed:
+                unchanged += 1
+                continue
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            conn.execute(
+                f"UPDATE historical_capture_samples SET {assignments} WHERE id = ?",
+                [updates[key] for key in updates] + [row["id"]],
+            )
+            updated += 1
+        conn.commit()
+    return {
+        "contract_version": DOUYIN_HISTORY_VERSION,
+        "status": "ready" if rows else "empty",
+        "account_id": account_id or "all",
+        "dataset_id": _normalize_dataset_id(dataset_id) if dataset_id else "all",
+        "semantic_feature_version": SEMANTIC_FEATURE_VERSION,
+        "scanned": len(rows),
+        "updated": updated,
+        "unchanged": unchanged,
+        "skipped_current": skipped_current,
+        "manual_verified_seen": manual_verified,
+        "force": bool(force),
+        "coverage": research_field_coverage(account_id=account_id, dataset_id=dataset_id).get("coverage") if rows else {},
+        "generated_at": utc_now(),
+    }
+
+
+def _semantic_features_current(row: dict) -> bool:
+    if _text(row.get("semantic_feature_version")) != SEMANTIC_FEATURE_VERSION:
+        return False
+    if _text(row.get("slice_structure")).lower() not in {"", "unknown"} and not _text(row.get("structure_confidence")):
+        return False
+    return True
+
+
+def _db_compare_value(value: Any, fallback: Any) -> str:
+    if isinstance(fallback, int):
+        return str(int(value or 0))
+    return _text(value)
+
+
 def semantic_calibration_queue(
     account_id: str | None = None,
     *,
@@ -420,7 +532,7 @@ def semantic_calibration_queue(
     min_priority: float = 0.0,
     label: str | None = None,
     queue_type: str = "mixed",
-    strategy: str = "research_ranker_v2_2",
+    strategy: str = "research_ranker_v2_4",
     min_disagreement: float = 0.0,
 ) -> dict:
     rows = _fetch_douyin_history_rows(account_id=account_id, dataset_id=dataset_id, limit=0)
@@ -487,7 +599,7 @@ def semantic_calibration_queue(
             "min_priority": priority_floor,
             "label": label_filter or "all",
             "queue_type": selected_queue_type,
-            "strategy": strategy or "research_ranker_v2_2",
+            "strategy": strategy or "research_ranker_v2_4",
             "min_disagreement": disagreement_floor,
         },
         "count": min(len(items), cap),
@@ -1423,7 +1535,7 @@ def _douyin_clean_sample(
         aweme_id=aweme_id,
         visible_count=visible_count,
         account_id=account_id,
-        existing=work,
+        existing={**work, "api_music_title": api.get("music_title")},
     )
     quality_contract = _douyin_quality_contract(quality)
     metric_sources = {
@@ -1468,9 +1580,15 @@ def _douyin_clean_sample(
         "content_category": classification["content_category"],
         "hook_type": classification["hook_type"],
         "slice_structure": classification["slice_structure"],
+        "structure_confidence": classification.get("structure_confidence") or "",
+        "structure_evidence": classification.get("structure_evidence") or "",
+        "structure_unknown_reason": classification.get("structure_unknown_reason") or "",
         "program_name": classification["program_name"],
         "artist_names": classification["artist_names"],
-        "song_title": _text(work.get("song_title") or classification["song_title"] or api.get("music_title")),
+        "song_title": _text(classification["song_title"] or work.get("song_title") or api.get("music_title")),
+        "original_sound_owner": classification.get("original_sound_owner") or "",
+        "is_original_sound": int(classification.get("is_original_sound") == "1"),
+        "entity_signal": classification.get("entity_signal") or "",
         "tags": _join_values(tags_value),
         "commercial_intent": classification["commercial_intent"],
         "rights_risk": classification["rights_risk"],
@@ -2121,9 +2239,15 @@ def _db_row(account_id: str, dataset: dict, sample: dict, now: str) -> dict:
         "content_category": sample.get("content_category") or "",
         "hook_type": sample.get("hook_type") or "",
         "slice_structure": sample.get("slice_structure") or "",
+        "structure_confidence": sample.get("structure_confidence") or "",
+        "structure_evidence": sample.get("structure_evidence") or "",
+        "structure_unknown_reason": sample.get("structure_unknown_reason") or "",
         "program_name": sample.get("program_name") or "",
         "artist_names": sample.get("artist_names") or "",
         "song_title": sample.get("song_title") or "",
+        "original_sound_owner": sample.get("original_sound_owner") or "",
+        "is_original_sound": int(sample.get("is_original_sound") or 0),
+        "entity_signal": sample.get("entity_signal") or "",
         "tags": sample.get("tags") or "",
         "commercial_intent": sample.get("commercial_intent") or "",
         "rights_risk": sample.get("rights_risk") or "",
@@ -2266,9 +2390,15 @@ def _sample_row_contract(row: dict) -> dict:
         "content_category": row.get("content_category") or "",
         "hook_type": row.get("hook_type") or "",
         "slice_structure": row.get("slice_structure") or "",
+        "structure_confidence": row.get("structure_confidence") or "",
+        "structure_evidence": row.get("structure_evidence") or "",
+        "structure_unknown_reason": row.get("structure_unknown_reason") or "",
         "program_name": row.get("program_name") or "",
         "artist_names": row.get("artist_names") or "",
         "song_title": row.get("song_title") or "",
+        "original_sound_owner": row.get("original_sound_owner") or "",
+        "is_original_sound": bool(row.get("is_original_sound")),
+        "entity_signal": row.get("entity_signal") or "",
         "tags": row.get("tags") or "",
         "commercial_intent": row.get("commercial_intent") or "",
         "rights_risk": row.get("rights_risk") or "",
@@ -2309,10 +2439,16 @@ def _prototype_sample(row: dict) -> dict:
         "duration_seconds": float(row.get("duration_seconds") or 0),
         "hook_type": row.get("hook_type") or "",
         "slice_structure": row.get("slice_structure") or "",
+        "structure_confidence": row.get("structure_confidence") or "",
+        "structure_evidence": row.get("structure_evidence") or "",
+        "structure_unknown_reason": row.get("structure_unknown_reason") or "",
         "content_category": row.get("content_category") or "",
         "program_name": row.get("program_name") or "",
         "artist_names": row.get("artist_names") or "",
         "song_title": row.get("song_title") or "",
+        "original_sound_owner": row.get("original_sound_owner") or "",
+        "is_original_sound": bool(row.get("is_original_sound")),
+        "entity_signal": row.get("entity_signal") or "",
         "tags": row.get("tags") or "",
         "classification_confidence": row.get("classification_confidence") or "",
         "semantic_unknown_reason": row.get("semantic_unknown_reason") or "",

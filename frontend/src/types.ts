@@ -642,6 +642,134 @@ export interface RankerTuningResult {
   [key: string]: unknown;
 }
 
+export interface SemanticFeatureCoverageItem {
+  count?: number;
+  total?: number;
+  rate?: number;
+  sample_count?: number;
+  [key: string]: unknown;
+}
+
+export interface SemanticFeatureExperiment {
+  contract_version?: string;
+  status?: string;
+  account_id?: string;
+  strategy?: string;
+  sample_count?: number;
+  k?: number;
+  holdout_policy?: string;
+  coverage?: Record<string, SemanticFeatureCoverageItem>;
+  base_metrics?: BacktestMetrics;
+  strategy_comparison?: Record<string, Record<string, unknown>>;
+  field_mask_ablation?: Record<string, unknown>[];
+  diagnosis?: {
+    promotion_gap_to_1_85?: number;
+    strongest_positive_evidence_fields?: Record<string, unknown>[];
+    possibly_noisy_fields?: Record<string, unknown>[];
+    low_coverage_core_fields?: string[];
+    recommendation?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface SemanticFeatureBackfillResult {
+  contract_version?: string;
+  status?: string;
+  semantic_feature_version?: string;
+  scanned?: number;
+  updated?: number;
+  unchanged?: number;
+  skipped_current?: number;
+  manual_verified_seen?: number;
+  coverage?: Record<string, SemanticFeatureCoverageItem>;
+  [key: string]: unknown;
+}
+
+export interface SliceStructureEvaluation {
+  contract_version?: string;
+  evaluator_version?: string;
+  status?: string;
+  sample_count?: number;
+  evaluated_count?: number;
+  coverage?: {
+    total?: number;
+    current_known_rate?: number;
+    evaluator_known_rate?: number;
+    trusted_rate?: number;
+    high_confidence_rate?: number;
+    agreement_rate?: number;
+    conflict_rate?: number;
+    conflict_count?: number;
+    [key: string]: unknown;
+  };
+  structure_distribution?: Array<Record<string, unknown>>;
+  issues?: Array<Record<string, unknown>>;
+  review_queue?: Array<Record<string, unknown>>;
+  recommendations?: string[];
+  [key: string]: unknown;
+}
+
+export interface MultimodalCollectionPlan {
+  contract_version?: string;
+  validation_version?: string;
+  plan_type?: string;
+  status?: string;
+  sample_count?: number;
+  candidate_count?: number;
+  plan_path?: string;
+  next_command?: string;
+  summary?: Record<string, unknown>;
+  samples?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface MultimodalValidationResult {
+  contract_version?: string;
+  validation_version?: string;
+  status?: string;
+  validation_mode?: string;
+  sample_count?: number;
+  evaluated_count?: number;
+  asset_readiness?: {
+    coverage?: Record<string, { count?: number; total?: number; rate?: number; [key: string]: unknown }>;
+    by_label?: Record<string, Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+  proxy_signal_experiment?: {
+    baseline?: Record<string, unknown>;
+    multimodal_proxy?: Record<string, unknown>;
+    lift_delta?: number;
+    high_hit_delta?: number;
+    low_avoidance_delta?: number;
+    feature_group_ablation?: Array<Record<string, unknown>>;
+    useful_signal_groups?: string[];
+    [key: string]: unknown;
+  };
+  promotion_gate?: Record<string, unknown>;
+  review_queue?: Array<Record<string, unknown>>;
+  recommendations?: string[];
+  [key: string]: unknown;
+}
+
+export interface MultimodalFeatureExperimentResult {
+  contract_version?: string;
+  validation_version?: string;
+  feature_version?: string;
+  status?: string;
+  validation_mode?: string;
+  sample_count?: number;
+  feature_ready_count?: number;
+  audio_ready_count?: number;
+  visual_ready_count?: number;
+  feature_coverage?: Record<string, unknown>;
+  strategy_comparison?: Record<string, Record<string, unknown>>;
+  feature_diagnostics?: Record<string, unknown>;
+  promotion_gate?: Record<string, unknown>;
+  recommendations?: string[];
+  [key: string]: unknown;
+}
+
 export interface PrototypeExample {
   title?: string;
   views?: number;

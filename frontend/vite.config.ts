@@ -20,6 +20,7 @@ export default defineConfig({
       "/metrics": "http://127.0.0.1:8000",
       "/platform": "http://127.0.0.1:8000",
       "/accounts": "http://127.0.0.1:8000",
+      "/learning": "http://127.0.0.1:8000",
       "/training-samples": "http://127.0.0.1:8000",
       "/feedback": "http://127.0.0.1:8000"
     }

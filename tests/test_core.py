@@ -4,9 +4,11 @@ import csv
 import io
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
+import wave
 import zipfile
 from pathlib import Path
 from html import escape
@@ -33,9 +35,20 @@ from dso.feedback.douyin_auth import complete_douyin_qr_login, douyin_oauth_stat
 from dso.feedback.importer import account_baselines, account_insights, import_metrics, list_training_samples
 from dso.feedback.platform import create_platform_mapping, map_platform_metric_row
 from dso.feedback.reward import compute_reward_proxy, feedback_signal_rates
-from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning
+from dso.learning.backtest import (
+    RESEARCH_RANKER_V23_STRATEGY,
+    RESEARCH_RANKER_V24_STRATEGY,
+    _apply_v23_diversity,
+    _score_v22_from_components,
+    _v24_reliable_signal_row,
+    backtest_rule_ranker,
+    list_backtest_reports,
+    run_ranker_tuning,
+    semantic_feature_experiment,
+)
 from dso.learning.historical_samples import (
     douyin_history_baselines,
+    backfill_semantic_features,
     import_douyin_history,
     import_historical_samples,
     historical_sample_summary,
@@ -48,7 +61,14 @@ from dso.learning.historical_samples import (
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
+from dso.learning.multimodal_validation import (
+    build_multimodal_collection_plan,
+    collect_multimodal_assets,
+    run_multimodal_feature_experiment,
+    run_multimodal_validation,
+)
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.slice_structure_evaluator import evaluate_slice_structure, evaluate_slice_structure_row
 from dso.media.ffmpeg import probe_video
 from dso.media.ingest import ingest_video
 from dso.quality.insights import _has_repetition_noise, quality_insights
@@ -78,6 +98,8 @@ from dso.versions import (
     SCORER_VERSION,
     SEGMENTER_VERSION,
     SEMANTIC_FEATURE_VERSION,
+    MULTIMODAL_VALIDATION_VERSION,
+    MULTIMODAL_FEATURE_VERSION,
     DOUYIN_HISTORY_VERSION,
 )
 
@@ -2369,10 +2391,10 @@ class CoreWorkflowTest(unittest.TestCase):
             min_priority=1,
             label="high",
             queue_type="mixed",
-            strategy="research_ranker_v2_2",
+            strategy=RESEARCH_RANKER_V24_STRATEGY,
         )
         self.assertEqual(filtered["filters"]["label"], "high")
-        self.assertEqual(filtered["filters"]["strategy"], "research_ranker_v2_2")
+        self.assertEqual(filtered["filters"]["strategy"], RESEARCH_RANKER_V24_STRATEGY)
         self.assertEqual(filtered["samples"][0]["id"], "hist_calibrate_1")
 
         updated = update_historical_sample_labels(
@@ -2432,10 +2454,12 @@ class CoreWorkflowTest(unittest.TestCase):
                 collected_at="2026-06-28T00:00:00+00:00",
             )
 
-        report = backtest_rule_ranker(account_id="main", k=5, strategy="research_ranker_v2_2", holdout_policy="time")
+        report = backtest_rule_ranker(account_id="main", k=5, strategy=RESEARCH_RANKER_V24_STRATEGY, holdout_policy="time")
 
         self.assertIn("strategy_comparison", report["metrics"])
-        self.assertEqual(report["metrics"]["strategy"], "research_ranker_v2_2")
+        self.assertEqual(report["metrics"]["strategy"], RESEARCH_RANKER_V24_STRATEGY)
+        self.assertIn(RESEARCH_RANKER_V24_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn("research_ranker_v2_3", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2_2", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2_1", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2", report["metrics"]["strategy_comparison"])
@@ -2446,18 +2470,351 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertIn("baseline_gap", report["metrics"])
         self.assertIn("semantic_gap_analysis", report["metrics"])
         self.assertIn("diagnostic_samples", report["metrics"])
+        self.assertIn("diversity_summary", report["metrics"])
         self.assertIn("leakage_guard_summary", report["metrics"])
         self.assertIn("next_calibration_queue", report["metrics"])
         self.assertIn("calibration_summary", report["metrics"])
-        self.assertEqual(report["metrics"]["promotion_gate"]["strategy"], "research_ranker_v2_2")
+        self.assertEqual(report["metrics"]["promotion_gate"]["strategy"], RESEARCH_RANKER_V24_STRATEGY)
         self.assertEqual(report["metrics"]["holdout_policy_key"], "time")
         self.assertTrue(report["top_rows"])
+        self.assertIn("v24_signal_trust", report["top_rows"][0]["component_scores"])
 
         tuning = run_ranker_tuning(account_id="main", k=5, holdout_policy="time", max_trials=2)
-        self.assertEqual(tuning["strategy"], "research_ranker_v2_2")
+        self.assertEqual(tuning["strategy"], RESEARCH_RANKER_V24_STRATEGY)
         self.assertTrue(tuning["trials"])
         self.assertIn("weight_config", tuning["best"])
         self.assertIn("promotion_gate", tuning)
+
+        experiment = semantic_feature_experiment(account_id="main", k=5, holdout_policy="time", include_field_masks=False)
+        self.assertEqual(experiment["status"], "ready")
+        self.assertEqual(experiment["strategy"], RESEARCH_RANKER_V24_STRATEGY)
+        self.assertIn("coverage", experiment)
+        self.assertIn("base_metrics", experiment)
+        self.assertIn("diagnosis", experiment)
+        self.assertEqual(experiment["field_mask_ablation"], [])
+
+    def test_research_ranker_v24_quarantines_weak_semantic_signals(self) -> None:
+        gated = _v24_reliable_signal_row(
+            {
+                "content_category": "performance_clip",
+                "hook_type": "high_note",
+                "slice_structure": "setup_to_payoff",
+                "structure_confidence": "medium",
+                "structure_evidence": "副歌后爆点",
+                "artist_names": "Grace",
+                "song_title": "Grace 创作的原声",
+                "original_sound_owner": "Grace",
+                "is_original_sound": 1,
+                "entity_signal": "Grace|原创",
+                "classification_confidence": "medium",
+            }
+        )
+
+        self.assertEqual(gated["hook_type"], "unknown")
+        self.assertEqual(gated["slice_structure"], "unknown")
+        self.assertEqual(gated["song_title"], "")
+        self.assertEqual(gated["artist_names"], "Grace")
+        self.assertEqual(gated["original_sound_owner"], "Grace")
+        self.assertEqual(gated["entity_signal"], "Grace|原创")
+
+        manual = _v24_reliable_signal_row(
+            {
+                "hook_type": "high_note",
+                "slice_structure": "setup_to_payoff",
+                "song_title": "真实歌名",
+                "classification_confidence": "manual_verified",
+            }
+        )
+
+        self.assertEqual(manual["hook_type"], "high_note")
+        self.assertEqual(manual["slice_structure"], "setup_to_payoff")
+        self.assertEqual(manual["song_title"], "真实歌名")
+
+    def test_slice_structure_evaluator_builds_review_queue(self) -> None:
+        _insert_historical_sample(
+            "hist_structure_eval_1",
+            dataset_id="tianci_20260628",
+            item_id="hist_structure_eval_1",
+            title="一开口高音爆发全场尖叫 Grace 舞台封神",
+            reward_proxy=96,
+            normalized_reward=98,
+            performance_label="high",
+            content_category="performance_clip",
+            hook_type="high_note",
+            slice_structure="unknown",
+            classification_confidence="medium",
+        )
+        _insert_historical_sample(
+            "hist_structure_eval_2",
+            dataset_id="tianci_20260628",
+            item_id="hist_structure_eval_2",
+            title="日常记录彩排过程 vlog",
+            reward_proxy=22,
+            normalized_reward=18,
+            performance_label="low",
+            content_category="behind_the_scenes",
+            hook_type="daily_moment",
+            slice_structure="climax_first",
+            classification_confidence="medium",
+        )
+
+        row_eval = evaluate_slice_structure_row(
+            {
+                "id": "row_only",
+                "title": "一开口高音爆发",
+                "slice_structure": "unknown",
+                "classification_confidence": "medium",
+            }
+        )
+        report = evaluate_slice_structure(account_id="main", dataset_id="tianci_20260628")
+
+        self.assertEqual(row_eval["suggested_structure"], "climax_first")
+        self.assertEqual(report["status"], "ready")
+        self.assertGreaterEqual(report["coverage"]["evaluator_known_count"], 2)
+        self.assertTrue(any(item["status"] == "suggested_update" for item in report["review_queue"]))
+        self.assertTrue(any(item["status"] == "conflict_review" for item in report["review_queue"]))
+        self.assertTrue(report["recommendations"])
+
+    def test_multimodal_validation_builds_collection_plan_and_asset_gate(self) -> None:
+        ready_id = "7655575210669722907"
+        missing_id = "7656046228765994171"
+        low_id = "7650000000000000000"
+        _insert_historical_sample(
+            "hist_mm_ready",
+            dataset_id="tianci_20260628",
+            item_id=ready_id,
+            title="一开口高音爆发全场尖叫 舞台封神",
+            reward_proxy=96,
+            normalized_reward=98,
+            performance_label="high",
+            content_category="performance_highlight",
+            hook_type="high_note",
+            slice_structure="climax_first",
+            tags="高音|舞台|全场",
+        )
+        _insert_historical_sample(
+            "hist_mm_missing",
+            dataset_id="tianci_20260628",
+            item_id=missing_id,
+            title="副歌合唱观众泪目 这段值得切",
+            reward_proxy=86,
+            normalized_reward=88,
+            performance_label="high",
+            content_category="performance_highlight",
+            hook_type="chorus",
+            slice_structure="chorus_first",
+            tags="副歌|合唱|观众",
+        )
+        _insert_historical_sample(
+            "hist_mm_low",
+            dataset_id="tianci_20260628",
+            item_id=low_id,
+            title="王力宏现场震全场 低互动舞台片段",
+            reward_proxy=12,
+            normalized_reward=16,
+            performance_label="low",
+            content_category="performance_highlight",
+            hook_type="live_stage",
+            slice_structure="linear",
+            tags="王力宏|现场|舞台",
+        )
+        asset_root = self.root / "data" / "douyin_media_assets" / "main" / "beta_d1"
+        for folder, suffix in [("videos", ".mp4"), ("covers", ".jpg"), ("audio", ".wav")]:
+            target = asset_root / folder / f"{ready_id}{suffix}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"asset")
+
+        plan = build_multimodal_collection_plan(account_id="main", dataset_id="tianci_20260628", limit=2)
+        validation = run_multimodal_validation(account_id="main", dataset_id="tianci_20260628", limit=10, min_samples=1, min_asset_coverage=0.8)
+        dry_run = collect_multimodal_assets(plan_path=plan["plan_path"], limit=1, dry_run=True)
+
+        self.assertEqual(plan["validation_version"], MULTIMODAL_VALIDATION_VERSION)
+        self.assertTrue(Path(plan["plan_path"]).exists())
+        self.assertEqual(plan["sample_count"], 2)
+        self.assertTrue(any(item["aweme_id"] == missing_id for item in plan["samples"]))
+        self.assertEqual(validation["validation_version"], MULTIMODAL_VALIDATION_VERSION)
+        self.assertIn("asset_readiness", validation)
+        self.assertLess(validation["asset_readiness"]["coverage"]["ready_for_multimodal"]["rate"], 0.8)
+        self.assertEqual(validation["promotion_gate"]["decision"], "collect_assets_first")
+        self.assertEqual(dry_run["collection_mode"], "dry_run")
+        self.assertEqual(dry_run["planned"], 1)
+
+    def test_multimodal_feature_experiment_extracts_real_audio_features(self) -> None:
+        high_id = "7651111111111111111"
+        low_id = "7651111111111111112"
+        mid_id = "7651111111111111113"
+        _insert_historical_sample(
+            "hist_mm_feature_high",
+            dataset_id="tianci_20260628",
+            item_id=high_id,
+            title="高音爆发 全场尖叫 舞台高光",
+            reward_proxy=96,
+            normalized_reward=96,
+            performance_label="high",
+            content_category="performance_highlight",
+            hook_type="high_note",
+            slice_structure="climax_first",
+            classification_confidence="medium",
+        )
+        _insert_historical_sample(
+            "hist_mm_feature_low",
+            dataset_id="tianci_20260628",
+            item_id=low_id,
+            title="平铺直叙 低互动片段",
+            reward_proxy=12,
+            normalized_reward=12,
+            performance_label="low",
+            content_category="performance_highlight",
+            hook_type="live_stage",
+            slice_structure="linear",
+            classification_confidence="medium",
+        )
+        _insert_historical_sample(
+            "hist_mm_feature_mid",
+            dataset_id="tianci_20260628",
+            item_id=mid_id,
+            title="副歌合唱 观众回应",
+            reward_proxy=52,
+            normalized_reward=52,
+            performance_label="mid",
+            content_category="performance_highlight",
+            hook_type="chorus",
+            slice_structure="chorus_first",
+            classification_confidence="medium",
+        )
+        audio_root = self.root / "data" / "douyin_media_assets" / "main" / "beta_d2" / "audio"
+        _write_test_wav(audio_root / f"{high_id}.wav", amplitudes=[1800, 6000, 13000, 22000])
+        _write_test_wav(audio_root / f"{low_id}.wav", amplitudes=[120, 160, 120, 160])
+        _write_test_wav(audio_root / f"{mid_id}.wav", amplitudes=[900, 1300, 1600, 1400])
+
+        result = run_multimodal_feature_experiment(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=10,
+            k=1,
+            min_feature_samples=1,
+            audio_window_seconds=2.0,
+            force=True,
+        )
+
+        diagnostics = result["feature_diagnostics"]
+        self.assertEqual(result["feature_version"], MULTIMODAL_FEATURE_VERSION)
+        self.assertEqual(result["feature_ready_count"], 3)
+        self.assertEqual(result["audio_ready_count"], 3)
+        self.assertIn("semantic_plus_audio", result["strategy_comparison"])
+        self.assertIn("semantic_plus_audio_visual", result["strategy_comparison"])
+        self.assertIn("promotion_gate", result)
+        self.assertGreater(
+            diagnostics["by_label"]["high"]["avg_audio_score"],
+            diagnostics["by_label"]["low"]["avg_audio_score"],
+        )
+
+    def test_research_ranker_v22_uses_semantic_weight_and_positive_evidence(self) -> None:
+        base_components = {
+            "account_baseline_position": 60.0,
+            "high_similarity": 0.0,
+            "low_interaction_risk": 0.0,
+            "prototype_fit": 0.0,
+            "semantic_label_trust": 50.0,
+            "long_tail_novelty": 35.0,
+            "best_similarity": 0.8,
+        }
+
+        unweighted = _score_v22_from_components(
+            base_components,
+            config={
+                "semantic_strong_weight": 1.0,
+                "semantic_floor_weight": 1.0,
+                "high_similarity_weight": 0.0,
+                "low_risk_weight": 0.0,
+                "prototype_weight": 0.0,
+            },
+        )
+        damped = _score_v22_from_components(
+            base_components,
+            config={
+                "semantic_strong_weight": 0.5,
+                "semantic_floor_weight": 1.0,
+                "high_similarity_weight": 0.0,
+                "low_risk_weight": 0.0,
+                "prototype_weight": 0.0,
+            },
+        )
+        positive = _score_v22_from_components(
+            {
+                **base_components,
+                "account_baseline_position": 50.0,
+                "high_similarity": 82.0,
+                "prototype_fit": 45.0,
+            }
+        )
+
+        self.assertLess(damped, unweighted)
+        self.assertGreater(positive, 50.0)
+
+    def test_research_ranker_v22_gates_low_interaction_risk(self) -> None:
+        strong_evidence = {
+            "account_baseline_position": 50.0,
+            "high_similarity": 72.0,
+            "low_interaction_risk": 40.0,
+            "prototype_fit": 0.0,
+            "semantic_label_trust": 50.0,
+            "long_tail_novelty": 35.0,
+            "best_similarity": 0.8,
+        }
+        risky = {
+            **strong_evidence,
+            "high_similarity": 20.0,
+            "low_interaction_risk": 95.0,
+        }
+
+        self.assertGreater(_score_v22_from_components(strong_evidence), 50.0)
+        self.assertLess(_score_v22_from_components(risky), _score_v22_from_components(strong_evidence))
+
+    def test_research_ranker_v23_penalizes_near_duplicate_topk(self) -> None:
+        rows = [
+            {
+                "training_sample_id": "dup_a",
+                "title": "王铮亮 张远《故乡的云》直拍 #声生不息",
+                "song_title": "故乡的云",
+                "artist_names": "王铮亮|张远",
+                "content_category": "performance_clip",
+                "strategy_scores": {RESEARCH_RANKER_V23_STRATEGY: 66.0},
+                "component_scores": {},
+            },
+            {
+                "training_sample_id": "dup_b",
+                "title": "王铮亮 张远《故乡的云》直拍 #声生不息",
+                "song_title": "故乡的云",
+                "artist_names": "王铮亮|张远",
+                "content_category": "performance_clip",
+                "strategy_scores": {RESEARCH_RANKER_V23_STRATEGY: 65.5},
+                "component_scores": {},
+            },
+            {
+                "training_sample_id": "unique",
+                "title": "单依纯《橄榄树》舞台评价",
+                "song_title": "橄榄树",
+                "artist_names": "单依纯",
+                "content_category": "judge_comment",
+                "strategy_scores": {RESEARCH_RANKER_V23_STRATEGY: 64.0},
+                "component_scores": {},
+            },
+        ]
+
+        adjusted = _apply_v23_diversity(rows)
+        scores = {
+            row["training_sample_id"]: row["strategy_scores"][RESEARCH_RANKER_V23_STRATEGY]
+            for row in adjusted
+        }
+        penalties = {
+            row["training_sample_id"]: row["component_scores"].get("v23_diversity_penalty", 0)
+            for row in adjusted
+        }
+
+        self.assertEqual(penalties["dup_a"], 0)
+        self.assertGreater(penalties["dup_b"], 0)
+        self.assertLess(scores["dup_b"], scores["unique"])
 
     def test_douyin_research_classification_filters_noisy_artist_tags(self) -> None:
         classified = classify_published_work(
@@ -2494,6 +2851,22 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(classified["hook_type"], "celebrity_pairing")
         self.assertIn("单依纯", classified["artist_names"])
         self.assertIn("汪苏泷", classified["artist_names"])
+
+    def test_douyin_research_classification_outputs_structure_evidence_and_original_sound_owner(self) -> None:
+        classified = classify_published_work(
+            title="一开口高音炸场！侯明昊《笼》舞台直拍",
+            tags=["#侯明昊", "#笼"],
+            aweme_id="structure_1001",
+            existing={"music_title": "@歌手2026创作的原声"},
+        )
+
+        self.assertEqual(classified["slice_structure"], "climax_first")
+        self.assertEqual(classified["structure_confidence"], "high")
+        self.assertEqual(classified["structure_evidence"], "一开口")
+        self.assertEqual(classified["song_title"], "笼")
+        self.assertEqual(classified["original_sound_owner"], "歌手2026")
+        self.assertEqual(classified["is_original_sound"], "1")
+        self.assertEqual(classified["entity_signal"], "artist:侯明昊")
 
     def test_douyin_clean_history_import_backfills_research_semantics(self) -> None:
         clean_dir = self.root / "data" / "douyin_capture" / "geshou2026" / "clean_20260628T010000_appleevents_api"
@@ -2539,6 +2912,9 @@ class CoreWorkflowTest(unittest.TestCase):
         sample = listed["samples"][0]
         self.assertEqual(sample["content_category"], "performance_clip")
         self.assertEqual(sample["hook_type"], "high_note")
+        self.assertEqual(sample["slice_structure"], "pure_highlight")
+        self.assertEqual(sample["structure_confidence"], "medium")
+        self.assertEqual(sample["structure_evidence"], "副歌")
         self.assertEqual(sample["program_name"], "歌手2026")
         self.assertIn("万妮达", sample["artist_names"])
         self.assertEqual(sample["semantic_feature_version"], SEMANTIC_FEATURE_VERSION)
@@ -2548,6 +2924,37 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(coverage["coverage"]["content_category"]["rate"], 1.0)
         self.assertEqual(coverage["coverage"]["hook_type"]["rate"], 1.0)
         self.assertIn("artist_names", coverage["usable_dimensions"])
+
+    def test_semantic_features_backfill_updates_unknown_structure_without_manual_label(self) -> None:
+        _insert_historical_sample(
+            "hist_sem_backfill_1",
+            dataset_id="geshou2026_20260628",
+            item_id="hist_sem_backfill_1",
+            title="一开口高音炸场！侯明昊《笼》舞台直拍",
+            reward_proxy=80,
+            normalized_reward=90,
+            performance_label="high",
+            content_category="unknown",
+            hook_type="unknown",
+            slice_structure="unknown",
+            artist_names="",
+            song_title="@歌手2026创作的原声",
+            tags="侯明昊|笼",
+            classification_confidence="medium",
+        )
+
+        result = backfill_semantic_features(account_id="main", dataset_id="geshou2026_20260628", force=True)
+        sample = list_historical_samples("main", dataset_id="geshou2026_20260628", limit=1)["samples"][0]
+
+        self.assertEqual(result["semantic_feature_version"], SEMANTIC_FEATURE_VERSION)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(sample["slice_structure"], "climax_first")
+        self.assertEqual(sample["structure_confidence"], "high")
+        self.assertEqual(sample["structure_evidence"], "一开口")
+        self.assertEqual(sample["song_title"], "笼")
+        self.assertEqual(sample["original_sound_owner"], "歌手2026")
+        self.assertTrue(sample["is_original_sound"])
+        self.assertEqual(sample["entity_signal"], "artist:侯明昊")
 
     def test_douyin_clean_history_import_labels_baselines_and_prototypes(self) -> None:
         clean_dir = self.root / "data" / "douyin_capture" / "tianci" / "clean_20260628T000000_appleevents_api"
@@ -3220,6 +3627,22 @@ def _insert_historical_sample(
             ],
         )
         conn.commit()
+
+
+def _write_test_wav(path: Path, amplitudes: list[int], *, sample_rate: int = 16000, seconds_per_level: float = 0.5) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames: list[bytes] = []
+    samples_per_level = max(1, int(sample_rate * seconds_per_level))
+    for amp in amplitudes:
+        amplitude = max(0, min(32000, int(amp)))
+        for index in range(samples_per_level):
+            value = amplitude if index % 2 == 0 else -amplitude
+            frames.append(struct.pack("<h", value))
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"".join(frames))
 
 
 def _write_xlsx_rows(path: Path, sheet_name: str, rows: list[list[object]]) -> None:
