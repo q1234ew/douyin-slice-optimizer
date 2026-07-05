@@ -90,6 +90,8 @@ PY
 }
 
 install_system_cuda() {
+  export_proxy
+
   if command -v nvcc >/dev/null 2>&1; then
     nvcc --version
     return 0
@@ -110,12 +112,16 @@ install_system_cuda() {
   repo_tag="ubuntu${VERSION_ID//./}"
   local keyring="/tmp/cuda-keyring_1.1-1_all.deb"
   local url="https://developer.download.nvidia.com/compute/cuda/repos/${repo_tag}/x86_64/cuda-keyring_1.1-1_all.deb"
+  local sudo_cmd=(sudo)
+  if [[ -n "${PROXY_URL}" ]]; then
+    sudo_cmd=(sudo --preserve-env=HTTP_PROXY,HTTPS_PROXY,http_proxy,https_proxy)
+  fi
 
   echo "Installing NVIDIA CUDA Toolkit 12.8. This requires your sudo password."
   wget -O "${keyring}" "${url}"
-  sudo dpkg -i "${keyring}"
-  sudo apt-get update
-  sudo apt-get install -y cuda-toolkit-12-8
+  "${sudo_cmd[@]}" dpkg -i "${keyring}"
+  "${sudo_cmd[@]}" apt-get update
+  "${sudo_cmd[@]}" apt-get install -y cuda-toolkit-12-8
 }
 
 install_gptq() {
