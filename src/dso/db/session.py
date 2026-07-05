@@ -145,6 +145,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
     _ensure_historical_capture_item_unique(conn)
     _ensure_prototype_bank_dataset_schema(conn)
+    _ensure_embedding_records_schema(conn)
 
 
 def _add_columns(conn: sqlite3.Connection, table: str, columns: Mapping[str, str]) -> None:
@@ -214,6 +215,37 @@ def _ensure_historical_capture_item_unique(conn: sqlite3.Connection) -> None:
         ON historical_capture_samples(account_id, platform, platform_item_id)
         WHERE platform_item_id != ''
         """
+    )
+
+
+def _ensure_embedding_records_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS embedding_records (
+          id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          dataset_id TEXT NOT NULL DEFAULT '',
+          platform_item_id TEXT NOT NULL DEFAULT '',
+          modality TEXT NOT NULL,
+          model_name TEXT NOT NULL,
+          model_version TEXT NOT NULL DEFAULT '',
+          vector_path TEXT NOT NULL DEFAULT '',
+          vector_dim INTEGER NOT NULL DEFAULT 0,
+          source_hash TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'ready',
+          error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embedding_records_entity ON embedding_records(entity_type, entity_id, modality, model_name, source_hash)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embedding_records_scope ON embedding_records(entity_type, account_id, dataset_id, modality, status)"
     )
 
 
@@ -401,6 +433,25 @@ CREATE TABLE IF NOT EXISTS clip_embeddings (
   vector_dim INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   FOREIGN KEY(candidate_segment_id) REFERENCES candidate_segments(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS embedding_records (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  account_id TEXT NOT NULL DEFAULT '',
+  dataset_id TEXT NOT NULL DEFAULT '',
+  platform_item_id TEXT NOT NULL DEFAULT '',
+  modality TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  model_version TEXT NOT NULL DEFAULT '',
+  vector_path TEXT NOT NULL DEFAULT '',
+  vector_dim INTEGER NOT NULL DEFAULT 0,
+  source_hash TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS history_matches (
@@ -848,6 +899,8 @@ CREATE TABLE IF NOT EXISTS prototype_bank_items (
 
 CREATE INDEX IF NOT EXISTS idx_candidate_segments_video ON candidate_segments(source_video_id);
 CREATE INDEX IF NOT EXISTS idx_clip_embeddings_candidate ON clip_embeddings(candidate_segment_id, embedding_type, model_name);
+CREATE INDEX IF NOT EXISTS idx_embedding_records_entity ON embedding_records(entity_type, entity_id, modality, model_name, source_hash);
+CREATE INDEX IF NOT EXISTS idx_embedding_records_scope ON embedding_records(entity_type, account_id, dataset_id, modality, status);
 CREATE INDEX IF NOT EXISTS idx_slice_scores_final ON slice_scores(final_score DESC);
 CREATE INDEX IF NOT EXISTS idx_rights_asset ON rights_clearance(asset_type, asset_id);
 CREATE INDEX IF NOT EXISTS idx_metric_snapshots_candidate ON metric_snapshots(candidate_segment_id);

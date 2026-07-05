@@ -276,6 +276,10 @@
                 <span v-if="state.busyKey === 'multimodal-feature'" class="spinner"></span>
                 <Icon v-else name="audio-lines" />真实特征实验
               </button>
+              <button id="qwen-embedding-btn" type="button" :disabled="state.busyKey === 'qwen-embedding'" @click="withBusy('qwen-embedding', runQwenEmbeddingResearch)">
+                <span v-if="state.busyKey === 'qwen-embedding'" class="spinner"></span>
+                <Icon v-else name="search-code" />Qwen 索引/回测
+              </button>
             </div>
             <div id="learning-result" class="meta" style="margin-top:10px;">{{ state.learningResult }}</div>
             <div class="detail-metrics" style="margin-top:8px;">
@@ -312,6 +316,10 @@
             <div v-if="multimodalFeatureText" class="quality-row" style="margin-top:8px;">
               <span class="status" :class="multimodalFeatureClass">Beta-D-2</span>
               <span>{{ multimodalFeatureText }}</span>
+            </div>
+            <div v-if="qwenEmbeddingText" class="quality-row" style="margin-top:8px;">
+              <span class="status" :class="qwenEmbeddingClass">Beta-D-3</span>
+              <span>{{ qwenEmbeddingText }}</span>
             </div>
             <div class="calibration-toolbar">
               <div>
@@ -558,6 +566,7 @@ const {
   buildMultimodalCollectionPlan,
   runMultimodalValidation,
   runMultimodalFeatureExperiment,
+  runQwenEmbeddingResearch,
   loadSemanticCalibrationQueue,
   saveCalibrationLabels,
   reopenCalibrationSample,
@@ -769,6 +778,8 @@ const sliceStructureEvaluationClass = computed(() => {
 const multimodalCollectionPlan = computed<Record<string, unknown>>(() => state.multimodalCollectionPlan || {});
 const multimodalValidation = computed<Record<string, unknown>>(() => state.multimodalValidation || {});
 const multimodalFeatureExperiment = computed<Record<string, unknown>>(() => state.multimodalFeatureExperiment || {});
+const qwenEmbeddingBuild = computed<Record<string, unknown>>(() => state.qwenEmbeddingBuild || {});
+const qwenEmbeddingEvidence = computed<Record<string, unknown>>(() => state.qwenEmbeddingEvidence || {});
 const multimodalPlanText = computed(() => {
   const plan = multimodalCollectionPlan.value;
   if (!Object.keys(plan).length) return "";
@@ -812,6 +823,30 @@ const multimodalFeatureClass = computed(() => {
   if (Boolean(gate.passed)) return "ok";
   const decision = String(gate.decision || "");
   return decision === "collect_or_extract_more_features" ? "warn" : "neutral";
+});
+const qwenEmbeddingText = computed(() => {
+  const build = qwenEmbeddingBuild.value;
+  const evidence = qwenEmbeddingEvidence.value;
+  if (!Object.keys(build).length && !Object.keys(evidence).length) return "";
+  const coverage = build.coverage && typeof build.coverage === "object" ? build.coverage as Record<string, unknown> : {};
+  const summary = evidence.similar_evidence_summary && typeof evidence.similar_evidence_summary === "object"
+    ? evidence.similar_evidence_summary as Record<string, unknown>
+    : {};
+  const latest = latestMetrics.value.embedding_strategy_gap && typeof latestMetrics.value.embedding_strategy_gap === "object"
+    ? latestMetrics.value.embedding_strategy_gap as Record<string, unknown>
+    : {};
+  const selected = latest.selected && typeof latest.selected === "object" ? latest.selected as Record<string, unknown> : {};
+  const delta = Number(selected.topk_lift_delta_vs_v2_4 || 0);
+  return `样本 ${countLabel(Number(build.sample_count || evidence.sample_count || 0))} / ready ${percent(Number(coverage.ready_rate || 0))} / 证据 ${countLabel(Number(summary.sample_count || 0))} / 较 v2.4 ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`;
+});
+const qwenEmbeddingClass = computed(() => {
+  const latest = latestMetrics.value.embedding_strategy_gap && typeof latestMetrics.value.embedding_strategy_gap === "object"
+    ? latestMetrics.value.embedding_strategy_gap as Record<string, unknown>
+    : {};
+  const selected = latest.selected && typeof latest.selected === "object" ? latest.selected as Record<string, unknown> : {};
+  if (Boolean(selected.passed_research_gate)) return "ok";
+  const buildStatus = String(qwenEmbeddingBuild.value.status || "");
+  return buildStatus === "service_unavailable" ? "warn" : "neutral";
 });
 const calibrationQueueText = computed(() => {
   const total = Number(calibrationQueue.value.total_candidates ?? calibrationQueue.value.count ?? calibrationSamples.value.length);
@@ -882,7 +917,7 @@ const strategyComparison = computed<Record<string, Record<string, unknown>>>(() 
   const value = latestMetrics.value.strategy_comparison;
   return value && typeof value === "object" ? value as Record<string, Record<string, unknown>> : {};
 });
-const backtestStrategyRows = computed(() => ["research_ranker_v2_4", "research_ranker_v2_3", "research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
+const backtestStrategyRows = computed(() => ["ranker_plus_text_embedding", "ranker_plus_visual_embedding", "ranker_plus_text_visual_embedding", "research_ranker_v2_4", "research_ranker_v2_3", "research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
   const item = strategyComparison.value[strategy] || {};
   return {
     strategy,
@@ -1032,6 +1067,9 @@ function sampleSourceLabel(value: string): string {
 
 function strategyLabel(value: string): string {
   const labels: Record<string, string> = {
+    ranker_plus_text_embedding: "Qwen 文本证据",
+    ranker_plus_visual_embedding: "Qwen 视觉证据",
+    ranker_plus_text_visual_embedding: "Qwen 文视证据",
     research_ranker_v2_4: "历史证据 v2.4",
     research_ranker_v2_3: "历史证据 v2.3",
     research_ranker_v2_2: "历史证据 v2.2",

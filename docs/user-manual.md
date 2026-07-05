@@ -429,7 +429,10 @@ dso douyin-history-import \
 | 运行回测 | 对比当前规则、语义基线和历史证据排序器 |
 | 刷新队列 | 获取高影响、低可信或缺关键字段样本 |
 | 保存人工标签 | 人工修正类别、Hook、结构、艺人、歌名和标签 |
+| 重新打开校准 | 将最近已保存的样本重新放回待校准队列 |
 | 重建标签与回测 | 重新计算互动热度标签并运行回测 |
+
+保存人工标签后，样本会被标记为 `manual_verified`，因此会从“语义校准队列”的待处理列表中消失。这是已完成状态，不是刷新失败。页面会在“最近已保存”里保留最近样本；如果误保存或需要二次校准，点击“重新打开校准”，样本会恢复为低置信校准样本并重新出现在队列里。
 
 常用 CLI：
 
@@ -438,6 +441,7 @@ dso memory-build --account main --force
 dso interest-clock --account main --rebuild --limit 5
 dso prototype-build --account main --source visible_capture --dataset all --force
 dso semantic-calibration-queue --account main --dataset all --limit 50
+dso semantic-calibration-reopen <sample_id> --confidence low --reason "second calibration pass"
 dso research-labels-rebuild --account main --dataset all
 dso backtest --account main --k 10 --strategy research_ranker_v2_1 --holdout-policy time
 dso ranker-tuning-run --account main --k 10 --max-trials 12
@@ -445,6 +449,28 @@ dso backtest-reports --account main --limit 10
 ```
 
 样本少于 300 的账号只能展示低置信趋势，不应输出确定性权重。
+
+### 7.6 Qwen2.5-Omni 低显存 Shadow Mode
+
+低显存 Omni 模块用于离线验证短片段多模态理解，默认模型为 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`。当前只建议在具备 CUDA 的目标机上运行 15 秒以内片段，`batch_size=1`，`return_audio=false`。
+
+该模块输出只作为语义校准建议，不会自动写入 `manual_verified`，不会直接改变候选生产分数，也不会替代人工审核。
+
+常用 CLI：
+
+```bash
+dso qwen-omni-status
+dso qwen-omni-analyze <segment_id> --max-clip-seconds 15 --load-model
+dso qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seconds 15 --load-model
+```
+
+常用 API：
+
+| API | 用途 |
+| --- | --- |
+| `GET /learning/qwen-omni/status` | 检查服务、显存门控和当前加载模型 |
+| `POST /segments/{segment_id}/qwen-omni/analyze` | 对单条候选做短片段 shadow 分析 |
+| `POST /learning/qwen-omni/shadow-run` | 对历史样本批量做 shadow-run |
 
 ## 8. CLI 快速手册
 
@@ -653,7 +679,11 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `POST /metrics/import` | 导入授权指标文件 |
 | `GET /learning/historical-samples/summary` | 历史样本汇总 |
 | `GET /learning/semantic-calibration/queue` | 语义校准队列 |
+| `PATCH /learning/historical-samples/{sample_id}/labels` | 保存人工语义标签 |
+| `POST /learning/historical-samples/{sample_id}/calibration/reopen` | 重新打开已保存样本的校准状态 |
 | `POST /learning/backtest` | 运行离线回测 |
+| `GET /learning/qwen-omni/status` | 检查 Omni 低显存服务状态 |
+| `POST /learning/qwen-omni/shadow-run` | 执行 Omni shadow-run |
 | `GET /platform/douyin/summary` | 抖音账号同步摘要 |
 
 ## 13. 当前限制
@@ -662,4 +692,5 @@ echo $DSO_DOUYIN_REDIRECT_URI
 - 当前播放量缺失时，排序和原型解释基于互动热度代理分。
 - 官方或授权账号的 6h / 24h / 72h / 7d / 30d 完整窗口指标仍需持续接入。
 - 样本少于 300 的账号只输出低置信趋势。
+- Qwen2.5-Omni 低显存模式只用于短片段离线研究；当前目标机不适合完整 BF16 版或 30 秒以上视频常驻分析。
 - 系统不会自动发布或代替人工做最终内容合规判断。

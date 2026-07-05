@@ -1,6 +1,6 @@
 # 当前工程状态
 
-更新时间：2026-07-03
+更新时间：2026-07-05
 
 ## 1. 产品状态
 
@@ -98,14 +98,15 @@ http://127.0.0.1:8000/
 - 语义字段回填 v3：已发布 clean JSON 导入和 `/learning/semantic-features/backfill` 会补齐 `content_category`、`hook_type`、`slice_structure`、结构置信度/证据、节目、艺人、歌曲、原声 owner、实体信号、标签和 `semantic_feature_version`；三类核心语义字段已收敛到固定枚举，无法判断时保留 `unknown` 并记录原因。
 - 语义特征实验：`/learning/semantic-feature-experiment/run` 可用同一套时间切分验证语义字段遮蔽实验，报告 lift 变化、疑似噪声字段和下一步建议，不写入候选生产分数。
 - Slice Structure Evaluator：`/learning/slice-structure/evaluate` 只读评估 `slice_structure` 的可判定率、一致率、冲突率和结构复核队列；不伪造人工标注，不直接改写历史样本。
-- 工作台语义校准队列：学习面板已接入 `/learning/semantic-calibration/queue`，可按账号和数据集查看高影响样本、缺失字段、当前标签、label reason、风险/分歧分和推荐校准字段，并快速编辑语义字段。
-- 语义校准接口：`/learning/semantic-calibration/queue` 支持 `limit`、`account_id`、`dataset_id`、`min_priority`、`label`、`queue_type`、`strategy`、`min_disagreement`；人工 PATCH 后写入 `change_events` 并且只有用户保存的样本标记 `manual_verified`。
+- 工作台语义校准队列：学习面板已接入 `/learning/semantic-calibration/queue`，可按账号和数据集查看高影响样本、缺失字段、当前标签、label reason、风险/分歧分和推荐校准字段，并快速编辑语义字段。保存人工标签后样本会退出待校准队列，并进入“最近已保存”。
+- 语义校准接口：`/learning/semantic-calibration/queue` 支持 `limit`、`account_id`、`dataset_id`、`min_priority`、`label`、`queue_type`、`strategy`、`min_disagreement`；人工 PATCH 后写入 `change_events` 并且只有用户保存的样本标记 `manual_verified`。如需二次校准，可用 `/learning/historical-samples/{sample_id}/calibration/reopen` 或工作台“重新打开校准”按钮把样本放回队列。
 - 互动热度标签 v2：`/learning/research-labels/rebuild` 按账号内相对表现重算 `research_labels.visible_engagement_v2`，加入发布时间年龄桶和时长桶基线降级，不改 `reward_proxy`。
 - 历史相似召回：候选切片可优先从 `historical_capture_samples` 匹配相似高互动和低互动作品。
 - 历史证据排序器 v2.4：`src/dso/learning/research_ranker.py` 输出高互动相似、低互动风险、账号基线、原型命中、语义可信度、长尾机会、信号可信度门控、`ranker_advice` 和与语义基线差异解释；离线回测增加标题/歌曲近重复多样性约束、诊断样本和下一批校准队列。
 - V1 Beta-D-1 小规模多模态验证：新增只读本地素材采集计划、Chrome AppleEvents 媒体资源采集入口和离线多模态验证报告；采集只读取页面媒体资源并下载视频/封面/抽帧/音频，不做关注、点赞、评论或发布。
 - 多模态采集保护：`multimodal-collect` 默认 `dry_run`，显式 `--download` 才执行下载；默认 `--max-storage-gb 3`，采集器按 `data/douyin_media_assets` 整体目录计算容量，下载前、下载中和抽帧/音频后都会检查上限。
 - V1 Beta-D-2 真实轻量多模态特征实验：`/learning/multimodal-feature-experiment/run` 可从本地视频/音频/封面/抽帧提取短窗音频能量和视觉亮度/对比/饱和/清晰度特征，并与语义基线并排比较；实验只写本地特征缓存，不改候选生产分数。
+- Qwen2.5-Omni 低显存 Shadow Mode：`src/dso/learning/qwen_omni.py` 接入外部多模态模型服务，默认模型 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`，默认仅分析 15 秒以内短片段，`return_audio=false`，输出只作为校准建议，不写 `manual_verified`，不进入生产排序权重。
 - 轻量权重调参：`/learning/ranker-tuning/run` 只搜索已有可解释组件权重，不训练 Logistic / LightGBM，不写候选生产分数。
 - 原型库口径加固：无 `source_path` 时不再自动混读旧工作簿。
 - 发布时间趋势：无训练样本时可用历史样本生成低/中置信趋势。
@@ -120,6 +121,7 @@ http://127.0.0.1:8000/
 - `research_ranker_v2_4` 当前已高于 v2.3 和语义基线，并达到高互动命中率和低互动避让率目标；但 `topk_lift_vs_random` 尚未达到 1.85 生产门槛，因此继续标记为 `research_only`。
 - Beta-D-1 当前仍为低置信实验：本地多模态 ready 覆盖不足 70%，多模态代理分未证明稳定优于语义基线前，不进入生产排序权重。
 - Beta-D-2 已证明“真实轻量音频特征”有研究增益，但样本覆盖仍低：300 样本中真实特征可用 82 条，音频 44 条，视觉 82 条；仅允许进入下一步可解释权重搜索，不直接并入生产排序。
+- Qwen2.5-Omni-7B BF16 不适合当前 15.47GB 显存目标机；低显存 GPTQ-Int4 仅按 15 秒以内、batch=1、离线 shadow-run 使用。30 秒及以上视频仍建议 48GB 级显存环境。当前目标服务实际加载的是 `Qwen/Qwen3-VL-Embedding-2B`，`/load` 尚未切到 Omni，因此 Omni 结果暂只能视为链路和门控验证。
 
 ## 7. 关键目录和模块
 
@@ -172,6 +174,14 @@ npm run build
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m unittest discover -s tests
 ```
 
+Qwen2.5-Omni 低显存 shadow 检查：
+
+```bash
+PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-status
+PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-analyze <segment_id> --max-clip-seconds 15 --load-model
+PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seconds 15 --load-model
+```
+
 ## 9. 关键 API
 
 | API | 用途 |
@@ -186,8 +196,12 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m unittest d
 | `POST /learning/multimodal/collect` | 执行只读媒体资源采集，默认 dry-run，支持 3GB 存储上限 |
 | `POST /learning/multimodal-validation/run` | 只读多模态素材覆盖和代理信号增益验证 |
 | `POST /learning/multimodal-feature-experiment/run` | 真实轻量音频/视觉特征提取、策略对比和研究门控 |
+| `GET /learning/qwen-omni/status` | 检查 Qwen2.5-Omni 低显存服务、显存门控和当前加载模型 |
+| `POST /segments/{segment_id}/qwen-omni/analyze` | 对 15 秒以内候选片段执行 Omni shadow 分析，只返回建议 |
+| `POST /learning/qwen-omni/shadow-run` | 对历史样本批量执行低显存 Omni shadow-run，不写生产标签 |
 | `GET /learning/semantic-calibration/queue?account_id=&dataset_id=&min_priority=&label=&queue_type=&strategy=&min_disagreement=` | 人工语义校准队列 |
 | `PATCH /learning/historical-samples/{sample_id}/labels` | 人工修正历史样本语义标签并写 change log |
+| `POST /learning/historical-samples/{sample_id}/calibration/reopen` | 将已保存人工标签的样本重新打开，回到语义校准队列 |
 | `POST /learning/research-labels/rebuild` | 重算 v2 互动热度相对标签 |
 | `GET /learning/douyin-history/baselines?account_id=&min_count=1` | 历史样本账号基线和 Top 信号 |
 | `GET /segments/{segment_id}/history` | 候选片段历史相似召回 |
@@ -219,7 +233,13 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m unittest d
 - 正式历史样本 11,002 条，重复视频组 0，播放量正数样本 0。
 - 全局研究覆盖率 v3：`content_category` 98.67%，`hook_type` 28.69%，`slice_structure` 34.40%，`artist_names` 92.00%，`song_title` 98.35%，`original_sound_owner` 63.67%，`entity_signal` 99.58%，`tags` 99.21%。
 - `research-coverage` 全局状态仍需结合遮蔽实验解释：覆盖率升高不等于可强加权，`slice_structure` 和 `hook_type` 仍需人工校准或更强语义抽取。
-- 后端全量测试通过：`Ran 105 tests in 2.683s OK (skipped=12)`。前端生产构建通过：`npm run build`。
+- 2026-07-05 校准队列修复验证：`PATCH /learning/historical-samples/{sample_id}/labels` 保存后样本进入 `recently_saved_samples`，不再出现在待校准 `samples`；`POST /learning/historical-samples/{sample_id}/calibration/reopen` 可把 `classification_confidence` 改回 `low/medium/high` 并重新进入队列，前端已提供“重新打开校准”按钮。
+- 2026-07-05 目标模型服务检查：`qwen-omni-status` 可连接 `http://192.168.31.143:8001`，服务主机为 `aidev-OMEN-MAX-Gaming-Laptop-16-ah0xxx`，GPU 为 `NVIDIA GeForce RTX 5080 Laptop GPU`，显存 15.47GB，CUDA 可用。资源门控结论：支持 GPTQ-Int4 15 秒短片段，无法稳定支持 GPTQ-Int4 30 秒或 BF16 15 秒。
+- 2026-07-05 服务端登录排查：服务以 `aidev` 用户运行 `/home/aidev/dso_multimodal_model_service/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8001`。`app.py` 当前只实现 `SentenceTransformer` 加载，`/load` 不读取请求模型名，`/analyze/clip` 为关键词 heuristic；环境变量固定为 `DSO_MODEL_ID=Qwen/Qwen3-VL-Embedding-2B`、`DSO_MODEL_BACKEND=sentence_transformers`、`HF_HUB_OFFLINE=1`。服务端未安装 `gptqmodel`、`qwen-omni-utils`、`decord`，本地 HF cache 未发现 Omni/GPTQ/AWQ 模型目录。因此当前不能通过 API 切换到 Omni，需先改服务端代码/依赖/模型缓存。
+- 2026-07-05 100 条 media 运行：`multimodal-feature-experiment --limit 100` 成功，100 条中真实特征 ready 82 条，音频 44 条、视觉 82 条；`semantic_baseline=1.1592`，`semantic_plus_audio=1.2863`，`semantic_plus_audio_visual=1.2180`，`visual_only=0.9128`，promotion gate 为 `ready_for_weight_search`。
+- 2026-07-05 Qwen embedding 运行：`qwen-embeddings-build --limit 100 --modality text` 成功创建 92 条、复用 8 条、失败 0；`qwen-embedding-evidence --limit 100 --modality text` 返回 `status=ready`。
+- 2026-07-05 Omni shadow 探针：`qwen-omni-shadow-run --limit 100 --max-clip-seconds 15` 曾返回 10 条 heuristic、90 条超 15 秒跳过；由于服务仍加载 `Qwen3-VL-Embedding-2B` 而非 Omni，该结果不作为有效 Omni 推理结论。客户端已加保护：服务端未加载 Omni 时直接返回 `model_switch_required`，不再继续跑 heuristic。
+- 后端全量测试通过：`112 passed, 4 warnings in 8.23s`。前端生产构建通过：`npm run build`。
 
 ## 11. 下一步优先级
 
@@ -228,3 +248,4 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m unittest d
 3. 加强弱分类：针对 Hook 和结构字段建立 gold set、样例和人工校准回放，只有通过遮蔽实验验证后再进入排序强权重。
 4. 扩展小样本多模态研究：先验证封面、首帧、音频节奏、ASR/OCR 对 high/mid/low 的解释力。
 5. 接入官方或授权账号窗口指标，补齐 6h / 24h / 72h / 7d / 30d；在此之前不把结果表述为播放量或发布效果承诺。
+6. 修复目标模型服务的 Omni 加载路由：确认 `/load` 能加载 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`，再只对 15 秒以内短片段做 shadow-run；长视频先切 8-15 秒候选片段，不直接送整条历史 media。

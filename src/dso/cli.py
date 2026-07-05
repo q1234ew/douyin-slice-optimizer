@@ -42,6 +42,8 @@ from dso.learning.multimodal_validation import (
     run_multimodal_validation,
 )
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.qwen_embeddings import build_qwen_embedding_index, run_qwen_embedding_evidence
+from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_shadow
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.media.ingest import ingest_video, list_videos
 from dso.review import mark_candidate_review
@@ -457,6 +459,74 @@ def cmd_multimodal_feature_experiment(
         min_feature_samples=min_feature_samples,
         audio_window_seconds=audio_window_seconds,
         force=force,
+    )
+
+
+def cmd_qwen_embeddings_build(
+    account: str | None,
+    dataset: str | None,
+    entity_type: str,
+    modality: str,
+    limit: int,
+    force: bool = False,
+) -> dict:
+    init_db()
+    return build_qwen_embedding_index(
+        account_id=account,
+        dataset_id=dataset,
+        entity_type=entity_type,
+        modality=modality,
+        limit=limit,
+        force=force,
+    )
+
+
+def cmd_qwen_embedding_evidence(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    k: int,
+    modality: str,
+) -> dict:
+    init_db()
+    return run_qwen_embedding_evidence(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        k=k,
+        modality=modality,
+    )
+
+
+def cmd_qwen_omni_status() -> dict:
+    init_db()
+    return qwen_omni_status()
+
+
+def cmd_qwen_omni_analyze(segment_id: str, account: str | None, max_clip_seconds: float, load_model: bool = False) -> dict:
+    init_db()
+    return analyze_candidate_with_qwen_omni(
+        segment_id,
+        account_id=account,
+        max_clip_seconds=max_clip_seconds,
+        load_model=load_model,
+    )
+
+
+def cmd_qwen_omni_shadow_run(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    max_clip_seconds: float,
+    load_model: bool = False,
+) -> dict:
+    init_db()
+    return run_qwen_omni_shadow(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        max_clip_seconds=max_clip_seconds,
+        load_model=load_model,
     )
 
 
@@ -1063,6 +1133,50 @@ def _typer_main(typer_module: Any) -> None:
     ) -> None:
         _print(cmd_multimodal_feature_experiment(account, dataset, limit, k, min_feature_samples, audio_window_seconds, force))
 
+    @app.command("qwen-embeddings-build")
+    def qwen_embeddings_build_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        entity_type: str = typer_module.Option("historical_sample", "--entity-type"),
+        modality: str = typer_module.Option("text", "--modality"),
+        limit: int = typer_module.Option(300, "--limit"),
+        force: bool = typer_module.Option(False, "--force"),
+    ) -> None:
+        _print(cmd_qwen_embeddings_build(account, dataset, entity_type, modality, limit, force))
+
+    @app.command("qwen-embedding-evidence")
+    def qwen_embedding_evidence_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(300, "--limit"),
+        k: int = typer_module.Option(10, "--k"),
+        modality: str = typer_module.Option("all", "--modality"),
+    ) -> None:
+        _print(cmd_qwen_embedding_evidence(account, dataset, limit, k, modality))
+
+    @app.command("qwen-omni-status")
+    def qwen_omni_status_command() -> None:
+        _print(cmd_qwen_omni_status())
+
+    @app.command("qwen-omni-analyze")
+    def qwen_omni_analyze_command(
+        segment_id: str,
+        account: str | None = typer_module.Option(None, "--account"),
+        max_clip_seconds: float = typer_module.Option(15.0, "--max-clip-seconds"),
+        load_model: bool = typer_module.Option(False, "--load-model"),
+    ) -> None:
+        _print(cmd_qwen_omni_analyze(segment_id, account, max_clip_seconds, load_model))
+
+    @app.command("qwen-omni-shadow-run")
+    def qwen_omni_shadow_run_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(20, "--limit"),
+        max_clip_seconds: float = typer_module.Option(15.0, "--max-clip-seconds"),
+        load_model: bool = typer_module.Option(False, "--load-model"),
+    ) -> None:
+        _print(cmd_qwen_omni_shadow_run(account, dataset, limit, max_clip_seconds, load_model))
+
     @app.command("backtest-reports")
     def backtest_reports_command(
         account: str | None = typer_module.Option(None, "--account"),
@@ -1406,6 +1520,31 @@ def _argparse_main() -> None:
     multimodal_feature.add_argument("--min-feature-samples", type=int, default=60)
     multimodal_feature.add_argument("--audio-window-seconds", type=float, default=10.0)
     multimodal_feature.add_argument("--force", action="store_true")
+    qwen_embeddings = sub.add_parser("qwen-embeddings-build")
+    qwen_embeddings.add_argument("--account")
+    qwen_embeddings.add_argument("--dataset")
+    qwen_embeddings.add_argument("--entity-type", default="historical_sample")
+    qwen_embeddings.add_argument("--modality", default="text")
+    qwen_embeddings.add_argument("--limit", type=int, default=300)
+    qwen_embeddings.add_argument("--force", action="store_true")
+    qwen_evidence = sub.add_parser("qwen-embedding-evidence")
+    qwen_evidence.add_argument("--account")
+    qwen_evidence.add_argument("--dataset")
+    qwen_evidence.add_argument("--limit", type=int, default=300)
+    qwen_evidence.add_argument("--k", type=int, default=10)
+    qwen_evidence.add_argument("--modality", default="all")
+    sub.add_parser("qwen-omni-status")
+    qwen_omni_analyze = sub.add_parser("qwen-omni-analyze")
+    qwen_omni_analyze.add_argument("segment_id")
+    qwen_omni_analyze.add_argument("--account")
+    qwen_omni_analyze.add_argument("--max-clip-seconds", type=float, default=15.0)
+    qwen_omni_analyze.add_argument("--load-model", action="store_true")
+    qwen_omni_shadow = sub.add_parser("qwen-omni-shadow-run")
+    qwen_omni_shadow.add_argument("--account")
+    qwen_omni_shadow.add_argument("--dataset")
+    qwen_omni_shadow.add_argument("--limit", type=int, default=20)
+    qwen_omni_shadow.add_argument("--max-clip-seconds", type=float, default=15.0)
+    qwen_omni_shadow.add_argument("--load-model", action="store_true")
     backtest_reports = sub.add_parser("backtest-reports")
     backtest_reports.add_argument("--account")
     backtest_reports.add_argument("--limit", type=int, default=10)
@@ -1627,6 +1766,16 @@ def _argparse_main() -> None:
                 args.force,
             )
         )
+    elif args.command == "qwen-embeddings-build":
+        _print(cmd_qwen_embeddings_build(args.account, args.dataset, args.entity_type, args.modality, args.limit, args.force))
+    elif args.command == "qwen-embedding-evidence":
+        _print(cmd_qwen_embedding_evidence(args.account, args.dataset, args.limit, args.k, args.modality))
+    elif args.command == "qwen-omni-status":
+        _print(cmd_qwen_omni_status())
+    elif args.command == "qwen-omni-analyze":
+        _print(cmd_qwen_omni_analyze(args.segment_id, args.account, args.max_clip_seconds, args.load_model))
+    elif args.command == "qwen-omni-shadow-run":
+        _print(cmd_qwen_omni_shadow_run(args.account, args.dataset, args.limit, args.max_clip_seconds, args.load_model))
     elif args.command == "backtest-reports":
         _print(cmd_backtest_reports(args.account, args.limit))
     elif args.command == "datasets":

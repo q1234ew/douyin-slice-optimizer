@@ -28,6 +28,8 @@ import type {
   MultimodalValidationResult,
   PreviewState,
   PrototypeBankResult,
+  QwenEmbeddingBuildResult,
+  QwenEmbeddingEvidenceResult,
   QualityReport,
   RankerTuningResult,
   RuntimeDiagnostics,
@@ -117,6 +119,7 @@ export interface DashboardStore {
   buildMultimodalCollectionPlan: () => Promise<void>;
   runMultimodalValidation: () => Promise<void>;
   runMultimodalFeatureExperiment: () => Promise<void>;
+  runQwenEmbeddingResearch: () => Promise<void>;
   loadSemanticCalibrationQueue: (notify?: boolean) => Promise<void>;
   saveCalibrationLabels: (sampleId: string) => Promise<void>;
   reopenCalibrationSample: (sampleId: string) => Promise<void>;
@@ -161,6 +164,8 @@ export interface DashboardState {
   multimodalCollectionPlan: MultimodalCollectionPlan | null;
   multimodalValidation: MultimodalValidationResult | null;
   multimodalFeatureExperiment: MultimodalFeatureExperimentResult | null;
+  qwenEmbeddingBuild: QwenEmbeddingBuildResult | null;
+  qwenEmbeddingEvidence: QwenEmbeddingEvidenceResult | null;
   calibrationDrafts: Record<string, CalibrationDraft>;
   rankerTuning: RankerTuningResult | null;
   prototypeBank: PrototypeBankResult | null;
@@ -229,6 +234,8 @@ export function useDashboard(): DashboardStore {
     multimodalCollectionPlan: null,
     multimodalValidation: null,
     multimodalFeatureExperiment: null,
+    qwenEmbeddingBuild: null,
+    qwenEmbeddingEvidence: null,
     calibrationDrafts: {},
     rankerTuning: null,
     prototypeBank: null,
@@ -1083,6 +1090,44 @@ export function useDashboard(): DashboardStore {
     toast("真实多模态特征实验已生成");
   }
 
+  async function runQwenEmbeddingResearch(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const build = await api<QwenEmbeddingBuildResult>("/learning/qwen-embeddings/build", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      entity_type: "historical_sample",
+      modality: "text",
+      limit: 300,
+      force: false
+    }));
+    state.qwenEmbeddingBuild = build;
+    const evidence = await api<QwenEmbeddingEvidenceResult>("/learning/qwen-embedding-evidence/run", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 300,
+      k: 10,
+      modality: "text"
+    }));
+    state.qwenEmbeddingEvidence = evidence;
+    const report = await api<BacktestReport>("/learning/backtest", jsonBody({
+      account_id: account || null,
+      k: 10,
+      strategy: "ranker_plus_text_embedding",
+      holdout_policy: "time"
+    }));
+    state.backtestReports = [report, ...state.backtestReports].slice(0, 3);
+    const coverage = build.coverage || {};
+    const metrics = report.metrics || {};
+    const gap = metrics.embedding_strategy_gap && typeof metrics.embedding_strategy_gap === "object"
+      ? metrics.embedding_strategy_gap as Record<string, unknown>
+      : {};
+    const selected = gap.selected && typeof gap.selected === "object" ? gap.selected as Record<string, unknown> : {};
+    const delta = Number(selected.topk_lift_delta_vs_v2_4 || 0);
+    state.learningResult = `Qwen 索引 ${build.status || "ready"} / ready ${percentText(Number(coverage.ready_rate || 0))} / 回测 lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / 较 v2.4 ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`;
+    toast("Qwen embedding 索引与研究回测已生成");
+  }
+
   async function loadSemanticCalibrationQueue(notify = true): Promise<void> {
     beginModule("history");
     try {
@@ -1350,6 +1395,7 @@ export function useDashboard(): DashboardStore {
     buildMultimodalCollectionPlan,
     runMultimodalValidation,
     runMultimodalFeatureExperiment,
+    runQwenEmbeddingResearch,
     loadSemanticCalibrationQueue,
     saveCalibrationLabels,
     reopenCalibrationSample,

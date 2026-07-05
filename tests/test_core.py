@@ -68,6 +68,18 @@ from dso.learning.multimodal_validation import (
     run_multimodal_validation,
 )
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.qwen_embeddings import (
+    QWEN_EMBEDDING_MODEL,
+    TEXT_EMBEDDING_STRATEGY,
+    build_qwen_embedding_index,
+    run_qwen_embedding_evidence,
+)
+from dso.learning.qwen_omni import (
+    QWEN_OMNI_MODEL,
+    analyze_candidate_with_qwen_omni,
+    qwen_omni_status,
+    run_qwen_omni_shadow,
+)
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure, evaluate_slice_structure_row
 from dso.media.ffmpeg import probe_video
 from dso.media.ingest import ingest_video
@@ -102,6 +114,89 @@ from dso.versions import (
     MULTIMODAL_FEATURE_VERSION,
     DOUYIN_HISTORY_VERSION,
 )
+
+
+class _FakeQwenClient:
+    def __init__(self, *, unavailable: bool = False) -> None:
+        self.unavailable = unavailable
+        self.text_calls = 0
+
+    def health(self) -> dict:
+        if self.unavailable:
+            return {"status": "service_unavailable", "service_url": "mock"}
+        return {"status": "ready", "service_url": "mock", "raw": {"status": "model"}}
+
+    def load(self) -> dict:
+        return self.health()
+
+    def embed_text(self, text: str) -> list[float]:
+        if self.unavailable:
+            raise RuntimeError("service_unavailable")
+        self.text_calls += 1
+        value = str(text or "")
+        if any(token in value for token in ["高音", "高互动", "爆发", "尖叫"]):
+            return _unit_vector(0)
+        if any(token in value for token in ["低互动", "福利", "下单", "平铺"]):
+            return _unit_vector(1)
+        return _unit_vector(2)
+
+    def embed_image(self, image_path: Path) -> list[float]:
+        return _unit_vector(3)
+
+    def embed_video_frames(self, frame_paths: list[Path]) -> list[float]:
+        return _unit_vector(3)
+
+
+class _FakeQwenOmniClient:
+    def __init__(self, *, total_memory_gb: float = 15.47, loaded_model: str = "Qwen/Qwen3-VL-Embedding-2B", unavailable: bool = False) -> None:
+        self.service_url = "mock-omni"
+        self.model_id = QWEN_OMNI_MODEL
+        self.total_memory_gb = total_memory_gb
+        self.loaded_model = loaded_model
+        self.unavailable = unavailable
+        self.load_calls = 0
+        self.payloads: list[dict] = []
+
+    def health(self) -> dict:
+        if self.unavailable:
+            return {"status": "service_unavailable", "service_url": self.service_url, "error": "offline"}
+        return {
+            "status": "ready",
+            "service_url": self.service_url,
+            "raw": {
+                "status": "ready",
+                "torch": {
+                    "cuda_available": True,
+                    "devices": [{"index": 0, "name": "RTX 5080 Laptop GPU", "total_memory_gb": self.total_memory_gb}],
+                },
+                "model": {"loaded": True, "model_id": self.loaded_model},
+            },
+        }
+
+    def load(self, *, model_id: str | None = None, max_clip_seconds: float = 15.0) -> dict:
+        self.load_calls += 1
+        self.loaded_model = model_id or self.model_id
+        return self.health()
+
+    def analyze_clip(self, payload: dict) -> dict:
+        self.payloads.append(payload)
+        title = str(payload.get("title") or payload.get("transcript") or "")
+        return {
+            "status": "ready",
+            "semantic_suggestions": {
+                "content_category": "performance_highlight",
+                "hook_type": "high_note" if "高音" in title or "爆发" in title else "reaction",
+                "slice_structure": "setup_to_payoff",
+            },
+            "scores": {"audio_moment": 0.82, "stage_moment": 0.76, "risk": 0.08},
+            "advice": "recommend_calibration",
+        }
+
+
+def _unit_vector(index: int, *, dim: int = 2048) -> list[float]:
+    vector = [0.0] * dim
+    vector[index] = 1.0
+    return vector
 
 
 class CoreWorkflowTest(unittest.TestCase):
@@ -2708,6 +2803,217 @@ class CoreWorkflowTest(unittest.TestCase):
             diagnostics["by_label"]["high"]["avg_audio_score"],
             diagnostics["by_label"]["low"]["avg_audio_score"],
         )
+
+    def test_qwen_embedding_index_reuses_text_cache_and_records_service_failures(self) -> None:
+        _insert_historical_sample(
+            "hist_qwen_high",
+            dataset_id="tianci_20260628",
+            item_id="hist_qwen_high",
+            title="高音爆发全场尖叫 高互动舞台",
+            reward_proxy=96,
+            normalized_reward=96,
+            performance_label="high",
+            tags="高音|爆发",
+        )
+        _insert_historical_sample(
+            "hist_qwen_low",
+            dataset_id="tianci_20260628",
+            item_id="hist_qwen_low",
+            title="平铺直叙低互动福利口播",
+            reward_proxy=12,
+            normalized_reward=12,
+            performance_label="low",
+            tags="低互动|福利",
+        )
+
+        client = _FakeQwenClient()
+        created = build_qwen_embedding_index(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=10,
+            modality="text",
+            client=client,
+        )
+        reused = build_qwen_embedding_index(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=10,
+            modality="text",
+            client=_FakeQwenClient(),
+        )
+        failed = build_qwen_embedding_index(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=10,
+            modality="visual",
+            client=_FakeQwenClient(unavailable=True),
+        )
+
+        self.assertEqual(created["created"], 2)
+        self.assertEqual(created["coverage"]["ready_records"], 2)
+        self.assertEqual(reused["reused"], 2)
+        self.assertEqual(failed["skipped"], 2)
+        with connect() as conn:
+            rows = conn.execute(
+                "SELECT modality, model_name, status, vector_dim, vector_path FROM embedding_records ORDER BY modality, entity_id"
+            ).fetchall()
+        self.assertTrue(any(row["modality"] == "text" and row["model_name"] == QWEN_EMBEDDING_MODEL and row["vector_dim"] == 2048 for row in rows))
+        self.assertTrue(any(row["modality"] == "visual" and row["status"] == "skipped" for row in rows))
+        self.assertTrue(all(Path(row["vector_path"]).exists() for row in rows if row["status"] == "ready"))
+
+    def test_qwen_embedding_evidence_and_backtest_strategy_are_research_only(self) -> None:
+        for index in range(12):
+            is_high = index >= 8
+            is_low = index < 3
+            _insert_historical_sample(
+                f"hist_qwen_bt_{index}",
+                dataset_id="tianci_20260628",
+                item_id=f"hist_qwen_bt_{index}",
+                title=(
+                    f"高音爆发全场尖叫 高互动样本 {index}"
+                    if is_high
+                    else f"平铺直叙低互动福利样本 {index}" if is_low else f"副歌合唱中性样本 {index}"
+                ),
+                reward_proxy=90 + index if is_high else 10 + index if is_low else 45 + index,
+                normalized_reward=90 + index if is_high else 10 + index if is_low else 45 + index,
+                performance_label="high" if is_high else "low" if is_low else "mid",
+                tags="高音|爆发" if is_high else "低互动|福利" if is_low else "副歌|合唱",
+                published_at=f"2026-06-{10 + index:02d}T00:00:00+00:00",
+            )
+
+        build_qwen_embedding_index(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=20,
+            modality="text",
+            client=_FakeQwenClient(),
+        )
+        evidence = run_qwen_embedding_evidence(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=20,
+            k=5,
+            modality="text",
+            client=_FakeQwenClient(),
+        )
+        report = backtest_rule_ranker(
+            account_id="main",
+            k=3,
+            strategy=TEXT_EMBEDDING_STRATEGY,
+            holdout_policy="time",
+        )
+
+        self.assertEqual(evidence["embedding_coverage"]["text_ready_count"], 12)
+        self.assertIn("similar_evidence_summary", evidence)
+        self.assertEqual(report["metrics"]["strategy"], TEXT_EMBEDDING_STRATEGY)
+        self.assertIn(TEXT_EMBEDDING_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn("embedding_coverage", report["metrics"])
+        self.assertIn("embedding_strategy_gap", report["metrics"])
+        self.assertEqual(report["metrics"]["promotion_gate"]["status"], "research_only")
+        self.assertFalse(report["metrics"]["promotion_gate"]["passed"])
+        self.assertTrue(any("qwen_text_evidence_quality" in row.get("component_scores", {}) for row in report["top_rows"]))
+
+    def test_qwen_omni_low_vram_status_and_shadow_analysis(self) -> None:
+        status = qwen_omni_status(client=_FakeQwenOmniClient())
+
+        self.assertEqual(status["contract_version"], "qwen2_5_omni_7b_gptq_int4.shadow_v1")
+        self.assertEqual(status["status"], "model_switch_required")
+        self.assertTrue(status["resource_gate"]["supports_gptq_int4_15s"])
+        self.assertFalse(status["resource_gate"]["supports_gptq_int4_30s"])
+        self.assertTrue(status["model_switch_required"])
+        self.assertFalse(status["limits"]["production_weight"])
+
+        segment = _insert_segment()
+        skipped = analyze_candidate_with_qwen_omni(segment["id"], max_clip_seconds=15, client=_FakeQwenOmniClient())
+        client = _FakeQwenOmniClient()
+        analyzed = analyze_candidate_with_qwen_omni(segment["id"], max_clip_seconds=40, load_model=True, client=client)
+
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertEqual(skipped["reason"], "clip_too_long_for_low_vram")
+        self.assertEqual(analyzed["status"], "ready")
+        self.assertEqual(analyzed["semantic_suggestions"]["content_category"], "performance_highlight")
+        self.assertEqual(client.load_calls, 1)
+        self.assertFalse(client.payloads[0]["return_audio"])
+        self.assertEqual(client.payloads[0]["model"], QWEN_OMNI_MODEL)
+
+    def test_qwen_omni_stops_when_service_does_not_switch_model(self) -> None:
+        class StuckEmbeddingClient(_FakeQwenOmniClient):
+            def load(self, *, model_id: str | None = None, max_clip_seconds: float = 15.0) -> dict:
+                self.load_calls += 1
+                self.loaded_model = "Qwen/Qwen3-VL-Embedding-2B"
+                return self.health()
+
+        segment = _insert_segment()
+        analyzed = analyze_candidate_with_qwen_omni(
+            segment["id"],
+            max_clip_seconds=40,
+            load_model=True,
+            client=StuckEmbeddingClient(),
+        )
+        self.assertEqual(analyzed["status"], "model_switch_required")
+        self.assertEqual(analyzed["loaded_model"], "Qwen/Qwen3-VL-Embedding-2B")
+        self.assertFalse(analyzed["production_weight"])
+
+        _insert_historical_sample(
+            "hist_omni_stuck",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_stuck",
+            title="短片段高音爆发",
+            reward_proxy=90,
+            normalized_reward=90,
+            performance_label="high",
+            duration_seconds=9,
+        )
+        shadow = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=5,
+            max_clip_seconds=15,
+            load_model=True,
+            client=StuckEmbeddingClient(),
+        )
+        self.assertEqual(shadow["status"], "model_switch_required")
+        self.assertEqual(shadow["analyzed_count"], 0)
+        self.assertTrue(shadow["model_switch_required"])
+
+    def test_qwen_omni_shadow_run_keeps_output_advisory_only(self) -> None:
+        _insert_historical_sample(
+            "hist_omni_short",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_short",
+            title="高音爆发全场尖叫",
+            reward_proxy=98,
+            normalized_reward=98,
+            performance_label="high",
+            duration_seconds=12,
+        )
+        _insert_historical_sample(
+            "hist_omni_long",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_long",
+            title="长段完整舞台",
+            reward_proxy=30,
+            normalized_reward=30,
+            performance_label="mid",
+            duration_seconds=32,
+        )
+
+        client = _FakeQwenOmniClient()
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=5,
+            max_clip_seconds=15,
+            load_model=True,
+            client=client,
+        )
+
+        self.assertEqual(result["contract_version"], "qwen2_5_omni_7b_gptq_int4.shadow_v1")
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["analyzed_count"], 1)
+        self.assertEqual(result["skipped_count"], 1)
+        self.assertFalse(result["samples"][0]["production_weight"])
+        self.assertFalse(result["samples"][0]["writes_labels"])
 
     def test_research_ranker_v22_uses_semantic_weight_and_positive_evidence(self) -> None:
         base_components = {

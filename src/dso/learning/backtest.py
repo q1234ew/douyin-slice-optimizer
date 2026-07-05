@@ -9,6 +9,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
+from dso.learning.qwen_embeddings import (
+    EMBEDDING_RESEARCH_STRATEGIES,
+    TEXT_EMBEDDING_STRATEGY,
+    TEXT_VISUAL_EMBEDDING_STRATEGY,
+    VISUAL_EMBEDDING_STRATEGY,
+    embedding_backtest_summary,
+    embedding_coverage_for_scope,
+    embedding_strategy_gap,
+    historical_embedding_backtest_context,
+    historical_embedding_strategy_scores,
+)
 from dso.utils import clamp, new_id, utc_now
 from dso.versions import BACKTEST_VERSION, RESEARCH_LABEL_VERSION, RESEARCH_RANKER_VERSION, SCORER_VERSION
 
@@ -21,6 +32,9 @@ BACKTEST_STRATEGIES = {
     "research_ranker_v2_2",
     "research_ranker_v2_3",
     "research_ranker_v2_4",
+    TEXT_EMBEDDING_STRATEGY,
+    VISUAL_EMBEDDING_STRATEGY,
+    TEXT_VISUAL_EMBEDDING_STRATEGY,
     "ranker_without_prototypes",
     "ranker_without_low_risk",
 }
@@ -258,6 +272,9 @@ def backtest_rule_ranker(
         "next_calibration_queue": historical_dataset.get("next_calibration_queue") or [],
         "calibration_summary": historical_dataset.get("calibration_summary")
         or _calibration_summary(strategy_comparison, promotion_gate, selected_strategy),
+        "embedding_coverage": historical_dataset.get("embedding_coverage") or embedding_coverage_for_scope(account_id=account_id),
+        "embedding_evidence_summary": historical_dataset.get("embedding_evidence_summary") or {},
+        "embedding_strategy_gap": historical_dataset.get("embedding_strategy_gap") or embedding_strategy_gap(strategy_comparison, selected_strategy=selected_strategy),
     }
     status = "ready" if len(rows) >= (30 if source == "historical_capture_samples" else 3) else "low_confidence"
     if source == "historical_capture_samples" and not promotion_gate.get("passed"):
@@ -511,8 +528,10 @@ def _historical_backtest_dataset(
     train_basis = _prepare_history_tokens(train_rows or all_rows)
     history_index = _history_candidate_index(train_basis)
     eval_basis = _prepare_history_tokens(eval_rows)
+    embedding_context = historical_embedding_backtest_context(train_basis + eval_basis)
     baselines = _historical_group_baselines(train_basis)
     interaction_thresholds = _interaction_thresholds(train_basis)
+    embedding_context["thresholds"] = interaction_thresholds
     account_profiles = _account_ranker_profiles(train_basis, thresholds=interaction_thresholds)
     scored = []
     for row in eval_basis:
@@ -541,9 +560,17 @@ def _historical_backtest_dataset(
             gated_components=component_scores,
             signal_quality=v24_signal_quality,
         )
+        embedding_scores, embedding_components = historical_embedding_strategy_scores(
+            row,
+            train_basis,
+            embedding_context,
+            base_score=float(strategy_scores.get(RESEARCH_RANKER_V24_STRATEGY) or 50.0),
+        )
+        strategy_scores.update(embedding_scores)
         component_scores = {
             **component_scores,
             **v24_signal_quality,
+            **embedding_components,
             "v24_account_baseline_position": float(component_scores.get("account_baseline_position") or 0.0),
             "v24_high_similarity": float(component_scores.get("high_similarity") or 0.0),
             "v24_low_interaction_risk": float(component_scores.get("low_interaction_risk") or 0.0),
@@ -604,6 +631,10 @@ def _historical_backtest_dataset(
         for row in scored:
             scores = row.get("strategy_scores") if isinstance(row.get("strategy_scores"), dict) else {}
             row["final_score"] = float(scores.get(RESEARCH_RANKER_V24_STRATEGY, row.get("final_score") or 0.0))
+    if strategy in EMBEDDING_RESEARCH_STRATEGIES:
+        for row in scored:
+            scores = row.get("strategy_scores") if isinstance(row.get("strategy_scores"), dict) else {}
+            row["final_score"] = float(scores.get(strategy, row.get("final_score") or 0.0))
     strategy_comparison = {
         name: _strategy_metrics(scored, name, k=k)
         for name in [
@@ -614,6 +645,9 @@ def _historical_backtest_dataset(
             RESEARCH_RANKER_V22_STRATEGY,
             RESEARCH_RANKER_V23_STRATEGY,
             RESEARCH_RANKER_V24_STRATEGY,
+            TEXT_EMBEDDING_STRATEGY,
+            VISUAL_EMBEDDING_STRATEGY,
+            TEXT_VISUAL_EMBEDDING_STRATEGY,
             "ranker_without_prototypes",
             "ranker_without_low_risk",
         ]
@@ -622,7 +656,11 @@ def _historical_backtest_dataset(
     component_ablation = {
         "ranker_without_prototypes": strategy_comparison["ranker_without_prototypes"],
         "ranker_without_low_risk": strategy_comparison["ranker_without_low_risk"],
+        TEXT_EMBEDDING_STRATEGY: strategy_comparison[TEXT_EMBEDDING_STRATEGY],
+        VISUAL_EMBEDDING_STRATEGY: strategy_comparison[VISUAL_EMBEDDING_STRATEGY],
+        TEXT_VISUAL_EMBEDDING_STRATEGY: strategy_comparison[TEXT_VISUAL_EMBEDDING_STRATEGY],
     }
+    embedding_gap = embedding_strategy_gap(strategy_comparison, selected_strategy=strategy if strategy in EMBEDDING_RESEARCH_STRATEGIES else TEXT_VISUAL_EMBEDDING_STRATEGY)
     return {
         "rows": scored,
         "strategy_comparison": strategy_comparison,
@@ -641,6 +679,9 @@ def _historical_backtest_dataset(
             _promotion_gate(strategy_comparison, per_account, strategy=strategy),
             strategy,
         ),
+        "embedding_coverage": embedding_coverage_for_scope(account_id=account_id),
+        "embedding_evidence_summary": embedding_backtest_summary(scored),
+        "embedding_strategy_gap": embedding_gap,
         "holdout_policy_key": actual_policy,
         "holdout_policy_text": _holdout_policy("historical_capture_samples", actual_policy, split_summary=split_summary),
         "label_version": label_version or RESEARCH_LABEL_VERSION,
@@ -1292,6 +1333,16 @@ def _evidence_quality_from_components(components: dict[str, float]) -> float:
 
 
 def _weight_config_for_strategy(strategy: str) -> dict[str, Any]:
+    if strategy in EMBEDDING_RESEARCH_STRATEGIES:
+        return {
+            "name": "qwen_embedding_research_overlay",
+            "base_strategy": RESEARCH_RANKER_V24_STRATEGY,
+            "strategy": strategy,
+            "text_strategy": TEXT_EMBEDDING_STRATEGY,
+            "visual_strategy": VISUAL_EMBEDDING_STRATEGY,
+            "text_visual_strategy": TEXT_VISUAL_EMBEDDING_STRATEGY,
+            "production_status": "research_only",
+        }
     if strategy == RESEARCH_RANKER_V24_STRATEGY:
         return RESEARCH_RANKER_V24_WEIGHT_CONFIG
     if strategy == RESEARCH_RANKER_V23_STRATEGY:
@@ -1694,6 +1745,26 @@ def _promotion_gate(
     strategy: str = RESEARCH_RANKER_V24_STRATEGY,
 ) -> dict:
     target = strategy_comparison.get(strategy) or strategy_comparison.get("research_ranker_v2") or {}
+    if strategy in EMBEDDING_RESEARCH_STRATEGIES:
+        base = strategy_comparison.get(RESEARCH_RANKER_V24_STRATEGY) or {}
+        lift_delta = float(target.get("topk_lift_vs_random") or 0.0) - float(base.get("topk_lift_vs_random") or 0.0)
+        low_delta = float(target.get("low_interaction_avoidance_rate") or 0.0) - float(base.get("low_interaction_avoidance_rate") or 0.0)
+        high_delta = float(target.get("high_interaction_hit_rate") or 0.0) - float(base.get("high_interaction_hit_rate") or 0.0)
+        return {
+            "passed": False,
+            "research_gate_passed": lift_delta >= 0.02 and low_delta >= -0.0001,
+            "status": "research_only",
+            "strategy": strategy,
+            "topk_lift_vs_random": round(float(target.get("topk_lift_vs_random") or 0.0), 4),
+            "high_interaction_hit_rate": round(float(target.get("high_interaction_hit_rate") or 0.0), 4),
+            "low_interaction_avoidance_rate": round(float(target.get("low_interaction_avoidance_rate") or 0.0), 4),
+            "required_lift_delta_vs_v2_4": 0.02,
+            "lift_delta_vs_v2_4": round(lift_delta, 4),
+            "high_hit_delta_vs_v2_4": round(high_delta, 4),
+            "low_avoidance_delta_vs_v2_4": round(low_delta, 4),
+            "decision": "keep_as_research_evidence",
+            "note": "Qwen embedding 策略只作为研究证据对比，不替代 v2.4 生产权重。",
+        }
     ready_improved = [
         item
         for item in per_account_metrics
@@ -1767,6 +1838,16 @@ def _baseline_gap(strategy_comparison: dict, strategy: str) -> dict:
 def _calibration_summary(strategy_comparison: dict, promotion_gate: dict, strategy: str) -> dict:
     target = strategy_comparison.get(strategy) or {}
     semantic = strategy_comparison.get("semantic_baseline_v2") or {}
+    if strategy in EMBEDDING_RESEARCH_STRATEGIES:
+        return {
+            "strategy": strategy,
+            "status": "research_only",
+            "semantic_baseline_ahead": float(semantic.get("topk_lift_vs_random") or 0) > float(target.get("topk_lift_vs_random") or 0),
+            "target_topk_lift_vs_random": float(target.get("topk_lift_vs_random") or 0),
+            "target_high_interaction_hit_rate": float(target.get("high_interaction_hit_rate") or 0),
+            "required_lift_delta_vs_v2_4": 0.02,
+            "production_status": "research_only",
+        }
     return {
         "strategy": strategy,
         "status": "eligible_for_stronger_weight" if promotion_gate.get("passed") else "research_only",
@@ -1783,6 +1864,19 @@ def _semantic_gap_analysis(strategy_comparison: dict, strategy: str) -> dict:
     gap = _baseline_gap(strategy_comparison, strategy)
     target = strategy_comparison.get(strategy) or {}
     semantic = strategy_comparison.get("semantic_baseline_v2") or {}
+    if strategy in EMBEDDING_RESEARCH_STRATEGIES:
+        base = strategy_comparison.get(RESEARCH_RANKER_V24_STRATEGY) or {}
+        lift_delta = float(target.get("topk_lift_vs_random") or 0.0) - float(base.get("topk_lift_vs_random") or 0.0)
+        return {
+            "strategy": strategy,
+            "target_topk_lift_vs_random": float(target.get("topk_lift_vs_random") or 0.0),
+            "semantic_topk_lift_vs_random": float(semantic.get("topk_lift_vs_random") or 0.0),
+            "lift_gap": round(float(gap.get("lift_vs_semantic_baseline") or 0.0), 4),
+            "lift_delta_vs_v2_4": round(lift_delta, 4),
+            "required_lift_delta_vs_v2_4": 0.02,
+            "passed": lift_delta >= 0.02,
+            "status": "positive_research_signal" if lift_delta >= 0.02 else "research_only",
+        }
     required_gap = 0.03 if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY} else 0.0
     lift_gap = float(gap.get("lift_vs_semantic_baseline") or 0.0)
     return {
@@ -2211,6 +2305,9 @@ def _report_payload(
             "leakage_guard_summary": {},
             "next_calibration_queue": [],
             "calibration_summary": _calibration_summary({}, _promotion_gate({}, [], strategy=RESEARCH_RANKER_V24_STRATEGY), RESEARCH_RANKER_V24_STRATEGY),
+            "embedding_coverage": {},
+            "embedding_evidence_summary": {},
+            "embedding_strategy_gap": embedding_strategy_gap({}, selected_strategy=TEXT_VISUAL_EMBEDDING_STRATEGY),
         },
         "top_rows": rows,
     }

@@ -222,9 +222,23 @@
               <span class="status neutral">基线差异</span>
               <span>{{ clipText(semanticGapText, 116) }}</span>
             </div>
+            <div v-if="embeddingEvidenceText" class="quality-row" style="margin-top:8px;">
+              <span class="status neutral">相似历史证据</span>
+              <span>{{ clipText(embeddingEvidenceText, 116) }}</span>
+            </div>
+            <div v-if="embeddingEvidence.embedding_ranker_reason" class="quality-row" style="margin-top:8px;">
+              <span class="status neutral">Qwen</span>
+              <span>{{ clipText(String(embeddingEvidence.embedding_ranker_reason || ''), 116) }}</span>
+            </div>
             <div v-if="componentRows.length" class="detail-metrics" style="margin-top:8px;">
               <span v-for="item in componentRows" :key="item.key">{{ item.label }}<strong>{{ item.value }}</strong></span>
             </div>
+            <template v-if="embeddingEvidenceRows.length">
+              <div v-for="item in embeddingEvidenceRows" :key="`${item.label}-${item.historical_sample_id || item.platform_item_id || item.title}`" class="quality-row">
+                <span class="status" :class="String(item.status || 'neutral')">{{ item.label }}</span>
+                <span>{{ clipText(`${item.title || item.platform_item_id || '历史样本'} / 相似 ${Number(item.similarity || 0).toFixed(2)} / 热度 ${Number(item.normalized_reward || item.reward_proxy || 0).toFixed(1)}`, 116) }}</span>
+              </div>
+            </template>
             <template v-if="prototypeHits.length">
               <div v-for="item in prototypeHits.slice(0, 3)" :key="String(item.prototype_key || item.prototype_name)" class="quality-row">
                 <span class="status ok">原型</span>
@@ -365,6 +379,39 @@ const baseline = computed(() => history.value?.account_baseline_position || {});
 const componentScores = computed<Record<string, unknown>>(() => {
   const scores = history.value?.component_scores;
   return scores && typeof scores === "object" ? scores as Record<string, unknown> : {};
+});
+const embeddingEvidence = computed<Record<string, unknown>>(() => {
+  const value = history.value?.embedding_evidence;
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+});
+const embeddingQuality = computed<Record<string, unknown>>(() => {
+  const value = embeddingEvidence.value.embedding_evidence_quality;
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+});
+const embeddingEvidenceText = computed(() => {
+  if (!Object.keys(embeddingEvidence.value).length) return "";
+  const textScore = Number(embeddingEvidence.value.text_similarity_score || 0);
+  const visualScore = Number(embeddingEvidence.value.visual_similarity_score || 0);
+  const quality = Number(embeddingQuality.value.score || 0);
+  const scope = String(embeddingEvidence.value.embedding_scope || "account");
+  return `文本 ${textScore.toFixed(2)} / 视觉 ${visualScore.toFixed(2)} / 质量 ${quality.toFixed(2)} / ${scope}`;
+});
+const embeddingEvidenceRows = computed(() => {
+  const groups: Array<[string, string, string]> = [
+    ["matched_text_high_samples", "文本高互动", "ok"],
+    ["matched_text_low_samples", "文本低风险", "warn"],
+    ["matched_visual_high_samples", "视觉高互动", "ok"],
+    ["matched_visual_low_samples", "视觉低风险", "warn"]
+  ];
+  const rows: Array<Record<string, unknown>> = [];
+  for (const [key, label, status] of groups) {
+    const values = embeddingEvidence.value[key];
+    if (!Array.isArray(values)) continue;
+    for (const item of values.slice(0, 2)) {
+      rows.push({ ...(item as Record<string, unknown>), label, status });
+    }
+  }
+  return rows.slice(0, 6);
 });
 const componentRows = computed(() => ["high_similarity", "low_interaction_risk", "account_baseline_position", "prototype_fit", "semantic_label_trust"].map((key) => ({
   key,

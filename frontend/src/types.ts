@@ -770,6 +770,43 @@ export interface MultimodalFeatureExperimentResult {
   [key: string]: unknown;
 }
 
+export interface QwenEmbeddingBuildResult {
+  contract_version?: string;
+  status?: string;
+  embedding_model?: string;
+  embedding_version?: string;
+  entity_type?: string;
+  account_id?: string;
+  dataset_id?: string;
+  modality?: string;
+  sample_count?: number;
+  created?: number;
+  reused?: number;
+  skipped?: number;
+  failed?: number;
+  coverage?: Record<string, unknown>;
+  service_status?: Record<string, unknown>;
+  errors?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface QwenEmbeddingEvidenceResult {
+  contract_version?: string;
+  status?: string;
+  embedding_model?: string;
+  account_id?: string;
+  dataset_id?: string;
+  modality?: string;
+  sample_count?: number;
+  embedding_coverage?: Record<string, unknown>;
+  build_summary?: Record<string, unknown>;
+  similar_evidence_summary?: Record<string, unknown>;
+  low_interaction_risk_samples?: Array<Record<string, unknown>>;
+  evidence_samples?: Array<Record<string, unknown>>;
+  recommendations?: string[];
+  [key: string]: unknown;
+}
+
 export interface PrototypeExample {
   title?: string;
   views?: number;

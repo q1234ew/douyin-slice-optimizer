@@ -62,6 +62,12 @@ from dso.learning.multimodal_validation import (
     run_multimodal_validation,
 )
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
+from dso.learning.qwen_embeddings import (
+    build_qwen_embedding_index,
+    qwen_embedding_evidence_for_segment,
+    run_qwen_embedding_evidence,
+)
+from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_shadow
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.quality.insights import quality_insights
 from dso.review import list_change_events, list_review_events, mark_candidate_review
@@ -315,7 +321,22 @@ def segment_changes(segment_id: str) -> dict:
 @app.get("/segments/{segment_id}/history")
 def segment_history(segment_id: str, account_id: str | None = None, limit: int = 8) -> dict:
     try:
-        return calibrate_segment_history(segment_id, account_id=account_id, limit=limit)
+        history = calibrate_segment_history(segment_id, account_id=account_id, limit=limit)
+        embedding = qwen_embedding_evidence_for_segment(segment_id, account_id=account_id, limit=limit, modality="all")
+        return {**history, "embedding_evidence": embedding}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/segments/{segment_id}/qwen-omni/analyze")
+def segment_qwen_omni_analyze(segment_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return analyze_candidate_with_qwen_omni(
+            segment_id,
+            account_id=payload.get("account_id"),
+            max_clip_seconds=float(payload.get("max_clip_seconds") or 15.0),
+            load_model=bool(payload.get("load_model", False)),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -857,6 +878,45 @@ def post_multimodal_feature_experiment(payload: dict = Body(default_factory=dict
         min_feature_samples=int(payload.get("min_feature_samples") or 60),
         audio_window_seconds=float(payload.get("audio_window_seconds") or 10.0),
         force=bool(payload.get("force", False)),
+    )
+
+
+@app.post("/learning/qwen-embeddings/build")
+def post_qwen_embeddings_build(payload: dict = Body(default_factory=dict)) -> dict:
+    return build_qwen_embedding_index(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        entity_type=payload.get("entity_type") or "historical_sample",
+        modality=payload.get("modality") or "text",
+        limit=int(payload.get("limit") or 300),
+        force=bool(payload.get("force", False)),
+    )
+
+
+@app.post("/learning/qwen-embedding-evidence/run")
+def post_qwen_embedding_evidence(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_qwen_embedding_evidence(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 300),
+        k=int(payload.get("k") or 10),
+        modality=payload.get("modality") or "all",
+    )
+
+
+@app.get("/learning/qwen-omni/status")
+def get_qwen_omni_status() -> dict:
+    return qwen_omni_status()
+
+
+@app.post("/learning/qwen-omni/shadow-run")
+def post_qwen_omni_shadow_run(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_qwen_omni_shadow(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 20),
+        max_clip_seconds=float(payload.get("max_clip_seconds") or 15.0),
+        load_model=bool(payload.get("load_model", False)),
     )
 
 

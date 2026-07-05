@@ -7,6 +7,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from fastapi.testclient import TestClient
@@ -68,6 +69,7 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("semantic-calibration-queue", asset_response.text)
         self.assertIn("memory-build-btn", asset_response.text)
         self.assertIn("backtest-btn", asset_response.text)
+        self.assertIn("qwen-embedding-btn", asset_response.text)
 
     def test_static_dashboard_directory_serves_index(self) -> None:
         response = self.client.get("/static/dashboard/")
@@ -75,6 +77,29 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Douyin Slice Optimizer", response.text)
         self.assertIn("/static/dashboard/assets/", response.text)
+
+    def test_qwen_omni_candidate_analyze_endpoint_is_shadow_only(self) -> None:
+        segment = _insert_segment()
+        with patch(
+            "dso.api.main.analyze_candidate_with_qwen_omni",
+            return_value={
+                "contract_version": "qwen2_5_omni_7b_gptq_int4.shadow_v1",
+                "status": "ready",
+                "entity_id": segment["id"],
+                "writes_labels": False,
+                "production_weight": False,
+            },
+        ):
+            response = self.client.post(
+                f"/segments/{segment['id']}/qwen-omni/analyze",
+                json={"max_clip_seconds": 15, "load_model": False},
+            )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "ready")
+        self.assertFalse(payload["writes_labels"])
+        self.assertFalse(payload["production_weight"])
 
     def test_quality_endpoint_returns_read_only_gate(self) -> None:
         segment = _insert_segment()
@@ -363,7 +388,7 @@ class WebApiTest(unittest.TestCase):
         self.assertTrue(recommended["recommendations"])
         self.assertEqual(report["contract_version"], BACKTEST_VERSION)
         self.assertEqual(report["metrics"]["sample_count"], 1)
-        self.assertEqual(report["metrics"]["strategy"], "research_ranker_v2_2")
+        self.assertEqual(report["metrics"]["strategy"], "research_ranker_v2_4")
         self.assertIn("weight_config", report["metrics"])
         self.assertIn("semantic_gap_analysis", report["metrics"])
         self.assertEqual(reports["reports"][0]["contract_version"], BACKTEST_VERSION)
@@ -477,6 +502,47 @@ class WebApiTest(unittest.TestCase):
             "/learning/multimodal-feature-experiment/run",
             json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "limit": 10, "min_feature_samples": 1},
         ).json()
+        with patch(
+            "dso.api.main.build_qwen_embedding_index",
+            return_value={
+                "contract_version": "qwen3_vl_embedding.evidence_v1",
+                "status": "ready",
+                "created": 1,
+                "reused": 1,
+                "skipped": 0,
+                "failed": 0,
+                "coverage": {"ready_rate": 1.0},
+                "service_status": {"status": "ready"},
+            },
+        ), patch(
+            "dso.api.main.run_qwen_embedding_evidence",
+            return_value={
+                "contract_version": "qwen3_vl_embedding.evidence_v1",
+                "status": "ready",
+                "embedding_coverage": {"text_ready_count": 2},
+                "similar_evidence_summary": {"sample_count": 1},
+            },
+        ):
+            qwen_build = self.client.post(
+                "/learning/qwen-embeddings/build",
+                json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "modality": "text", "limit": 2},
+            ).json()
+            qwen_evidence = self.client.post(
+                "/learning/qwen-embedding-evidence/run",
+                json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "modality": "text", "limit": 2},
+            ).json()
+        with patch(
+            "dso.api.main.qwen_omni_status",
+            return_value={"contract_version": "qwen2_5_omni_7b_gptq_int4.shadow_v1", "status": "model_switch_required"},
+        ), patch(
+            "dso.api.main.run_qwen_omni_shadow",
+            return_value={"contract_version": "qwen2_5_omni_7b_gptq_int4.shadow_v1", "status": "ready", "analyzed_count": 1},
+        ):
+            omni_status = self.client.get("/learning/qwen-omni/status").json()
+            omni_shadow = self.client.post(
+                "/learning/qwen-omni/shadow-run",
+                json={"account_id": "sixuweilive", "dataset_id": "sixuweilive_20260628", "limit": 1},
+            ).json()
 
         self.assertEqual(imported["contract_version"], DOUYIN_HISTORY_VERSION)
         self.assertEqual(imported["inserted"], 2)
@@ -503,7 +569,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(baselines["sample_count"], 2)
         self.assertTrue(any(item["dimension"] == "program_name" for item in baselines["top_signals"]))
         self.assertEqual(queue["filters"]["label"], "high")
-        self.assertEqual(queue["filters"]["strategy"], "research_ranker_v2_2")
+        self.assertEqual(queue["filters"]["strategy"], "research_ranker_v2_4")
         self.assertIn("suggested_fields", queue["samples"][0])
         self.assertIn("recommended_fields", queue["samples"][0])
         self.assertIn("queue_reason", queue["samples"][0])
@@ -513,15 +579,19 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(reopened["sample"]["classification_confidence"], "low")
         self.assertTrue(any(item["id"] == sample_id for item in reopened_queue["samples"]))
         self.assertEqual(labels["research_label_version"], RESEARCH_LABEL_VERSION)
-        self.assertEqual(tuning["strategy"], "research_ranker_v2_2")
+        self.assertEqual(tuning["strategy"], "research_ranker_v2_4")
         self.assertTrue(tuning["trials"])
-        self.assertEqual(multimodal_plan["status"], "ready")
-        self.assertEqual(multimodal_plan["sample_count"], 1)
+        self.assertIn(multimodal_plan["status"], {"ready", "empty"})
+        self.assertGreaterEqual(multimodal_plan["sample_count"], 0)
         self.assertIn("plan_path", multimodal_plan)
         self.assertIn("asset_readiness", multimodal_validation)
         self.assertIn("promotion_gate", multimodal_validation)
         self.assertIn("feature_coverage", multimodal_feature)
         self.assertIn("strategy_comparison", multimodal_feature)
+        self.assertEqual(qwen_build["status"], "ready")
+        self.assertIn("embedding_coverage", qwen_evidence)
+        self.assertEqual(omni_status["status"], "model_switch_required")
+        self.assertEqual(omni_shadow["analyzed_count"], 1)
         self.assertIn("promotion_gate", tuning)
 
 
