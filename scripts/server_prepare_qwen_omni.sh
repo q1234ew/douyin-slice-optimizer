@@ -110,7 +110,8 @@ install_system_cuda() {
 
   local repo_tag
   repo_tag="ubuntu${VERSION_ID//./}"
-  local keyring="/tmp/cuda-keyring_1.1-1_all.deb"
+  local keyring
+  keyring="$(mktemp /tmp/cuda-keyring.XXXXXX.deb)"
   local url="https://developer.download.nvidia.com/compute/cuda/repos/${repo_tag}/x86_64/cuda-keyring_1.1-1_all.deb"
   local sudo_cmd=(sudo)
   if [[ -n "${PROXY_URL}" ]]; then
