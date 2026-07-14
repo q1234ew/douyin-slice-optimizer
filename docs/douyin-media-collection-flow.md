@@ -97,6 +97,24 @@ PYTHONPATH=src python3 -m dso.cli douyin-media-collect \
   --run-id 20260629_pilot_sixuweilive
 ```
 
+生成 300 条多模态采集计划：
+
+```bash
+PYTHONPATH=src python3 -m dso.cli multimodal-collection-plan \
+  --limit 300 \
+  --stage beta_d1
+```
+
+执行下载采集时，`multimodal-collect` 默认仍是 dry-run，需要显式加 `--download`。默认存储上限已提升到 5GB，可通过 `--max-storage-gb` 或环境变量 `DSO_MULTIMODAL_COLLECTION_MAX_STORAGE_GB` 临时调大：
+
+```bash
+DSO_MULTIMODAL_COLLECTION_MAX_STORAGE_GB=5 \
+PYTHONPATH=src python3 -m dso.cli multimodal-collect \
+  --plan-path outputs/beta_d1_multimodal/multimodal_collection_plan.json \
+  --limit 300 \
+  --download
+```
+
 如果只需要视频、封面和抽帧，暂时不抽音频：
 
 ```bash

@@ -20,6 +20,13 @@ import type {
   LearningDataset,
   LearningDatasetList,
   Manifest,
+  MaterialCalibrationReplay,
+  MaterialConfusionQueue,
+  MaterialEvidenceStatus,
+  MaterialGoldDraft,
+  MaterialGoldQueue,
+  MaterialGoldSample,
+  MaterialResolverReport,
   MemoryBuildResult,
   ModuleStatus,
   ModuleStatusKey,
@@ -120,6 +127,14 @@ export interface DashboardStore {
   runMultimodalValidation: () => Promise<void>;
   runMultimodalFeatureExperiment: () => Promise<void>;
   runQwenEmbeddingResearch: () => Promise<void>;
+  loadMaterialGoldQueue: (notify?: boolean) => Promise<void>;
+  loadMaterialConfusionQueue: (notify?: boolean) => Promise<void>;
+  loadMaterialEvidenceStatus: (notify?: boolean) => Promise<void>;
+  runMaterialEvidenceSmoke: () => Promise<void>;
+  runMaterialResolverShadow: () => Promise<void>;
+  saveMaterialGoldAnnotation: (sampleId: string) => Promise<void>;
+  reopenMaterialGoldAnnotation: (sampleId: string) => Promise<void>;
+  runMaterialCalibrationReplay: () => Promise<void>;
   loadSemanticCalibrationQueue: (notify?: boolean) => Promise<void>;
   saveCalibrationLabels: (sampleId: string) => Promise<void>;
   reopenCalibrationSample: (sampleId: string) => Promise<void>;
@@ -166,7 +181,13 @@ export interface DashboardState {
   multimodalFeatureExperiment: MultimodalFeatureExperimentResult | null;
   qwenEmbeddingBuild: QwenEmbeddingBuildResult | null;
   qwenEmbeddingEvidence: QwenEmbeddingEvidenceResult | null;
+  materialGoldQueue: MaterialGoldQueue | null;
+  materialConfusionQueue: MaterialConfusionQueue | null;
+  materialEvidenceStatus: MaterialEvidenceStatus | null;
+  materialResolverReport: MaterialResolverReport | null;
+  materialCalibrationReplay: MaterialCalibrationReplay | null;
   calibrationDrafts: Record<string, CalibrationDraft>;
+  materialGoldDrafts: Record<string, MaterialGoldDraft>;
   rankerTuning: RankerTuningResult | null;
   prototypeBank: PrototypeBankResult | null;
   historyBaselines: DouyinHistoryBaselines | null;
@@ -236,7 +257,13 @@ export function useDashboard(): DashboardStore {
     multimodalFeatureExperiment: null,
     qwenEmbeddingBuild: null,
     qwenEmbeddingEvidence: null,
+    materialGoldQueue: null,
+    materialConfusionQueue: null,
+    materialEvidenceStatus: null,
+    materialResolverReport: null,
+    materialCalibrationReplay: null,
     calibrationDrafts: {},
+    materialGoldDrafts: {},
     rankerTuning: null,
     prototypeBank: null,
     historyBaselines: null,
@@ -609,11 +636,14 @@ export function useDashboard(): DashboardStore {
       state.baselines = baselines.baselines || [];
       state.accountInsights = insights || null;
 
-      const [clock, backtests, prototypes, calibration] = await Promise.allSettled([
+      const [clock, backtests, prototypes, calibration, materialGold, materialConfusion, materialEvidence] = await Promise.allSettled([
         api<InterestClockResult>(`/accounts/${encodeURIComponent(accountPath)}/interest-clock?limit=5`),
         api<BacktestList>(`/learning/backtest?account_id=${accountQuery}&limit=3`),
         api<PrototypeBankResult>(`/accounts/${encodeURIComponent(accountPath)}/prototypes?limit=5&source=visible_capture&dataset_id=${encodeURIComponent(dataset)}`),
-        api<SemanticCalibrationQueue>(calibrationQueuePath(8))
+        api<SemanticCalibrationQueue>(calibrationQueuePath(8)),
+        api<MaterialGoldQueue>(materialGoldQueuePath(6)),
+        api<MaterialConfusionQueue>(materialConfusionQueuePath(80)),
+        api<MaterialEvidenceStatus>(materialEvidenceStatusPath(80))
       ]);
       if (requestSeq !== feedbackLoadSeq) return;
       state.interestClock = clock.status === "fulfilled" ? clock.value || null : null;
@@ -621,7 +651,11 @@ export function useDashboard(): DashboardStore {
       state.prototypeBank = prototypes.status === "fulfilled" ? prototypes.value || null : null;
       state.semanticCalibrationQueue = calibration.status === "fulfilled" ? normalizeCalibrationQueue(calibration.value) : null;
       syncCalibrationDrafts(calibrationSamples(state.semanticCalibrationQueue));
-      const rejected = [clock, backtests, prototypes, calibration].find(result => result.status === "rejected");
+      state.materialGoldQueue = materialGold.status === "fulfilled" ? materialGold.value || null : null;
+      syncMaterialGoldDrafts(state.materialGoldQueue?.samples || []);
+      state.materialConfusionQueue = materialConfusion.status === "fulfilled" ? materialConfusion.value || null : null;
+      state.materialEvidenceStatus = materialEvidence.status === "fulfilled" ? materialEvidence.value || null : null;
+      const rejected = [clock, backtests, prototypes, calibration, materialGold, materialConfusion, materialEvidence].find(result => result.status === "rejected");
       if (rejected && rejected.status === "rejected") {
         state.learningResult = `部分研究评估暂不可用：${errorText(rejected.reason, "接口失败")}`;
         failModule("history", rejected.reason, "部分研究评估暂不可用");
@@ -637,6 +671,9 @@ export function useDashboard(): DashboardStore {
       state.backtestReports = [];
       state.prototypeBank = null;
       state.semanticCalibrationQueue = null;
+      state.materialGoldQueue = null;
+      state.materialConfusionQueue = null;
+      state.materialEvidenceStatus = null;
       state.learningResult = error instanceof Error ? `学习评估暂不可用：${error.message}` : "学习评估暂不可用";
       failModule("history", error, "历史先验与回测暂不可用");
     }
@@ -673,6 +710,38 @@ export function useDashboard(): DashboardStore {
     params.set("strategy", "research_ranker_v2_4");
     params.set("min_disagreement", "0");
     return `/learning/semantic-calibration/queue?${params.toString()}`;
+  }
+
+  function materialGoldQueuePath(limit = 6): string {
+    const params = new URLSearchParams();
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    if (account) params.set("account_id", account);
+    if (dataset) params.set("dataset_id", dataset);
+    params.set("limit", String(limit));
+    return `/learning/material-gold-set/queue?${params.toString()}`;
+  }
+
+  function materialConfusionQueuePath(limit = 80): string {
+    const params = new URLSearchParams();
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    if (account) params.set("account_id", account);
+    if (dataset) params.set("dataset_id", dataset);
+    params.set("limit", String(limit));
+    params.set("local_media_only", "true");
+    return `/learning/material-confusions/queue?${params.toString()}`;
+  }
+
+  function materialEvidenceStatusPath(limit = 80): string {
+    const params = new URLSearchParams();
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    if (account) params.set("account_id", account);
+    if (dataset) params.set("dataset_id", dataset);
+    params.set("limit", String(limit));
+    params.set("include_reviewed", "true");
+    return `/learning/material-evidence/status?${params.toString()}`;
   }
 
   function normalizeCalibrationQueue(queue: SemanticCalibrationQueue | null | undefined): SemanticCalibrationQueue | null {
@@ -717,6 +786,26 @@ export function useDashboard(): DashboardStore {
       next[key] = state.calibrationDrafts[key] || draftFromSample(sample);
     }
     state.calibrationDrafts = next;
+  }
+
+  function materialGoldDraftFromSample(sample: MaterialGoldSample): MaterialGoldDraft {
+    return {
+      domain_category: textValue(sample.domain_category) || "unknown",
+      material_type: textValue(sample.material_type) || "unknown",
+      program_context: textValue(sample.program_context) || "unknown",
+      presentation_style: textValue(sample.presentation_style) || "unknown",
+      review_note: "人工确认素材形态"
+    };
+  }
+
+  function syncMaterialGoldDrafts(samples: MaterialGoldSample[]): void {
+    const next: Record<string, MaterialGoldDraft> = {};
+    for (const sample of samples) {
+      const key = sampleKey(sample);
+      if (!key) continue;
+      next[key] = state.materialGoldDrafts[key] || materialGoldDraftFromSample(sample);
+    }
+    state.materialGoldDrafts = next;
   }
 
   function calibrationQueueCounts(queue: SemanticCalibrationQueue | null | undefined): { visible: number; total: number; pending: number; saved: number } {
@@ -1034,7 +1123,7 @@ export function useDashboard(): DashboardStore {
     const result = await api<MultimodalCollectionPlan>("/learning/multimodal/collection-plan", jsonBody({
       account_id: account || null,
       dataset_id: dataset || null,
-      limit: 120,
+      limit: 300,
       stage: "beta_d1",
       include_ready: false
     }));
@@ -1126,6 +1215,149 @@ export function useDashboard(): DashboardStore {
     const delta = Number(selected.topk_lift_delta_vs_v2_4 || 0);
     state.learningResult = `Qwen 索引 ${build.status || "ready"} / ready ${percentText(Number(coverage.ready_rate || 0))} / 回测 lift ${Number(metrics.topk_lift_vs_random || 0).toFixed(2)}x / 较 v2.4 ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`;
     toast("Qwen embedding 索引与研究回测已生成");
+  }
+
+  async function loadMaterialGoldQueue(notify = true): Promise<void> {
+    beginModule("history");
+    try {
+      const queue = await api<MaterialGoldQueue>(materialGoldQueuePath(12));
+      state.materialGoldQueue = queue || null;
+      syncMaterialGoldDrafts(queue.samples || []);
+      const summary = queue.batch_summary || {};
+      state.learningResult = `素材形态审核：待确认 ${Number(summary.pending_count || 0)} / 已确认 ${Number(summary.confirmed_count || 0)}`;
+      finishModule("history");
+      if (notify) toast("素材形态审核队列已刷新");
+    } catch (error) {
+      failModule("history", error, "素材形态审核队列刷新失败");
+      throw error;
+    }
+  }
+
+  async function loadMaterialConfusionQueue(notify = true): Promise<void> {
+    beginModule("history");
+    try {
+      const queue = await api<MaterialConfusionQueue>(materialConfusionQueuePath(80));
+      state.materialConfusionQueue = queue || null;
+      const summary = queue.batch_summary || {};
+      state.learningResult = `定向错判队列：${Number(summary.selected_count || queue.count || 0)} 条 / ${Number(summary.account_count || 0)} 个账号 / 媒体就绪 ${percentText(Number(summary.local_media_ready_rate || 0))}`;
+      finishModule("history");
+      if (notify) toast("定向错判队列已刷新");
+    } catch (error) {
+      failModule("history", error, "定向错判队列刷新失败");
+      throw error;
+    }
+  }
+
+  async function loadMaterialEvidenceStatus(notify = true): Promise<void> {
+    beginModule("history");
+    try {
+      const status = await api<MaterialEvidenceStatus>(materialEvidenceStatusPath(80));
+      state.materialEvidenceStatus = status || null;
+      const summary = status.batch_summary || {};
+      state.learningResult = `D10-B 证据：${Number(summary.evidence_ready_count || 0)}/${Number(summary.selected_count || 0)} / 多窗口 ${Number(summary.multi_window_ready_count || 0)} / ASR ${Number(summary.asr_ready_count || 0)} / OCR ${Number(summary.ocr_ready_count || 0)}`;
+      finishModule("history");
+      if (notify) toast("D10-B 证据状态已刷新");
+    } catch (error) {
+      failModule("history", error, "D10-B 证据状态刷新失败");
+      throw error;
+    }
+  }
+
+  async function runMaterialEvidenceSmoke(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const report = await api<MaterialEvidenceStatus>("/learning/material-evidence/extract", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 3,
+      window_seconds: 8,
+      run_asr: true,
+      run_ocr: true,
+      run_omni: true,
+      load_model: false,
+      force: false,
+      include_reviewed: true
+    }));
+    const coverage = report.coverage || {};
+    state.learningResult = `D10-B Smoke ${report.status || "ready"} / ${Number(report.sample_count || 0)} 条 / 多窗口 ${Number(coverage.multi_window_ready_count || 0)} / ASR ${Number(coverage.asr_ready_count || 0)} / OCR ${Number(coverage.ocr_ready_count || 0)}`;
+    await loadMaterialEvidenceStatus(false);
+    toast("D10-B 三窗口证据 Smoke 已完成");
+  }
+
+  async function runMaterialResolverShadow(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const report = await api<MaterialResolverReport>("/learning/material-resolver/shadow", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 80,
+      include_reviewed: true
+    }));
+    state.materialResolverReport = report;
+    const summary = report.summary || {};
+    state.learningResult = `Resolver Shadow / 证据 ${Number(summary.evidence_ready_count || 0)} / 分歧 ${Number(summary.disagreement_count || 0)} / Gold 证据 ${Number(summary.cached_gold_evaluable_count || 0)}/${Number(summary.gold_evaluable_count || 0)} / ${report.status || "research_only"}`;
+    await loadMaterialEvidenceStatus(false);
+    toast("D10-B Resolver Shadow 已生成");
+  }
+
+  async function saveMaterialGoldAnnotation(sampleId: string): Promise<void> {
+    const id = String(sampleId || "").trim();
+    const draft = state.materialGoldDrafts[id];
+    if (!id || !draft) {
+      toast("未找到可保存的素材形态样本");
+      return;
+    }
+    await api(`/learning/material-gold-set/${encodeURIComponent(id)}`, {
+      ...jsonBody({
+        domain_category: draft.domain_category,
+        material_type: draft.material_type,
+        program_context: draft.program_context,
+        presentation_style: draft.presentation_style,
+        review_note: draft.review_note,
+        operator: "workbench"
+      }),
+      method: "PATCH"
+    });
+    await loadMaterialGoldQueue(false);
+    await loadMaterialConfusionQueue(false);
+    const summary = state.materialGoldQueue?.batch_summary || {};
+    state.learningResult = `素材形态已确认 / 剩余 ${Number(summary.pending_count || 0)} / 已完成 ${Number(summary.confirmed_count || 0)}`;
+    toast("素材形态人工确认已保存");
+  }
+
+  async function reopenMaterialGoldAnnotation(sampleId: string): Promise<void> {
+    const id = String(sampleId || "").trim();
+    if (!id) return;
+    await api(`/learning/material-gold-set/${encodeURIComponent(id)}/reopen`, jsonBody({
+      operator: "workbench",
+      reason: "workbench reopen material gold annotation"
+    }));
+    await loadMaterialGoldQueue(false);
+    state.learningResult = "素材形态标注已重新打开";
+    toast("样本已回到待审核状态");
+  }
+
+  async function runMaterialCalibrationReplay(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const replay = await api<MaterialCalibrationReplay>("/learning/material-gold-set/replay", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      k: 30,
+      holdout_policy: "time"
+    }));
+    state.materialCalibrationReplay = replay;
+    state.materialGoldQueue = replay.queue || state.materialGoldQueue;
+    syncMaterialGoldDrafts(state.materialGoldQueue?.samples || []);
+    const metrics = replay.metrics || {};
+    const gate = (metrics.omni_material_v29_report || metrics.omni_material_v28_report) && typeof (metrics.omni_material_v29_report || metrics.omni_material_v28_report) === "object"
+      ? (metrics.promotion_gate || {})
+      : {};
+    const quality = metrics.omni_material_calibration || {};
+    const auditQuality = metrics.omni_material_calibration_holdout || quality;
+    const split = metrics.omni_material_gold_split || {};
+    state.learningResult = `v2.9 回放 / Gold ${Number(quality.confirmed_count || 0)} / 校准 ${Number(split.calibration_count || 0)} + 审计 ${Number(split.audit_count || 0)} / 严格 ${percentText(Number(auditQuality.material_type_accuracy || 0))} / 规范形态 ${percentText(Number(auditQuality.canonical_material_type_accuracy ?? auditQuality.material_type_accuracy ?? 0))} / ${String(gate.status || "research_only")}`;
+    toast("v2.9 素材形态层级回放已完成");
   }
 
   async function loadSemanticCalibrationQueue(notify = true): Promise<void> {
@@ -1396,6 +1628,14 @@ export function useDashboard(): DashboardStore {
     runMultimodalValidation,
     runMultimodalFeatureExperiment,
     runQwenEmbeddingResearch,
+    loadMaterialGoldQueue,
+    loadMaterialConfusionQueue,
+    loadMaterialEvidenceStatus,
+    runMaterialEvidenceSmoke,
+    runMaterialResolverShadow,
+    saveMaterialGoldAnnotation,
+    reopenMaterialGoldAnnotation,
+    runMaterialCalibrationReplay,
     loadSemanticCalibrationQueue,
     saveCalibrationLabels,
     reopenCalibrationSample,

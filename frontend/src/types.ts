@@ -591,6 +591,7 @@ export interface SemanticCalibrationSample {
   missing_fields?: string[];
   suggested_fields?: string[];
   recommended_fields?: string[];
+  recommended_field_guides?: AnnotationFieldGuide[];
   impact_reason?: string;
   queue_reason?: string;
   queue_type?: string;
@@ -606,6 +607,16 @@ export interface SemanticCalibrationSample {
   [key: string]: unknown;
 }
 
+export interface AnnotationFieldGuide {
+  field?: string;
+  label_zh?: string;
+  short_label_zh?: string;
+  description_zh?: string;
+  annotation_hint_zh?: string;
+  allowed_values?: Array<{ value?: string; label_zh?: string; label?: string }>;
+  [key: string]: unknown;
+}
+
 export interface SemanticCalibrationQueue {
   contract_version?: string;
   status?: string;
@@ -617,6 +628,7 @@ export interface SemanticCalibrationQueue {
   filters?: Record<string, unknown>;
   batch_summary?: Record<string, unknown>;
   semantic_label_catalog?: Record<string, unknown>;
+  annotation_field_guides?: Record<string, AnnotationFieldGuide>;
   [key: string]: unknown;
 }
 
@@ -627,6 +639,171 @@ export interface CalibrationDraft {
   artist_names: string;
   song_title: string;
   tags: string;
+}
+
+export interface MaterialGoldAnnotation {
+  id?: string;
+  sample_id?: string;
+  account_id?: string;
+  dataset_id?: string;
+  domain_category?: string;
+  material_type?: string;
+  program_context?: string;
+  presentation_style?: string;
+  review_status?: string;
+  operator?: string;
+  review_note?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface MaterialGoldSample extends SemanticCalibrationSample {
+  domain_category?: string;
+  material_type?: string;
+  program_context?: string;
+  presentation_style?: string;
+  material_conflict?: boolean;
+  score_delta_vs_v2_4?: number;
+  platform_url?: string;
+  material_label_verified?: boolean;
+  duplicate_group_size?: number;
+  collapsed_variant_count?: number;
+  annotation?: MaterialGoldAnnotation | null;
+}
+
+export interface MaterialGoldQueue {
+  contract_version?: string;
+  status?: string;
+  mode?: string;
+  count?: number;
+  total_candidates?: number;
+  samples?: MaterialGoldSample[];
+  recently_confirmed_samples?: MaterialGoldAnnotation[];
+  batch_summary?: Record<string, unknown>;
+  annotation_field_guides?: Record<string, AnnotationFieldGuide>;
+  source_backtest?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface MaterialConfusionSample extends MaterialGoldSample {
+  confusion_pair?: string;
+  confusion_pair_label_zh?: string;
+  candidate_material_types?: string[];
+  candidate_material_labels_zh?: string[];
+  candidate_context_fields?: string[];
+  omni_raw_material_type?: string;
+  omni_canonical_material_type?: string;
+  omni_highlight_signal?: string;
+  omni_program_context?: string;
+  taxonomy_derivation_reason?: string;
+  cue_evidence?: {
+    left_hits?: string[];
+    right_hits?: string[];
+    left_type?: string;
+    right_type?: string;
+  };
+  assets?: {
+    video?: boolean;
+    audio?: boolean;
+    transcript?: boolean;
+    ocr?: boolean;
+    visual?: boolean;
+    ready_for_evidence?: boolean;
+    paths?: Record<string, string[]>;
+  };
+}
+
+export interface MaterialConfusionQueue {
+  contract_version?: string;
+  queue_version?: string;
+  status?: string;
+  mode?: string;
+  count?: number;
+  total_candidates?: number;
+  taxonomy?: Record<string, unknown>;
+  confusion_pairs?: Array<Record<string, unknown>>;
+  batch_summary?: Record<string, unknown>;
+  samples?: MaterialConfusionSample[];
+  [key: string]: unknown;
+}
+
+export interface MaterialEvidenceSample {
+  sample_id?: string;
+  account_id?: string;
+  title?: string;
+  confusion_pair?: string;
+  status?: string;
+  source_has_audio?: boolean;
+  component_summary?: {
+    planned_window_count?: number;
+    executed_window_count?: number;
+    asr_ready_windows?: number;
+    asr_low_information_windows?: number;
+    asr_audio_missing_windows?: number;
+    ocr_ready_windows?: number;
+    omni_ready_windows?: number;
+    omni_legacy_response_windows?: number;
+  };
+  multi_window_prediction?: string;
+  multi_window_confidence?: number;
+  resolver_strategies?: Record<string, Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface MaterialEvidenceStatus {
+  contract_version?: string;
+  resolver_version?: string;
+  status?: string;
+  queue_count?: number;
+  batch_summary?: Record<string, unknown>;
+  coverage?: Record<string, unknown>;
+  samples?: MaterialEvidenceSample[];
+  latest_resolver_summary?: Record<string, unknown>;
+  recommendations?: string[];
+  [key: string]: unknown;
+}
+
+export interface MaterialResolverReport {
+  contract_version?: string;
+  resolver_version?: string;
+  status?: string;
+  summary?: Record<string, unknown>;
+  strategy_comparison?: Record<string, Record<string, unknown>>;
+  cached_eval_strategy_comparison?: Record<string, Record<string, unknown>>;
+  disagreement_samples?: Array<Record<string, unknown>>;
+  promotion_gate?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface MaterialGoldDraft {
+  domain_category: string;
+  material_type: string;
+  program_context: string;
+  presentation_style: string;
+  review_note: string;
+}
+
+export interface MaterialCalibrationReplay {
+  contract_version?: string;
+  status?: string;
+  mode?: string;
+  metrics?: {
+    strategy?: string;
+    strategy_comparison?: Record<string, Record<string, unknown>>;
+    promotion_gate?: Record<string, unknown>;
+    omni_material_calibration?: Record<string, unknown>;
+    omni_material_calibration_holdout?: Record<string, unknown>;
+    omni_material_gold_split?: Record<string, unknown>;
+    omni_material_router_profiles?: Record<string, unknown>[];
+    omni_material_taxonomy_router_profiles?: Record<string, unknown>[];
+    omni_material_v28_report?: Record<string, unknown>;
+    omni_material_v28_gate?: Record<string, unknown>;
+    omni_material_v29_report?: Record<string, unknown>;
+    omni_material_v29_gate?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  queue?: MaterialGoldQueue;
+  [key: string]: unknown;
 }
 
 export interface RankerTuningResult {

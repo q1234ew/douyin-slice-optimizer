@@ -1,0 +1,358 @@
+{
+  "contract_version": "benchmark_manifest.v1",
+  "benchmark_id": "dso-v1-beta-d10-ab-20260715-r1",
+  "lifecycle": "frozen",
+  "created_at": "2026-07-14T18:46:25.945857+00:00",
+  "purpose": "V1 Beta-D10 A/B historical ranker and material evidence checkpoint",
+  "immutability_policy": "Never edit a frozen manifest. Create a new benchmark_id when data, caches, Gold, source, or evaluation policy changes.",
+  "git": {
+    "parent_commit": "3ddb3fc7ad432744aa7ecffacd2192b79f533d66",
+    "branch_at_freeze": "codex/d10-ab-benchmark-checkpoint",
+    "source_state": "content-addressed_worktree_snapshot"
+  },
+  "versions": {
+    "backtest": "backtest.v2.4",
+    "research_labels": "research_labels.visible_engagement_v2",
+    "research_ranker": "historical_research_ranker.v2.4",
+    "material_evidence": "material_evidence.d10b.v1",
+    "material_resolver": "material_confusion_resolver.shadow_v1"
+  },
+  "run_config": {
+    "account_id": null,
+    "k": 30,
+    "strategy": "research_ranker_v2_9_material_taxonomy",
+    "holdout_policy": "time",
+    "label_version": "research_labels.visible_engagement_v2"
+  },
+  "suites": {
+    "historical_ranker": {
+      "sample_source": "historical_capture_samples",
+      "row_filter": "platform_item_id is present and reward_proxy or normalized_reward is positive",
+      "split": "account-local published_at 80/20 time split; hash fallback only when timestamps are incomplete",
+      "leakage_guard": [
+        "platform_item_id",
+        "stable_title_key"
+      ],
+      "comparison_strategies": [
+        "current_rules",
+        "semantic_baseline_v2",
+        "research_ranker_v2_2",
+        "research_ranker_v2_4",
+        "research_ranker_v2_8_material_calibrated",
+        "research_ranker_v2_9_material_taxonomy"
+      ],
+      "metric_basis": "visible engagement proxy; no play-count imputation"
+    },
+    "material_resolver_shadow": {
+      "queue_limit": 100,
+      "include_reviewed": true,
+      "window_seconds": 8.0,
+      "windows": [
+        "hook",
+        "middle",
+        "payoff"
+      ],
+      "minimum_cached_gold": 30,
+      "minimum_evidence_coverage": 0.85,
+      "minimum_canonical_accuracy": 0.85,
+      "maximum_severe_error_rate": 0.1,
+      "minimum_gain_vs_omni": 0.03,
+      "production_weight": false
+    }
+  },
+  "snapshot": {
+    "historical_samples": {
+      "count": 10984,
+      "account_count": 25,
+      "label_counts": {
+        "high": 2201,
+        "low": 2262,
+        "mid": 6521
+      },
+      "fields": [
+        "id",
+        "account_id",
+        "dataset_id",
+        "platform_item_id",
+        "sample_key",
+        "title",
+        "views",
+        "likes",
+        "comments",
+        "favorites",
+        "shares",
+        "follows",
+        "content_category",
+        "hook_type",
+        "slice_structure",
+        "program_name",
+        "artist_names",
+        "song_title",
+        "tags",
+        "published_at",
+        "reward_proxy",
+        "normalized_reward",
+        "performance_label",
+        "label_rank",
+        "label_percentile",
+        "label_reason",
+        "quality_grade",
+        "quality_score",
+        "feature_version",
+        "duration_seconds",
+        "media_type",
+        "commercial_intent",
+        "rights_risk",
+        "classification_confidence",
+        "semantic_feature_version",
+        "research_label_version",
+        "semantic_unknown_reason",
+        "structure_confidence",
+        "structure_evidence",
+        "structure_unknown_reason",
+        "original_sound_owner",
+        "is_original_sound",
+        "entity_signal"
+      ],
+      "sha256": "bb60be874324960b9c266e2cf2cfd36ece04c98432f7329e83f1b8ec8be3ec7f"
+    },
+    "material_gold": {
+      "confirmed_count": 60,
+      "fields": [
+        "sample_id",
+        "account_id",
+        "dataset_id",
+        "domain_category",
+        "material_type",
+        "program_context",
+        "presentation_style",
+        "review_status"
+      ],
+      "sha256": "81773f2798133dec175437b550a576f8ed9db7d44ceea9731f9c915382645406"
+    },
+    "omni_shadow_cache": {
+      "ready_count": 623,
+      "sha256": "13530106a84037723c4e304b59de3688a4097a4b8c0ea1b2d07a658991ee5d6c"
+    },
+    "material_evidence_cache": {
+      "ready_or_partial_count": 2,
+      "record_count": 2,
+      "sha256": "c2eacdf6b8430d9de2308e8252da1df7883b1b7c26e8e10bf4307bfcd29f17ba"
+    },
+    "source_code": {
+      "files": [
+        "src/dso/learning/backtest.py",
+        "src/dso/learning/benchmark_manifest.py",
+        "src/dso/learning/historical_samples.py",
+        "src/dso/learning/material_calibration.py",
+        "src/dso/learning/material_confusion.py",
+        "src/dso/learning/material_evidence.py",
+        "src/dso/learning/material_taxonomy.py",
+        "src/dso/learning/qwen_omni.py",
+        "src/dso/versions.py"
+      ],
+      "missing_files": [],
+      "sha256": "6faa45e663c236517f36020bacbabe6aac210101c59db8cb9b2c12bb44193a25"
+    }
+  },
+  "reference_report": {
+    "status": "research_ready",
+    "report_id": "bt_3eb5b599720f480e",
+    "created_at": "2026-07-14T18:46:04.032419+00:00",
+    "sample_count": 2157,
+    "k": 30,
+    "strategy": "research_ranker_v2_9_material_taxonomy",
+    "holdout_policy_key": "time",
+    "research_label_version": "research_labels.visible_engagement_v2",
+    "label_counts": {
+      "high": 399,
+      "mid": 1243,
+      "low": 515
+    },
+    "split_summary": {},
+    "leakage_guard_summary": {
+      "policy": "remove same platform_item_id and stable title key from training evidence when evaluating holdout rows",
+      "train_before": 8786,
+      "train_after": 8700,
+      "eval_count": 2157,
+      "removed_same_platform_item_id": 0,
+      "removed_same_title_key": 86,
+      "fallback_used": false
+    },
+    "material_gold_split": {
+      "policy": "deterministic account-stratified 70/30 split; same-account stable-title variants stay in one group",
+      "raw_confirmed_count": 60,
+      "effective_unique_count": 59,
+      "collapsed_duplicate_count": 1,
+      "calibration_count": 41,
+      "audit_count": 18,
+      "calibration_account_count": 13,
+      "audit_account_count": 10,
+      "group_overlap_count": 0,
+      "performance_label_used_for_split": false,
+      "account_summary": [
+        {
+          "account_id": "dk_voice_teacher",
+          "effective_gold_count": 7,
+          "calibration_count": 5,
+          "audit_count": 2
+        },
+        {
+          "account_id": "duanduanzhengzheng",
+          "effective_gold_count": 2,
+          "calibration_count": 2,
+          "audit_count": 0
+        },
+        {
+          "account_id": "geshou2026",
+          "effective_gold_count": 5,
+          "calibration_count": 3,
+          "audit_count": 2
+        },
+        {
+          "account_id": "haiye_yelaoshi",
+          "effective_gold_count": 3,
+          "calibration_count": 2,
+          "audit_count": 1
+        },
+        {
+          "account_id": "hukan_music",
+          "effective_gold_count": 5,
+          "calibration_count": 3,
+          "audit_count": 2
+        },
+        {
+          "account_id": "jason_teacher",
+          "effective_gold_count": 5,
+          "calibration_count": 3,
+          "audit_count": 2
+        },
+        {
+          "account_id": "raoxianyin",
+          "effective_gold_count": 2,
+          "calibration_count": 2,
+          "audit_count": 0
+        },
+        {
+          "account_id": "rimu_live",
+          "effective_gold_count": 1,
+          "calibration_count": 1,
+          "audit_count": 0
+        },
+        {
+          "account_id": "singer_yuhang",
+          "effective_gold_count": 7,
+          "calibration_count": 5,
+          "audit_count": 2
+        },
+        {
+          "account_id": "sixuweilive",
+          "effective_gold_count": 4,
+          "calibration_count": 3,
+          "audit_count": 1
+        },
+        {
+          "account_id": "tianci",
+          "effective_gold_count": 5,
+          "calibration_count": 3,
+          "audit_count": 2
+        },
+        {
+          "account_id": "weibabibibi",
+          "effective_gold_count": 7,
+          "calibration_count": 5,
+          "audit_count": 2
+        },
+        {
+          "account_id": "yuhuan",
+          "effective_gold_count": 6,
+          "calibration_count": 4,
+          "audit_count": 2
+        }
+      ],
+      "performance_eval_count_before_calibration_exclusion": 2198,
+      "performance_eval_count_after_calibration_exclusion": 2157,
+      "calibration_rows_excluded_from_performance_eval": 41
+    },
+    "promotion_gate": {
+      "passed": false,
+      "material_calibration_gate_passed": false,
+      "status": "material_taxonomy_research_only",
+      "strategy": "research_ranker_v2_9_material_taxonomy",
+      "topk_lift_vs_random": 1.4356,
+      "high_interaction_hit_rate": 0.5667,
+      "low_interaction_avoidance_rate": 0.9,
+      "required_lift_delta_vs_v2_4": 0.03,
+      "required_high_hit_delta_vs_v2_4": 0.05,
+      "required_low_avoidance_delta_vs_v2_4": 0.0,
+      "lift_delta_vs_v2_4": 0.0051,
+      "high_hit_delta_vs_v2_4": 0.0,
+      "low_avoidance_delta_vs_v2_4": 0.0,
+      "improved_ready_account_count": 20,
+      "decision": "keep_as_material_taxonomy_research",
+      "note": "v2.9 只使用 canonical 素材形态可信度；原始 Gold 标签与细粒度准确率保持不变。",
+      "ranking_gate_passed": false,
+      "gold_audit_quality_gate_passed": true
+    },
+    "strategy_comparison": {
+      "current_rules": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.4641,
+        "topk_lift_vs_random": 1.4905,
+        "high_interaction_hit_rate": 0.4333,
+        "low_interaction_avoidance_rate": 0.9
+      },
+      "semantic_baseline_v2": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.4537,
+        "topk_lift_vs_random": 1.4856,
+        "high_interaction_hit_rate": 0.5667,
+        "low_interaction_avoidance_rate": 0.9333
+      },
+      "research_ranker_v2_2": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.6048,
+        "topk_lift_vs_random": 1.5941,
+        "high_interaction_hit_rate": 0.7,
+        "low_interaction_avoidance_rate": 0.9333
+      },
+      "research_ranker_v2_4": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.5275,
+        "topk_lift_vs_random": 1.4305,
+        "high_interaction_hit_rate": 0.5667,
+        "low_interaction_avoidance_rate": 0.9
+      },
+      "research_ranker_v2_8_material_calibrated": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.5374,
+        "topk_lift_vs_random": 1.4356,
+        "high_interaction_hit_rate": 0.5667,
+        "low_interaction_avoidance_rate": 0.9
+      },
+      "research_ranker_v2_9_material_taxonomy": {
+        "sample_count": 2157,
+        "k": 30,
+        "ndcg_at_k": 0.5374,
+        "topk_lift_vs_random": 1.4356,
+        "high_interaction_hit_rate": 0.5667,
+        "low_interaction_avoidance_rate": 0.9
+      }
+    }
+  },
+  "known_limitations": [
+    "The historical metric is a visible-engagement proxy, not a play-count or publishing forecast.",
+    "The frozen D10-B evidence cache currently has low confirmed-Gold coverage.",
+    "A frozen result is comparable only when benchmark verification passes without drift."
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "canonicalization": "UTF-8 JSON, sorted keys, compact separators; volatile cache paths and timestamps excluded",
+    "content_sha256": "4b1fe0594dd30c4ba2e2b9c027a7d62d467b4201478fad49c8bea1b539170c04"
+  }
+}

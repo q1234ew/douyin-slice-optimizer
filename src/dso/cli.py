@@ -20,6 +20,12 @@ from dso.feedback.douyin import douyin_sync_summary, register_douyin_account, sy
 from dso.feedback.douyin_auth import complete_douyin_qr_login, douyin_oauth_status, start_douyin_qr_login
 from dso.feedback.importer import account_baselines, account_insights, import_metrics, list_training_samples, rebuild_feedback_state
 from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
+from dso.learning.benchmark_manifest import (
+    DEFAULT_BENCHMARK_ID,
+    freeze_benchmark_manifest,
+    run_frozen_benchmark,
+    verify_benchmark_manifest,
+)
 from dso.learning.historical_samples import (
     douyin_history_baselines,
     export_douyin_history_assets,
@@ -28,22 +34,26 @@ from dso.learning.historical_samples import (
     backfill_semantic_features,
     historical_sample_summary,
     list_historical_samples,
+    omni_calibration_replay,
     rebuild_research_labels,
     research_field_coverage,
     reopen_historical_sample_calibration,
     semantic_calibration_queue,
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
+from dso.learning.material_evidence import run_material_evidence_batch, run_material_resolver_shadow
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
 from dso.learning.multimodal_validation import (
+    DEFAULT_MULTIMODAL_COLLECTION_TARGET,
     build_multimodal_collection_plan,
     collect_multimodal_assets,
+    resolve_multimodal_storage_limit_bytes,
     run_multimodal_feature_experiment,
     run_multimodal_validation,
 )
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
 from dso.learning.qwen_embeddings import build_qwen_embedding_index, run_qwen_embedding_evidence
-from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_shadow
+from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.media.ingest import ingest_video, list_videos
 from dso.review import mark_candidate_review
@@ -339,6 +349,21 @@ def cmd_backtest(account: str | None, k: int, strategy: str = "research_ranker_v
     return backtest_rule_ranker(account_id=account, k=k, strategy=strategy, holdout_policy=holdout_policy, label_version=label_version)
 
 
+def cmd_benchmark_freeze(benchmark_id: str, reference_report_id: str | None) -> dict:
+    init_db()
+    return freeze_benchmark_manifest(benchmark_id, reference_report_id=reference_report_id)
+
+
+def cmd_benchmark_verify(benchmark_id: str) -> dict:
+    init_db()
+    return verify_benchmark_manifest(benchmark_id)
+
+
+def cmd_benchmark_run(benchmark_id: str, allow_drift: bool = False) -> dict:
+    init_db()
+    return run_frozen_benchmark(benchmark_id, allow_drift=allow_drift)
+
+
 def cmd_ranker_tuning(account: str | None, k: int, holdout_policy: str, max_trials: int, label_version: str | None = None) -> dict:
     init_db()
     return run_ranker_tuning(
@@ -364,6 +389,23 @@ def cmd_semantic_feature_experiment(
         holdout_policy=holdout_policy,
         label_version=label_version,
         include_field_masks=include_field_masks,
+    )
+
+
+def cmd_omni_calibration_replay(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    k: int,
+    holdout_policy: str,
+) -> dict:
+    init_db()
+    return omni_calibration_replay(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        k=k,
+        holdout_policy=holdout_policy,
     )
 
 
@@ -409,7 +451,7 @@ def cmd_multimodal_collect(
     extra_wait_seconds: int = 5,
     extract_audio: bool = True,
     dry_run: bool = True,
-    max_storage_gb: float = 3.0,
+    max_storage_gb: float | None = None,
 ) -> dict:
     init_db()
     return collect_multimodal_assets(
@@ -425,7 +467,7 @@ def cmd_multimodal_collect(
         extra_wait_seconds=extra_wait_seconds,
         extract_audio=extract_audio,
         dry_run=dry_run,
-        max_storage_bytes=int(float(max_storage_gb or 0.0) * 1024 * 1024 * 1024),
+        max_storage_bytes=resolve_multimodal_storage_limit_bytes(max_storage_gb=max_storage_gb),
     )
 
 
@@ -519,6 +561,9 @@ def cmd_qwen_omni_shadow_run(
     limit: int,
     max_clip_seconds: float,
     load_model: bool = False,
+    use_media: bool = False,
+    allow_windowed_clips: bool = False,
+    visual_ready_only: bool = False,
 ) -> dict:
     init_db()
     return run_qwen_omni_shadow(
@@ -527,6 +572,80 @@ def cmd_qwen_omni_shadow_run(
         limit=limit,
         max_clip_seconds=max_clip_seconds,
         load_model=load_model,
+        use_media=use_media,
+        allow_windowed_clips=allow_windowed_clips,
+        visual_ready_only=visual_ready_only,
+    )
+
+
+def cmd_qwen_omni_media_batch(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    max_clip_seconds: float,
+    load_model: bool = False,
+    force: bool = False,
+    output_path: str | None = None,
+) -> dict:
+    init_db()
+    return run_qwen_omni_media_batch(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        max_clip_seconds=max_clip_seconds,
+        load_model=load_model,
+        force=force,
+        output_path=output_path,
+    )
+
+
+def cmd_material_evidence_extract(
+    account: str | None,
+    dataset: str | None,
+    confusion_pair: str | None,
+    limit: int,
+    window_seconds: float,
+    load_model: bool = False,
+    force: bool = False,
+    run_asr: bool = True,
+    run_ocr: bool = True,
+    run_omni: bool = True,
+    include_reviewed: bool = True,
+    output_path: str | None = None,
+) -> dict:
+    init_db()
+    return run_material_evidence_batch(
+        account_id=account,
+        dataset_id=dataset,
+        confusion_pair=confusion_pair,
+        limit=limit,
+        window_seconds=window_seconds,
+        load_model=load_model,
+        force=force,
+        run_asr=run_asr,
+        run_ocr=run_ocr,
+        run_omni=run_omni,
+        include_reviewed=include_reviewed,
+        output_path=output_path,
+    )
+
+
+def cmd_material_resolver_shadow(
+    account: str | None,
+    dataset: str | None,
+    confusion_pair: str | None,
+    limit: int,
+    include_reviewed: bool = True,
+    output_path: str | None = None,
+) -> dict:
+    init_db()
+    return run_material_resolver_shadow(
+        account_id=account,
+        dataset_id=dataset,
+        confusion_pair=confusion_pair,
+        limit=limit,
+        include_reviewed=include_reviewed,
+        output_path=output_path,
     )
 
 
@@ -1027,6 +1146,26 @@ def _typer_main(typer_module: Any) -> None:
     ) -> None:
         _print(cmd_backtest(account, k, strategy, holdout_policy, label_version))
 
+    @app.command("benchmark-freeze")
+    def benchmark_freeze_command(
+        benchmark_id: str = typer_module.Option(DEFAULT_BENCHMARK_ID, "--benchmark-id"),
+        reference_report_id: str | None = typer_module.Option(None, "--reference-report-id"),
+    ) -> None:
+        _print(cmd_benchmark_freeze(benchmark_id, reference_report_id))
+
+    @app.command("benchmark-verify")
+    def benchmark_verify_command(
+        benchmark_id: str = typer_module.Option(DEFAULT_BENCHMARK_ID, "--benchmark-id"),
+    ) -> None:
+        _print(cmd_benchmark_verify(benchmark_id))
+
+    @app.command("benchmark-run")
+    def benchmark_run_command(
+        benchmark_id: str = typer_module.Option(DEFAULT_BENCHMARK_ID, "--benchmark-id"),
+        allow_drift: bool = typer_module.Option(False, "--allow-drift"),
+    ) -> None:
+        _print(cmd_benchmark_run(benchmark_id, allow_drift))
+
     @app.command("ranker-tuning-run")
     def ranker_tuning_command(
         account: str | None = typer_module.Option(None, "--account"),
@@ -1046,6 +1185,16 @@ def _typer_main(typer_module: Any) -> None:
         skip_field_masks: bool = typer_module.Option(False, "--skip-field-masks"),
     ) -> None:
         _print(cmd_semantic_feature_experiment(account, k, holdout_policy, label_version, not skip_field_masks))
+
+    @app.command("omni-calibration-replay")
+    def omni_calibration_replay_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(50, "--limit"),
+        k: int = typer_module.Option(10, "--k"),
+        holdout_policy: str = typer_module.Option("time", "--holdout-policy"),
+    ) -> None:
+        _print(cmd_omni_calibration_replay(account, dataset, limit, k, holdout_policy))
 
     @app.command("semantic-features-backfill")
     def semantic_features_backfill_command(
@@ -1069,7 +1218,7 @@ def _typer_main(typer_module: Any) -> None:
     def multimodal_collection_plan_command(
         account: str | None = typer_module.Option(None, "--account"),
         dataset: str | None = typer_module.Option(None, "--dataset"),
-        limit: int = typer_module.Option(120, "--limit"),
+        limit: int = typer_module.Option(DEFAULT_MULTIMODAL_COLLECTION_TARGET, "--limit"),
         stage: str = typer_module.Option("beta_d1", "--stage"),
         output_path: str | None = typer_module.Option(None, "--output-path"),
         include_ready: bool = typer_module.Option(False, "--include-ready"),
@@ -1090,7 +1239,7 @@ def _typer_main(typer_module: Any) -> None:
         extra_wait_seconds: int = typer_module.Option(5, "--extra-wait-seconds"),
         extract_audio: bool = typer_module.Option(True, "--extract-audio/--no-extract-audio"),
         dry_run: bool = typer_module.Option(True, "--dry-run/--download"),
-        max_storage_gb: float = typer_module.Option(3.0, "--max-storage-gb"),
+        max_storage_gb: float | None = typer_module.Option(None, "--max-storage-gb"),
     ) -> None:
         _print(
             cmd_multimodal_collect(
@@ -1174,8 +1323,77 @@ def _typer_main(typer_module: Any) -> None:
         limit: int = typer_module.Option(20, "--limit"),
         max_clip_seconds: float = typer_module.Option(15.0, "--max-clip-seconds"),
         load_model: bool = typer_module.Option(False, "--load-model"),
+        use_media: bool = typer_module.Option(False, "--use-media"),
+        allow_windowed_clips: bool = typer_module.Option(False, "--allow-windowed-clips"),
+        visual_ready_only: bool = typer_module.Option(False, "--visual-ready-only"),
     ) -> None:
-        _print(cmd_qwen_omni_shadow_run(account, dataset, limit, max_clip_seconds, load_model))
+        _print(
+            cmd_qwen_omni_shadow_run(
+                account,
+                dataset,
+                limit,
+                max_clip_seconds,
+                load_model,
+                use_media,
+                allow_windowed_clips,
+                visual_ready_only,
+            )
+        )
+
+    @app.command("qwen-omni-media-batch")
+    def qwen_omni_media_batch_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(20, "--limit"),
+        max_clip_seconds: float = typer_module.Option(8.0, "--max-clip-seconds"),
+        load_model: bool = typer_module.Option(False, "--load-model"),
+        force: bool = typer_module.Option(False, "--force"),
+        output_path: str | None = typer_module.Option(None, "--output-path"),
+    ) -> None:
+        _print(cmd_qwen_omni_media_batch(account, dataset, limit, max_clip_seconds, load_model, force, output_path))
+
+    @app.command("material-evidence-extract")
+    def material_evidence_extract_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        confusion_pair: str | None = typer_module.Option(None, "--confusion-pair"),
+        limit: int = typer_module.Option(10, "--limit"),
+        window_seconds: float = typer_module.Option(8.0, "--window-seconds"),
+        load_model: bool = typer_module.Option(False, "--load-model"),
+        force: bool = typer_module.Option(False, "--force"),
+        run_asr: bool = typer_module.Option(True, "--asr/--no-asr"),
+        run_ocr: bool = typer_module.Option(True, "--ocr/--no-ocr"),
+        run_omni: bool = typer_module.Option(True, "--omni/--no-omni"),
+        include_reviewed: bool = typer_module.Option(True, "--include-reviewed/--exclude-reviewed"),
+        output_path: str | None = typer_module.Option(None, "--output-path"),
+    ) -> None:
+        _print(
+            cmd_material_evidence_extract(
+                account,
+                dataset,
+                confusion_pair,
+                limit,
+                window_seconds,
+                load_model,
+                force,
+                run_asr,
+                run_ocr,
+                run_omni,
+                include_reviewed,
+                output_path,
+            )
+        )
+
+    @app.command("material-resolver-shadow")
+    def material_resolver_shadow_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        confusion_pair: str | None = typer_module.Option(None, "--confusion-pair"),
+        limit: int = typer_module.Option(80, "--limit"),
+        include_reviewed: bool = typer_module.Option(True, "--include-reviewed/--exclude-reviewed"),
+        output_path: str | None = typer_module.Option(None, "--output-path"),
+    ) -> None:
+        _print(cmd_material_resolver_shadow(account, dataset, confusion_pair, limit, include_reviewed, output_path))
 
     @app.command("backtest-reports")
     def backtest_reports_command(
@@ -1462,6 +1680,14 @@ def _argparse_main() -> None:
     backtest.add_argument("--strategy", default="research_ranker_v2_4")
     backtest.add_argument("--holdout-policy", default="time")
     backtest.add_argument("--label-version")
+    benchmark_freeze = sub.add_parser("benchmark-freeze")
+    benchmark_freeze.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
+    benchmark_freeze.add_argument("--reference-report-id")
+    benchmark_verify = sub.add_parser("benchmark-verify")
+    benchmark_verify.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
+    benchmark_run = sub.add_parser("benchmark-run")
+    benchmark_run.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
+    benchmark_run.add_argument("--allow-drift", action="store_true")
     ranker_tuning = sub.add_parser("ranker-tuning-run")
     ranker_tuning.add_argument("--account")
     ranker_tuning.add_argument("--k", type=int, default=10)
@@ -1474,6 +1700,12 @@ def _argparse_main() -> None:
     semantic_experiment.add_argument("--holdout-policy", default="time")
     semantic_experiment.add_argument("--label-version")
     semantic_experiment.add_argument("--skip-field-masks", action="store_true")
+    replay = sub.add_parser("omni-calibration-replay")
+    replay.add_argument("--account")
+    replay.add_argument("--dataset")
+    replay.add_argument("--limit", type=int, default=50)
+    replay.add_argument("--k", type=int, default=10)
+    replay.add_argument("--holdout-policy", default="time")
     semantic_backfill = sub.add_parser("semantic-features-backfill")
     semantic_backfill.add_argument("--account")
     semantic_backfill.add_argument("--dataset")
@@ -1487,7 +1719,7 @@ def _argparse_main() -> None:
     multimodal_plan = sub.add_parser("multimodal-collection-plan")
     multimodal_plan.add_argument("--account")
     multimodal_plan.add_argument("--dataset")
-    multimodal_plan.add_argument("--limit", type=int, default=120)
+    multimodal_plan.add_argument("--limit", type=int, default=DEFAULT_MULTIMODAL_COLLECTION_TARGET)
     multimodal_plan.add_argument("--stage", default="beta_d1")
     multimodal_plan.add_argument("--output-path")
     multimodal_plan.add_argument("--include-ready", action="store_true")
@@ -1504,7 +1736,7 @@ def _argparse_main() -> None:
     multimodal_collect.add_argument("--extra-wait-seconds", type=int, default=5)
     multimodal_collect.add_argument("--no-extract-audio", action="store_true")
     multimodal_collect.add_argument("--download", action="store_true")
-    multimodal_collect.add_argument("--max-storage-gb", type=float, default=3.0)
+    multimodal_collect.add_argument("--max-storage-gb", type=float, default=None)
     multimodal_validation = sub.add_parser("multimodal-validation")
     multimodal_validation.add_argument("--account")
     multimodal_validation.add_argument("--dataset")
@@ -1545,6 +1777,39 @@ def _argparse_main() -> None:
     qwen_omni_shadow.add_argument("--limit", type=int, default=20)
     qwen_omni_shadow.add_argument("--max-clip-seconds", type=float, default=15.0)
     qwen_omni_shadow.add_argument("--load-model", action="store_true")
+    qwen_omni_shadow.add_argument("--use-media", action="store_true")
+    qwen_omni_shadow.add_argument("--allow-windowed-clips", action="store_true")
+    qwen_omni_shadow.add_argument("--visual-ready-only", action="store_true")
+    qwen_omni_media_batch = sub.add_parser("qwen-omni-media-batch")
+    qwen_omni_media_batch.add_argument("--account")
+    qwen_omni_media_batch.add_argument("--dataset")
+    qwen_omni_media_batch.add_argument("--limit", type=int, default=20)
+    qwen_omni_media_batch.add_argument("--max-clip-seconds", type=float, default=8.0)
+    qwen_omni_media_batch.add_argument("--load-model", action="store_true")
+    qwen_omni_media_batch.add_argument("--force", action="store_true")
+    qwen_omni_media_batch.add_argument("--output-path")
+    material_evidence = sub.add_parser("material-evidence-extract")
+    material_evidence.add_argument("--account")
+    material_evidence.add_argument("--dataset")
+    material_evidence.add_argument("--confusion-pair")
+    material_evidence.add_argument("--limit", type=int, default=10)
+    material_evidence.add_argument("--window-seconds", type=float, default=8.0)
+    material_evidence.add_argument("--load-model", action="store_true")
+    material_evidence.add_argument("--force", action="store_true")
+    material_evidence.add_argument("--no-asr", action="store_true")
+    material_evidence.add_argument("--no-ocr", action="store_true")
+    material_evidence.add_argument("--no-omni", action="store_true")
+    material_evidence.add_argument("--include-reviewed", dest="include_reviewed", action="store_true", default=True)
+    material_evidence.add_argument("--exclude-reviewed", dest="include_reviewed", action="store_false")
+    material_evidence.add_argument("--output-path")
+    material_resolver = sub.add_parser("material-resolver-shadow")
+    material_resolver.add_argument("--account")
+    material_resolver.add_argument("--dataset")
+    material_resolver.add_argument("--confusion-pair")
+    material_resolver.add_argument("--limit", type=int, default=80)
+    material_resolver.add_argument("--include-reviewed", dest="include_reviewed", action="store_true", default=True)
+    material_resolver.add_argument("--exclude-reviewed", dest="include_reviewed", action="store_false")
+    material_resolver.add_argument("--output-path")
     backtest_reports = sub.add_parser("backtest-reports")
     backtest_reports.add_argument("--account")
     backtest_reports.add_argument("--limit", type=int, default=10)
@@ -1716,6 +1981,12 @@ def _argparse_main() -> None:
         _print(cmd_interest_clock(args.account, args.content_type, args.duration, args.limit, args.rebuild))
     elif args.command == "backtest":
         _print(cmd_backtest(args.account, args.k, args.strategy, args.holdout_policy, args.label_version))
+    elif args.command == "benchmark-freeze":
+        _print(cmd_benchmark_freeze(args.benchmark_id, args.reference_report_id))
+    elif args.command == "benchmark-verify":
+        _print(cmd_benchmark_verify(args.benchmark_id))
+    elif args.command == "benchmark-run":
+        _print(cmd_benchmark_run(args.benchmark_id, args.allow_drift))
     elif args.command == "ranker-tuning-run":
         _print(cmd_ranker_tuning(args.account, args.k, args.holdout_policy, args.max_trials, args.label_version))
     elif args.command == "semantic-feature-experiment":
@@ -1728,6 +1999,8 @@ def _argparse_main() -> None:
                 include_field_masks=not args.skip_field_masks,
             )
         )
+    elif args.command == "omni-calibration-replay":
+        _print(cmd_omni_calibration_replay(args.account, args.dataset, args.limit, args.k, args.holdout_policy))
     elif args.command == "semantic-features-backfill":
         _print(cmd_semantic_features_backfill(args.account, args.dataset, args.limit, args.force))
     elif args.command == "slice-structure-evaluate":
@@ -1775,7 +2048,58 @@ def _argparse_main() -> None:
     elif args.command == "qwen-omni-analyze":
         _print(cmd_qwen_omni_analyze(args.segment_id, args.account, args.max_clip_seconds, args.load_model))
     elif args.command == "qwen-omni-shadow-run":
-        _print(cmd_qwen_omni_shadow_run(args.account, args.dataset, args.limit, args.max_clip_seconds, args.load_model))
+        _print(
+            cmd_qwen_omni_shadow_run(
+                args.account,
+                args.dataset,
+                args.limit,
+                args.max_clip_seconds,
+                args.load_model,
+                args.use_media,
+                args.allow_windowed_clips,
+                args.visual_ready_only,
+            )
+        )
+    elif args.command == "qwen-omni-media-batch":
+        _print(
+            cmd_qwen_omni_media_batch(
+                args.account,
+                args.dataset,
+                args.limit,
+                args.max_clip_seconds,
+                args.load_model,
+                args.force,
+                args.output_path,
+            )
+        )
+    elif args.command == "material-evidence-extract":
+        _print(
+            cmd_material_evidence_extract(
+                args.account,
+                args.dataset,
+                args.confusion_pair,
+                args.limit,
+                args.window_seconds,
+                args.load_model,
+                args.force,
+                not args.no_asr,
+                not args.no_ocr,
+                not args.no_omni,
+                args.include_reviewed,
+                args.output_path,
+            )
+        )
+    elif args.command == "material-resolver-shadow":
+        _print(
+            cmd_material_resolver_shadow(
+                args.account,
+                args.dataset,
+                args.confusion_pair,
+                args.limit,
+                args.include_reviewed,
+                args.output_path,
+            )
+        )
     elif args.command == "backtest-reports":
         _print(cmd_backtest_reports(args.account, args.limit))
     elif args.command == "datasets":

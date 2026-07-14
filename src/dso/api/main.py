@@ -39,6 +39,7 @@ from dso.feedback.platform import (
 )
 from dso.media.ingest import ingest_video, list_videos
 from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
+from dso.learning.benchmark_manifest import load_benchmark_manifest, run_frozen_benchmark, verify_benchmark_manifest
 from dso.learning.historical_samples import (
     douyin_history_baselines,
     export_douyin_history_assets,
@@ -47,6 +48,7 @@ from dso.learning.historical_samples import (
     backfill_semantic_features,
     historical_sample_summary,
     list_historical_samples,
+    omni_calibration_replay,
     rebuild_research_labels,
     research_field_coverage,
     reopen_historical_sample_calibration,
@@ -54,10 +56,24 @@ from dso.learning.historical_samples import (
     update_historical_sample_labels,
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
+from dso.learning.material_calibration import (
+    material_gold_set_queue,
+    reopen_material_gold_annotation,
+    run_material_calibration_replay,
+    update_material_gold_annotation,
+)
+from dso.learning.material_confusion import material_confusion_queue, material_taxonomy_contract
+from dso.learning.material_evidence import (
+    material_evidence_status,
+    run_material_evidence_batch,
+    run_material_resolver_shadow,
+)
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
 from dso.learning.multimodal_validation import (
+    DEFAULT_MULTIMODAL_COLLECTION_TARGET,
     build_multimodal_collection_plan,
     collect_multimodal_assets,
+    resolve_multimodal_storage_limit_bytes,
     run_multimodal_feature_experiment,
     run_multimodal_validation,
 )
@@ -67,7 +83,7 @@ from dso.learning.qwen_embeddings import (
     qwen_embedding_evidence_for_segment,
     run_qwen_embedding_evidence,
 )
-from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_shadow
+from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.quality.insights import quality_insights
 from dso.review import list_change_events, list_review_events, mark_candidate_review
@@ -694,6 +710,45 @@ def get_backtests(account_id: str | None = None, limit: int = 10) -> dict:
     return list_backtest_reports(account_id=account_id, limit=limit)
 
 
+@app.get("/learning/benchmark-manifest/{benchmark_id}")
+def get_benchmark_manifest(benchmark_id: str, verify: bool = True) -> dict:
+    try:
+        manifest = load_benchmark_manifest(benchmark_id)
+        return {
+            "status": "ready",
+            "manifest": manifest,
+            "verification": verify_benchmark_manifest(benchmark_id) if verify else None,
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/benchmark/run")
+def post_benchmark_run(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_frozen_benchmark(
+            str(payload.get("benchmark_id") or "dso-v1-beta-d10-ab-20260715-r1"),
+            allow_drift=bool(payload.get("allow_drift", False)),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/learning/omni-calibration/replay")
+def post_omni_calibration_replay(payload: dict = Body(default_factory=dict)) -> dict:
+    return omni_calibration_replay(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 50),
+        k=int(payload.get("k") or 10),
+        holdout_policy=payload.get("holdout_policy") or "time",
+    )
+
+
 @app.get("/learning/datasets")
 def get_learning_datasets(account_id: str | None = None) -> dict:
     catalog = list_capture_datasets()
@@ -784,6 +839,135 @@ def post_reopen_historical_sample_calibration(sample_id: str, payload: dict = Bo
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/learning/material-gold-set/queue")
+def get_material_gold_set_queue(
+    account_id: str | None = None,
+    dataset_id: str | None = None,
+    limit: int = 12,
+    include_reviewed: bool = False,
+) -> dict:
+    return material_gold_set_queue(
+        account_id=account_id,
+        dataset_id=dataset_id,
+        limit=limit,
+        include_reviewed=include_reviewed,
+    )
+
+
+@app.get("/learning/material-taxonomy")
+def get_material_taxonomy() -> dict:
+    return material_taxonomy_contract()
+
+
+@app.get("/learning/material-confusions/queue")
+def get_material_confusion_queue(
+    account_id: str | None = None,
+    dataset_id: str | None = None,
+    confusion_pair: str | None = None,
+    limit: int = 80,
+    local_media_only: bool = True,
+    include_reviewed: bool = False,
+) -> dict:
+    try:
+        return material_confusion_queue(
+            account_id=account_id,
+            dataset_id=dataset_id,
+            confusion_pair=confusion_pair,
+            limit=limit,
+            local_media_only=local_media_only,
+            include_reviewed=include_reviewed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/material-evidence/status")
+def get_material_evidence_status(
+    account_id: str | None = None,
+    dataset_id: str | None = None,
+    confusion_pair: str | None = None,
+    limit: int = 80,
+    include_reviewed: bool = True,
+) -> dict:
+    try:
+        return material_evidence_status(
+            account_id=account_id,
+            dataset_id=dataset_id,
+            confusion_pair=confusion_pair,
+            limit=limit,
+            include_reviewed=include_reviewed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/material-evidence/extract")
+def post_material_evidence_extract(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_material_evidence_batch(
+            account_id=payload.get("account_id"),
+            dataset_id=payload.get("dataset_id"),
+            confusion_pair=payload.get("confusion_pair"),
+            limit=int(payload.get("limit") or 10),
+            window_seconds=float(payload.get("window_seconds") or 8.0),
+            run_asr=bool(payload.get("run_asr", True)),
+            run_ocr=bool(payload.get("run_ocr", True)),
+            run_omni=bool(payload.get("run_omni", True)),
+            load_model=bool(payload.get("load_model", False)),
+            force=bool(payload.get("force", False)),
+            include_reviewed=bool(payload.get("include_reviewed", True)),
+            sample_ids=payload.get("sample_ids") if isinstance(payload.get("sample_ids"), list) else None,
+            output_path=payload.get("output_path"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/material-resolver/shadow")
+def post_material_resolver_shadow(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_material_resolver_shadow(
+            account_id=payload.get("account_id"),
+            dataset_id=payload.get("dataset_id"),
+            confusion_pair=payload.get("confusion_pair"),
+            limit=int(payload.get("limit") or 80),
+            include_reviewed=bool(payload.get("include_reviewed", True)),
+            output_path=payload.get("output_path"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/learning/material-gold-set/{sample_id}")
+def patch_material_gold_set(sample_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return update_material_gold_annotation(sample_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/material-gold-set/{sample_id}/reopen")
+def post_reopen_material_gold_set(sample_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return reopen_material_gold_annotation(sample_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/material-gold-set/replay")
+def post_material_gold_set_replay(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_material_calibration_replay(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        k=int(payload.get("k") or 30),
+        holdout_policy=payload.get("holdout_policy") or "time",
+    )
+
+
 @app.post("/learning/research-labels/rebuild")
 def post_research_labels_rebuild(payload: dict = Body(default_factory=dict)) -> dict:
     return rebuild_research_labels(
@@ -830,7 +1014,7 @@ def post_multimodal_collection_plan(payload: dict = Body(default_factory=dict)) 
     return build_multimodal_collection_plan(
         account_id=payload.get("account_id"),
         dataset_id=payload.get("dataset_id"),
-        limit=int(payload.get("limit") or 120),
+        limit=int(payload.get("limit") or DEFAULT_MULTIMODAL_COLLECTION_TARGET),
         stage=payload.get("stage") or "beta_d1",
         output_path=payload.get("output_path"),
         include_ready=bool(payload.get("include_ready", False)),
@@ -852,7 +1036,10 @@ def post_multimodal_collect(payload: dict = Body(default_factory=dict)) -> dict:
         extra_wait_seconds=int(payload.get("extra_wait_seconds") or 5),
         extract_audio=bool(payload.get("extract_audio", True)),
         dry_run=bool(payload.get("dry_run", True)),
-        max_storage_bytes=int(payload.get("max_storage_bytes") or int(float(payload.get("max_storage_gb") or 3.0) * 1024 * 1024 * 1024)),
+        max_storage_bytes=resolve_multimodal_storage_limit_bytes(
+            max_storage_bytes=payload.get("max_storage_bytes"),
+            max_storage_gb=payload.get("max_storage_gb"),
+        ),
     )
 
 
@@ -917,6 +1104,22 @@ def post_qwen_omni_shadow_run(payload: dict = Body(default_factory=dict)) -> dic
         limit=int(payload.get("limit") or 20),
         max_clip_seconds=float(payload.get("max_clip_seconds") or 15.0),
         load_model=bool(payload.get("load_model", False)),
+        use_media=bool(payload.get("use_media", False)),
+        allow_windowed_clips=bool(payload.get("allow_windowed_clips", False)),
+        visual_ready_only=bool(payload.get("visual_ready_only", False)),
+    )
+
+
+@app.post("/learning/qwen-omni/media-batch")
+def post_qwen_omni_media_batch(payload: dict = Body(default_factory=dict)) -> dict:
+    return run_qwen_omni_media_batch(
+        account_id=payload.get("account_id"),
+        dataset_id=payload.get("dataset_id"),
+        limit=int(payload.get("limit") or 20),
+        max_clip_seconds=float(payload.get("max_clip_seconds") or 8.0),
+        load_model=bool(payload.get("load_model", False)),
+        force=bool(payload.get("force", False)),
+        output_path=payload.get("output_path"),
     )
 
 

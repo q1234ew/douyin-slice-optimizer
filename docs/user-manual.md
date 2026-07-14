@@ -418,7 +418,21 @@ dso douyin-history-import \
 
 ### 7.5 语义校准和离线回测
 
-进入“研究学习 > 校准与回测”，可以执行：
+进入“研究学习 > 校准与回测”后，页面分为三个工作模式：
+
+| 模式 | 用途 |
+| --- | --- |
+| 素材审核 | 默认入口；逐条确认 Material Gold Set，页面一次只展开一个样本 |
+| 语义校准 | 修正类别、Hook、结构、艺人、歌曲和标签 |
+| 算法回测 | 运行 v2.4-v2.9、语义、结构和 Qwen 实验；低频操作收在“数据与高级工具” |
+
+素材审核按页面顶部三步完成：
+
+1. 在左侧短队列选择样本，必要时点击“原视频”查看来源。
+2. 对照“Omni 原判”，确认领域分类、素材形态、呈现方式和节目语境；无法确定的字段保留“未知”。
+3. 点击“保存并进入下一条”。完成 12 条试标后可运行回放；完成首轮 60 条后运行 v2.9，分别检查严格标签准确率、规范形态准确率、严重错判率和 Top30 变化。
+
+其他可执行操作：
 
 | 操作 | 说明 |
 | --- | --- |
@@ -431,8 +445,19 @@ dso douyin-history-import \
 | 保存人工标签 | 人工修正类别、Hook、结构、艺人、歌名和标签 |
 | 重新打开校准 | 将最近已保存的样本重新放回待校准队列 |
 | 重建标签与回测 | 重新计算互动热度标签并运行回测 |
+| 刷新素材审核 | 获取素材形态 Gold Set 候选 |
+| 确认素材形态 | 人工确认领域、素材形态、节目语境和呈现方式 |
+| 运行 v2.9 回放 | 将 Gold 拆为校准/独立审计，比较严格标签与 canonical 形态，并对照 v2.4/v2.8 的 Top20/30/50 |
+| 3 条 Smoke | 对 confirmed Gold 优先队列执行 hook / middle / payoff 三窗口 ASR、OCR 和 Omni 证据抽取 |
+| Resolver 回放 | 在已有 D10-B 缓存上比较 title-only、Omni-only、ASR/OCR 和多窗口 Resolver；不会改标签或权重 |
 
 保存人工标签后，样本会被标记为 `manual_verified`，因此会从“语义校准队列”的待处理列表中消失。这是已完成状态，不是刷新失败。页面会在“最近已保存”里保留最近样本；如果误保存或需要二次校准，点击“重新打开校准”，样本会恢复为低置信校准样本并重新出现在队列里。
+
+“素材形态 Gold Set”与上述主语义校准相互独立。确认素材形态只写入 `material_gold_annotations`，不会修改互动数、`reward_proxy`、主语义标签或 `classification_confidence`。v2.9 不会把 `performance_highlight` 等人工细粒度标签改写掉；它只在排序路由侧派生 canonical 形态，并继续单独报告细节缺失。无法确定时保留 `unknown`，不要为了提高覆盖率强行归类。
+
+素材审核页底部的“定向错判队列”用于 D10-A。它默认从已有 Omni 缓存和本地视频中平衡选择 80 条样本，可按五类混淆筛选，并显示原始 Omni 形态、规范形态、关键词证据和媒体就绪状态。`performance_highlight` 在此派生为 `performance_clip + highlight_signal`，`program_context` 作为独立字段；队列候选不会自动写入 Gold。
+
+“三窗口证据与 Resolver Shadow”用于 D10-B。证据抽取默认包含并优先选择已确认 Gold，每条真实执行三个 8 秒窗口；ASR 提示词回声或纯音乐低信息结果会保留原文审计，但不参与语义投票。页面中的准确率来自同时具备完整 D10-B 证据和 confirmed Gold 的 cached-eval-only 子集；“Gold 证据 1/51”表示 51 条 Gold 中只有 1 条已有完整证据，不等于 51 条都已验证。大批量抽取应使用 CLI 断点执行，工作台的 Smoke 只用于小批验证。
 
 常用 CLI：
 
@@ -446,6 +471,8 @@ dso research-labels-rebuild --account main --dataset all
 dso backtest --account main --k 10 --strategy research_ranker_v2_1 --holdout-policy time
 dso ranker-tuning-run --account main --k 10 --max-trials 12
 dso backtest-reports --account main --limit 10
+dso material-evidence-extract --limit 3 --window-seconds 8 --include-reviewed
+dso material-resolver-shadow --limit 100 --include-reviewed
 ```
 
 样本少于 300 的账号只能展示低置信趋势，不应输出确定性权重。
@@ -454,7 +481,7 @@ dso backtest-reports --account main --limit 10
 
 低显存 Omni 模块用于离线验证短片段多模态理解，默认模型为 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`。当前只建议在具备 CUDA 的目标机上运行 15 秒以内片段，`batch_size=1`，`return_audio=false`。
 
-该模块输出只作为语义校准建议，不会自动写入 `manual_verified`，不会直接改变候选生产分数，也不会替代人工审核。
+该模块输出只作为语义校准建议，不会自动写入 `manual_verified`，不会直接改变候选生产分数，也不会替代人工审核。V1 Beta-D-6 增加 `research_ranker_v2_6_pool`，用于 Omni cached eval only 的 Top30 扩池研究门控；通过回测报告查看 `omni_pool_report`、`omni_pool_gate`、`omni_trust_profiles` 和账号级 `omni_account_pool_gates`，未通过 gate 前仍保持 `pool_research_only`。
 
 常用 CLI：
 
@@ -462,6 +489,9 @@ dso backtest-reports --account main --limit 10
 dso qwen-omni-status
 dso qwen-omni-analyze <segment_id> --max-clip-seconds 15 --load-model
 dso qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seconds 15 --load-model
+dso qwen-omni-shadow-run --limit 20 --max-clip-seconds 15 --use-media --allow-windowed-clips --visual-ready-only
+dso qwen-omni-media-batch --limit 20 --max-clip-seconds 8 --load-model
+dso backtest --account main --k 30 --strategy research_ranker_v2_6_pool --holdout-policy time
 ```
 
 常用 API：
@@ -471,6 +501,7 @@ dso qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seco
 | `GET /learning/qwen-omni/status` | 检查服务、显存门控和当前加载模型 |
 | `POST /segments/{segment_id}/qwen-omni/analyze` | 对单条候选做短片段 shadow 分析 |
 | `POST /learning/qwen-omni/shadow-run` | 对历史样本批量做 shadow-run |
+| `POST /learning/qwen-omni/media-batch` | 对本地真视频历史样本做切窗、上传和断点缓存 |
 
 ## 8. CLI 快速手册
 
@@ -681,6 +712,15 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `GET /learning/semantic-calibration/queue` | 语义校准队列 |
 | `PATCH /learning/historical-samples/{sample_id}/labels` | 保存人工语义标签 |
 | `POST /learning/historical-samples/{sample_id}/calibration/reopen` | 重新打开已保存样本的校准状态 |
+| `GET /learning/material-gold-set/queue` | 获取素材形态 Gold Set 审核队列 |
+| `PATCH /learning/material-gold-set/{sample_id}` | 保存素材形态人工确认 |
+| `POST /learning/material-gold-set/{sample_id}/reopen` | 重新打开素材形态审核 |
+| `POST /learning/material-gold-set/replay` | 运行 v2.9 素材形态层级校准回放 |
+| `GET /learning/material-taxonomy` | 获取 D10 规范素材形态和旧标签派生规则 |
+| `GET /learning/material-confusions/queue` | 获取跨账号平衡的 D10-A 定向错判队列 |
+| `GET /learning/material-evidence/status` | 获取 D10-B 三窗口证据覆盖与最近 Resolver 摘要 |
+| `POST /learning/material-evidence/extract` | 抽取 ASR、OCR、Omni 三窗口证据；只写 Shadow 缓存 |
+| `POST /learning/material-resolver/shadow` | 运行 cached-eval-only Resolver 策略对比与研究门控 |
 | `POST /learning/backtest` | 运行离线回测 |
 | `GET /learning/qwen-omni/status` | 检查 Omni 低显存服务状态 |
 | `POST /learning/qwen-omni/shadow-run` | 执行 Omni shadow-run |

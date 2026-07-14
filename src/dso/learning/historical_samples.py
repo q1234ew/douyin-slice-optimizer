@@ -24,6 +24,7 @@ from dso.learning.prototypes import (
     _text,
     list_capture_datasets,
 )
+from dso.learning.qwen_omni import omni_annotation_field_guides, qwen_omni_shadow_cache_index
 from dso.learning.semantic_labels import normalize_semantic_labels, semantic_label_catalog
 from dso.review import insert_change_event
 from dso.utils import new_id, read_json, utc_now, write_json
@@ -543,6 +544,7 @@ def semantic_calibration_queue(
     disagreement_floor = max(0.0, _safe_float(min_disagreement))
     cap = max(1, int(limit or 50))
     recently_saved = _recently_saved_calibration_samples(rows, label_filter=label_filter, limit=min(cap, 8))
+    omni_cache = qwen_omni_shadow_cache_index()
     for row in rows:
         confidence = _text(row.get("classification_confidence"))
         if confidence == "manual_verified":
@@ -551,7 +553,8 @@ def semantic_calibration_queue(
         if label_filter and label_filter not in {"all", "any"} and row_label != label_filter:
             continue
         needs = _semantic_calibration_needs(row)
-        signals = _calibration_queue_signals(row, needs)
+        omni_signal = _omni_calibration_signal(row, _omni_cache_for_history_row(row, omni_cache))
+        signals = _calibration_queue_signals(row, needs, omni_signal=omni_signal)
         if selected_queue_type != "mixed" and signals["queue_type"] != selected_queue_type:
             continue
         if signals["disagreement_score"] < disagreement_floor:
@@ -569,8 +572,13 @@ def semantic_calibration_queue(
                     item["field"]
                     for item in needs
                     if item.get("field") in MANUAL_LABEL_FIELDS
+                ] + [
+                    field
+                    for field in omni_signal.get("recommended_fields", [])
+                    if field in MANUAL_LABEL_FIELDS and field not in [item["field"] for item in needs]
                 ],
                 "recommended_fields": signals["recommended_fields"],
+                "recommended_field_guides": _field_guides_for_list(signals["recommended_fields"]),
                 "priority_score": priority,
                 "impact_reason": _semantic_calibration_reason(row, needs),
                 "queue_reason": signals["queue_reason"],
@@ -579,6 +587,7 @@ def semantic_calibration_queue(
                 "risk_score": signals["risk_score"],
                 "baseline_strategy_score": signals["baseline_strategy_score"],
                 "ranker_strategy_score": signals["ranker_strategy_score"],
+                "omni_shadow": omni_signal,
                 "manual_verified": confidence == "manual_verified",
             }
         )
@@ -606,9 +615,91 @@ def semantic_calibration_queue(
         "total_candidates": len(items),
         "queue_policy": "prioritize high-impact weak labels, low-interaction risk, and semantic-vs-ranker disagreement for manual calibration.",
         "semantic_label_catalog": semantic_label_catalog(),
+        "annotation_field_guides": omni_annotation_field_guides(),
         "batch_summary": _calibration_batch_summary(items, rows),
         "samples": items[:cap],
         "recently_saved_samples": recently_saved,
+        "generated_at": utc_now(),
+    }
+
+
+def omni_calibration_replay(
+    account_id: str | None = None,
+    *,
+    dataset_id: str | None = None,
+    limit: int = 50,
+    k: int = 10,
+    holdout_policy: str = "time",
+) -> dict:
+    from dso.learning.backtest import RESEARCH_RANKER_V24_STRATEGY, RESEARCH_RANKER_V25_SHADOW_STRATEGY, backtest_rule_ranker
+
+    queue = semantic_calibration_queue(
+        account_id=account_id,
+        dataset_id=dataset_id,
+        limit=limit,
+        queue_type="mixed",
+        strategy=RESEARCH_RANKER_V25_SHADOW_STRATEGY,
+    )
+    v24_report = backtest_rule_ranker(
+        account_id=account_id,
+        k=k,
+        strategy=RESEARCH_RANKER_V24_STRATEGY,
+        holdout_policy=holdout_policy,
+    )
+    v25_report = backtest_rule_ranker(
+        account_id=account_id,
+        k=k,
+        strategy=RESEARCH_RANKER_V25_SHADOW_STRATEGY,
+        holdout_policy=holdout_policy,
+    )
+    v24_metrics = (v24_report.get("metrics") or {}).get("strategy_comparison", {}).get(RESEARCH_RANKER_V24_STRATEGY, {})
+    v25_metrics = (v25_report.get("metrics") or {}).get("strategy_comparison", {}).get(RESEARCH_RANKER_V25_SHADOW_STRATEGY, {})
+    return {
+        "contract_version": DOUYIN_HISTORY_VERSION,
+        "status": "ready",
+        "mode": "omni_shadow_calibration_replay",
+        "account_id": account_id or "all",
+        "dataset_id": _normalize_dataset_id(dataset_id) if dataset_id else "all",
+        "query": {
+            "limit": max(1, int(limit or 50)),
+            "k": max(1, int(k or 10)),
+            "holdout_policy": holdout_policy or "time",
+        },
+        "queue": {
+            "status": queue.get("status"),
+            "count": queue.get("count"),
+            "total_candidates": queue.get("total_candidates"),
+            "batch_summary": queue.get("batch_summary"),
+            "samples": queue.get("samples") or [],
+        },
+        "before_after": {
+            "baseline_strategy": RESEARCH_RANKER_V24_STRATEGY,
+            "shadow_strategy": RESEARCH_RANKER_V25_SHADOW_STRATEGY,
+            "v2_4": v24_metrics,
+            "v2_5_shadow": v25_metrics,
+            "lift_delta_vs_v2_4": round(
+                _safe_float(v25_metrics.get("topk_lift_vs_random"))
+                - _safe_float(v24_metrics.get("topk_lift_vs_random")),
+                4,
+            ),
+            "high_hit_delta_vs_v2_4": round(
+                _safe_float(v25_metrics.get("high_interaction_hit_rate"))
+                - _safe_float(v24_metrics.get("high_interaction_hit_rate")),
+                4,
+            ),
+            "low_avoidance_delta_vs_v2_4": round(
+                _safe_float(v25_metrics.get("low_interaction_avoidance_rate"))
+                - _safe_float(v24_metrics.get("low_interaction_avoidance_rate")),
+                4,
+            ),
+        },
+        "omni_shadow_summary": (v25_report.get("metrics") or {}).get("omni_shadow_summary") or {},
+        "omni_shadow_ablation": (v25_report.get("metrics") or {}).get("omni_shadow_ablation") or {},
+        "omni_shadow_account_metrics": (v25_report.get("metrics") or {}).get("omni_shadow_account_metrics") or [],
+        "promotion_gate": (v25_report.get("metrics") or {}).get("promotion_gate") or {},
+        "writes_labels": False,
+        "production_weight": False,
+        "recommendations": _omni_replay_recommendations(queue, v25_report),
         "generated_at": utc_now(),
     }
 
@@ -1710,7 +1801,8 @@ def _normalize_queue_type(value: Any) -> str:
     return text if text in {"impact", "risk", "disagreement", "mixed"} else "mixed"
 
 
-def _calibration_queue_signals(row: dict, needs: list[dict]) -> dict:
+def _calibration_queue_signals(row: dict, needs: list[dict], *, omni_signal: dict | None = None) -> dict:
+    omni_signal = omni_signal or {}
     label = _text(row.get("performance_label")).lower()
     reward = _safe_float(row.get("normalized_reward") or row.get("reward_proxy"))
     confidence = _text(row.get("classification_confidence")).lower()
@@ -1725,16 +1817,22 @@ def _calibration_queue_signals(row: dict, needs: list[dict]) -> dict:
         disagreement += min(24.0, reward * 0.18)
     elif label == "low":
         disagreement += 12.0
+    disagreement += _safe_float(omni_signal.get("disagreement_boost"))
     risk = 0.0
     if label == "low":
         risk = 64.0 + min(24.0, (100.0 - reward) * 0.24) + unknown_count * 4.0
     elif reward <= 25:
         risk = 38.0 + unknown_count * 6.0
     impact = min(100.0, reward * 0.55 + (30.0 if label == "high" else 0.0) + low_confidence_penalty)
+    impact += _safe_float(omni_signal.get("impact_boost"))
     if label == "low" and risk >= max(impact, disagreement):
         queue_type = "risk"
         queue_reason = "low_interaction_risk"
         priority = risk
+    elif omni_signal.get("queue_reason") and disagreement >= max(impact, risk):
+        queue_type = "disagreement"
+        queue_reason = _text(omni_signal.get("queue_reason"))
+        priority = disagreement
     elif disagreement >= max(impact, risk):
         queue_type = "disagreement"
         queue_reason = "semantic_ranker_disagreement"
@@ -1750,6 +1848,7 @@ def _calibration_queue_signals(row: dict, needs: list[dict]) -> dict:
     ]
     if not recommended:
         recommended = ["content_category", "hook_type", "slice_structure"] if queue_type != "risk" else ["hook_type", "slice_structure"]
+    recommended = _dedupe_fields([*recommended, *[field for field in omni_signal.get("recommended_fields", []) if field in MANUAL_LABEL_FIELDS]])
     baseline_score = _queue_semantic_proxy(row)
     ranker_score = max(0.0, min(100.0, baseline_score + (impact - risk) * 0.05 + (disagreement - 40.0) * 0.03))
     return {
@@ -1761,6 +1860,79 @@ def _calibration_queue_signals(row: dict, needs: list[dict]) -> dict:
         "risk_score": round(max(0.0, min(100.0, risk)), 2),
         "baseline_strategy_score": round(baseline_score, 4),
         "ranker_strategy_score": round(ranker_score, 4),
+    }
+
+
+def _dedupe_fields(fields: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for field in fields:
+        if field in seen:
+            continue
+        seen.add(field)
+        result.append(field)
+    return result
+
+
+def _field_guides_for_list(fields: list[str]) -> list[dict[str, Any]]:
+    guides = omni_annotation_field_guides(fields)
+    return [guides[field] for field in fields if field in guides]
+
+
+def _omni_cache_for_history_row(row: dict, cache_index: dict[str, dict]) -> dict:
+    if not cache_index:
+        return {}
+    return cache_index.get(_text(row.get("id"))) or cache_index.get(_text(row.get("platform_item_id"))) or {}
+
+
+def _omni_calibration_signal(row: dict, omni: dict) -> dict:
+    if not isinstance(omni, dict) or not omni:
+        return {"available": False, "recommended_fields": []}
+    suggestions = omni.get("semantic_suggestions") if isinstance(omni.get("semantic_suggestions"), dict) else {}
+    quality = omni.get("semantic_quality") if isinstance(omni.get("semantic_quality"), dict) else {}
+    field_quality = quality.get("field_quality") if isinstance(quality.get("field_quality"), dict) else {}
+    suggested_fields = {}
+    recommended = []
+    conflicts = []
+    missing_rescues = []
+    usable = []
+    for field in ["content_category", "hook_type", "slice_structure"]:
+        item = field_quality.get(field) if isinstance(field_quality.get(field), dict) else {}
+        value = _text(item.get("normalized_value") or suggestions.get(field))
+        if not value or value.lower() == "unknown":
+            continue
+        suggested_fields[field] = value
+        if item.get("usable_for_ranker"):
+            usable.append(field)
+        current = _text(row.get(field))
+        current_unknown = current.lower() in {"", "unknown", "none", "null", "其他", "其它"}
+        if current_unknown:
+            missing_rescues.append(field)
+            recommended.append(field)
+        elif current.lower() != value.lower():
+            conflicts.append(field)
+            recommended.append(field)
+    queue_reason = ""
+    if conflicts:
+        queue_reason = "omni_shadow_semantic_conflict"
+    elif missing_rescues:
+        queue_reason = "omni_shadow_missing_field_rescue"
+    disagreement_boost = len(conflicts) * 20.0 + len(missing_rescues) * 8.0
+    impact_boost = len(usable) * 4.0
+    return {
+        "available": True,
+        "normalization_version": quality.get("normalization_version") or omni.get("normalization_version") or "",
+        "cache_path": omni.get("cache_path") or "",
+        "suggested_fields": suggested_fields,
+        "ranker_usable_fields": quality.get("ranker_usable_fields") if isinstance(quality.get("ranker_usable_fields"), list) else omni.get("ranker_usable_fields") or [],
+        "recommended_fields": _dedupe_fields(recommended),
+        "conflict_fields": conflicts,
+        "missing_rescue_fields": missing_rescues,
+        "queue_reason": queue_reason,
+        "disagreement_boost": round(disagreement_boost, 4),
+        "impact_boost": round(impact_boost, 4),
+        "writes_labels": False,
+        "production_weight": False,
     }
 
 
@@ -1797,26 +1969,56 @@ def _queue_semantic_proxy(row: dict) -> float:
 def _calibration_batch_summary(items: list[dict], rows: list[dict]) -> dict:
     missing_counter: Counter[str] = Counter()
     accounts: Counter[str] = Counter()
+    omni_available = 0
+    omni_conflict = 0
     saved = 0
     for row in rows:
         if _text(row.get("classification_confidence")) == "manual_verified":
             saved += 1
     for item in items:
         accounts[_text(item.get("account_id")) or "unknown"] += 1
+        omni = item.get("omni_shadow") if isinstance(item.get("omni_shadow"), dict) else {}
+        if omni.get("available"):
+            omni_available += 1
+        if omni.get("conflict_fields"):
+            omni_conflict += 1
         for field in item.get("recommended_fields") or []:
             missing_counter[field] += 1
+    field_guides = omni_annotation_field_guides()
     return {
         "pending_count": len(items),
         "saved_count": saved,
         "top_missing_fields": [
-            {"field": field, "count": count}
+            {
+                "field": field,
+                "label_zh": (field_guides.get(field) or {}).get("short_label_zh") or field,
+                "description_zh": (field_guides.get(field) or {}).get("description_zh") or "",
+                "count": count,
+            }
             for field, count in missing_counter.most_common(6)
         ],
         "impact_accounts": [
             {"account_id": account, "count": count}
             for account, count in accounts.most_common(8)
         ],
+        "omni_shadow_available_count": omni_available,
+        "omni_shadow_conflict_count": omni_conflict,
     }
+
+
+def _omni_replay_recommendations(queue: dict, v25_report: dict) -> list[str]:
+    recs = ["Omni 校准回放只做研究验证，不写 manual_verified，不替代 v2.4 生产权重。"]
+    summary = (v25_report.get("metrics") or {}).get("omni_shadow_summary") or {}
+    eval_rate = _safe_float(summary.get("eval_cache_available_rate"))
+    if eval_rate < 0.2:
+        recs.append("Omni 验证集覆盖率低于 20%，优先补齐账号级样本后再判断泛化。")
+    batch = queue.get("batch_summary") if isinstance(queue.get("batch_summary"), dict) else {}
+    if _safe_float(batch.get("omni_shadow_conflict_count")) > 0:
+        recs.append("优先人工校准 Omni shadow 冲突样本，再重跑 replay 比较校准前后。")
+    gate = (v25_report.get("metrics") or {}).get("promotion_gate") or {}
+    if gate.get("research_gate_passed"):
+        recs.append("v2.5 shadow 已出现正向研究信号；扩大覆盖并做消融确认后再考虑权重迁移。")
+    return recs
 
 
 def _research_label_baseline_groups(rows: list[dict]) -> dict[str, dict[tuple[str, ...], list[float]]]:

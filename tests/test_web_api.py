@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover - exercised by environments without web de
     TestClient = None
 
 from dso.db.session import connect, init_db
+from dso.learning.benchmark_manifest import freeze_benchmark_manifest
 from dso.scoring.scorer import score_segment
 from dso.versions import (
     ARTIFACT_MANIFEST_VERSION,
@@ -70,6 +71,10 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("memory-build-btn", asset_response.text)
         self.assertIn("backtest-btn", asset_response.text)
         self.assertIn("qwen-embedding-btn", asset_response.text)
+        self.assertIn("material-gold-review", asset_response.text)
+        self.assertIn("素材审核", asset_response.text)
+        self.assertIn("保存并进入下一条", asset_response.text)
+        self.assertIn("calibration-mode-tabs", asset_response.text)
 
     def test_static_dashboard_directory_serves_index(self) -> None:
         response = self.client.get("/static/dashboard/")
@@ -77,6 +82,20 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Douyin Slice Optimizer", response.text)
         self.assertIn("/static/dashboard/assets/", response.text)
+
+    def test_frozen_benchmark_manifest_api_verifies_snapshot(self) -> None:
+        freeze_benchmark_manifest("api-benchmark-v1", source_files=[])
+
+        response = self.client.get("/learning/benchmark-manifest/api-benchmark-v1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["manifest"]["benchmark_id"], "api-benchmark-v1")
+        self.assertEqual(payload["verification"]["status"], "verified")
+        self.assertTrue(payload["verification"]["passed"])
+
+        missing = self.client.get("/learning/benchmark-manifest/missing-benchmark-v1")
+        self.assertEqual(missing.status_code, 404)
 
     def test_qwen_omni_candidate_analyze_endpoint_is_shadow_only(self) -> None:
         segment = _insert_segment()
@@ -100,6 +119,44 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ready")
         self.assertFalse(payload["writes_labels"])
         self.assertFalse(payload["production_weight"])
+
+    def test_material_evidence_endpoints_remain_shadow_only(self) -> None:
+        status_payload = {
+            "contract_version": "material_evidence.d10b.v1",
+            "status": "not_started",
+            "batch_summary": {"selected_count": 80, "evidence_ready_count": 0},
+            "writes_main_semantic_labels": False,
+            "production_weight": False,
+        }
+        batch_payload = {
+            "contract_version": "material_evidence.d10b.v1",
+            "status": "ready",
+            "sample_count": 3,
+            "coverage": {"multi_window_ready_count": 3},
+            "writes_main_semantic_labels": False,
+            "production_weight": False,
+        }
+        resolver_payload = {
+            "contract_version": "material_evidence.d10b.v1",
+            "resolver_version": "material_confusion_resolver.shadow_v1",
+            "status": "resolver_research_only",
+            "summary": {"disagreement_count": 2},
+            "rewrites_existing_gold": False,
+            "production_weight": False,
+        }
+        with patch("dso.api.main.material_evidence_status", return_value=status_payload), patch(
+            "dso.api.main.run_material_evidence_batch", return_value=batch_payload
+        ), patch("dso.api.main.run_material_resolver_shadow", return_value=resolver_payload):
+            status = self.client.get("/learning/material-evidence/status?limit=80").json()
+            batch = self.client.post("/learning/material-evidence/extract", json={"limit": 3}).json()
+            resolver = self.client.post("/learning/material-resolver/shadow", json={"limit": 80}).json()
+
+        self.assertEqual(status["status"], "not_started")
+        self.assertEqual(batch["coverage"]["multi_window_ready_count"], 3)
+        self.assertEqual(resolver["status"], "resolver_research_only")
+        self.assertFalse(status["production_weight"])
+        self.assertFalse(batch["writes_main_semantic_labels"])
+        self.assertFalse(resolver["rewrites_existing_gold"])
 
     def test_quality_endpoint_returns_read_only_gate(self) -> None:
         segment = _insert_segment()
@@ -479,6 +536,28 @@ class WebApiTest(unittest.TestCase):
             f"/learning/historical-samples/{sample_id}/calibration/reopen",
             json={"classification_confidence": "low", "operator": "tester", "reason": "api reopen test"},
         ).json()
+        material_confirmed = self.client.patch(
+            f"/learning/material-gold-set/{sample_id}",
+            json={
+                "domain_category": "music_variety",
+                "material_type": "performance_clip",
+                "program_context": "歌手2026",
+                "presentation_style": "program_clip",
+                "operator": "tester",
+                "review_note": "api material gold test",
+            },
+        ).json()
+        material_queue = self.client.get(
+            "/learning/material-gold-set/queue?account_id=sixuweilive&dataset_id=sixuweilive_20260628&limit=2"
+        ).json()
+        material_taxonomy = self.client.get("/learning/material-taxonomy").json()
+        material_confusions = self.client.get(
+            "/learning/material-confusions/queue?account_id=sixuweilive&dataset_id=sixuweilive_20260628&limit=8"
+        ).json()
+        material_reopened = self.client.post(
+            f"/learning/material-gold-set/{sample_id}/reopen",
+            json={"operator": "tester", "reason": "api material reopen test"},
+        ).json()
         reopened_queue = self.client.get(
             "/learning/semantic-calibration/queue?account_id=sixuweilive&dataset_id=sixuweilive_20260628&limit=2&label=high&min_priority=1"
         ).json()
@@ -572,11 +651,21 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(queue["filters"]["strategy"], "research_ranker_v2_4")
         self.assertIn("suggested_fields", queue["samples"][0])
         self.assertIn("recommended_fields", queue["samples"][0])
+        self.assertIn("annotation_field_guides", queue)
+        self.assertIn("description_zh", queue["annotation_field_guides"]["content_category"])
         self.assertIn("queue_reason", queue["samples"][0])
         self.assertIn("impact_reason", queue["samples"][0])
         self.assertEqual(patched["sample"]["classification_confidence"], "manual_verified")
         self.assertEqual(reopened["status"], "reopened")
         self.assertEqual(reopened["sample"]["classification_confidence"], "low")
+        self.assertEqual(material_confirmed["status"], "confirmed")
+        self.assertFalse(material_confirmed["writes_main_semantic_labels"])
+        self.assertTrue(any(item["sample_id"] == sample_id for item in material_queue["recently_confirmed_samples"]))
+        self.assertFalse(material_taxonomy["rewrites_source_labels"])
+        self.assertNotIn("program_context", material_taxonomy["material_form_types"])
+        self.assertEqual(material_confusions["queue_version"], "material_confusion_queue.v1")
+        self.assertFalse(material_confusions["rewrites_existing_gold"])
+        self.assertEqual(material_reopened["status"], "reopened")
         self.assertTrue(any(item["id"] == sample_id for item in reopened_queue["samples"]))
         self.assertEqual(labels["research_label_version"], RESEARCH_LABEL_VERSION)
         self.assertEqual(tuning["strategy"], "research_ranker_v2_4")

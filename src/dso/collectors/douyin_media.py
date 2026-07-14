@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -123,17 +125,18 @@ def collect_douyin_media(
             )
             results.append(row)
             continue
-        results.append(
-            _collect_one(
-                item,
-                paths=paths,
-                page_delay_seconds=page_delay_seconds,
-                extra_wait_seconds=extra_wait_seconds,
-                extract_audio=extract_audio,
-                storage_root=asset_root,
-                max_storage_bytes=storage_limit,
-            )
+        result = _collect_one(
+            item,
+            paths=paths,
+            page_delay_seconds=page_delay_seconds,
+            extra_wait_seconds=extra_wait_seconds,
+            extract_audio=extract_audio,
+            storage_root=asset_root,
+            max_storage_bytes=storage_limit,
         )
+        results.append(result)
+        if _close_tab_after_sample_enabled():
+            _chrome_close_current_douyin_tab()
         if storage_limit and _directory_size(asset_root) >= storage_limit:
             stopped_for_storage = True
             break
@@ -345,9 +348,21 @@ def _download(
         return False, "storage_limit_reached"
     headers = {"User-Agent": DEFAULT_USER_AGENT, "Referer": referer}
     temp_path = path.with_name(path.name + ".part")
+    timeout_seconds = _download_timeout_seconds()
+    if shutil.which("curl"):
+        return _download_with_curl(
+            url,
+            path,
+            temp_path=temp_path,
+            referer=referer,
+            storage_root=storage_root,
+            max_storage_bytes=max_storage_bytes,
+            timeout_seconds=timeout_seconds,
+        )
     try:
+        deadline = time.monotonic() + timeout_seconds
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        with urllib.request.urlopen(req, timeout=min(20.0, timeout_seconds)) as resp:
             current = _directory_size(storage_root) if storage_root else 0
             content_length = int(resp.headers.get("Content-Length") or 0)
             if max_storage_bytes and content_length and current + content_length > max_storage_bytes:
@@ -356,6 +371,10 @@ def _download(
             path.parent.mkdir(parents=True, exist_ok=True)
             with temp_path.open("wb") as handle:
                 while True:
+                    if time.monotonic() > deadline:
+                        handle.close()
+                        temp_path.unlink(missing_ok=True)
+                        return False, f"download_timeout_after_{timeout_seconds:.0f}s"
                     chunk = resp.read(1024 * 512)
                     if not chunk:
                         break
@@ -370,6 +389,94 @@ def _download(
     except Exception as exc:
         temp_path.unlink(missing_ok=True)
         return False, str(exc)
+
+
+def _download_with_curl(
+    url: str,
+    path: Path,
+    *,
+    temp_path: Path,
+    referer: str,
+    storage_root: Path | None,
+    max_storage_bytes: int,
+    timeout_seconds: float,
+) -> tuple[bool, str]:
+    current = _directory_size(storage_root) if storage_root else 0
+    if max_storage_bytes and current >= max_storage_bytes:
+        return False, "storage_limit_reached"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "curl",
+        "--location",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        f"{timeout_seconds:.0f}",
+        "--connect-timeout",
+        "10",
+        "--speed-limit",
+        "1024",
+        "--speed-time",
+        "10",
+        "--user-agent",
+        DEFAULT_USER_AGENT,
+        "--referer",
+        referer,
+        "--output",
+        str(temp_path),
+    ]
+    if max_storage_bytes:
+        remaining = max(1, max_storage_bytes - current)
+        command.extend(["--max-filesize", str(remaining)])
+    command.append(url)
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + timeout_seconds + 5
+        while process.poll() is None:
+            if time.monotonic() > deadline:
+                process.kill()
+                process.wait(timeout=5)
+                temp_path.unlink(missing_ok=True)
+                return False, f"download_timeout_after_{timeout_seconds:.0f}s"
+            time.sleep(0.2)
+        if process.returncode != 0:
+            temp_path.unlink(missing_ok=True)
+            return False, f"curl_exit_{process.returncode}"
+        if _storage_over_limit(storage_root, max_storage_bytes):
+            temp_path.unlink(missing_ok=True)
+            return False, "storage_limit_would_exceed"
+        temp_path.replace(path)
+        return True, ""
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        return False, str(exc)
+
+
+def _download_timeout_seconds() -> float:
+    try:
+        return max(5.0, float(os.environ.get("DSO_DOUYIN_MEDIA_DOWNLOAD_TIMEOUT_SECONDS") or 35.0))
+    except ValueError:
+        return 35.0
+
+
+def _close_tab_after_sample_enabled() -> bool:
+    return str(os.environ.get("DSO_DOUYIN_MEDIA_CLOSE_TAB_AFTER_SAMPLE") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _chrome_close_current_douyin_tab() -> None:
+    script = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return "no_window"
+  set t to active tab of front window
+  if (URL of t) contains "douyin.com" then
+    close t
+    return "closed"
+  end if
+  return "not_douyin"
+end tell
+"""
+    subprocess.run(["osascript"], input=script, text=True, capture_output=True, timeout=10, check=False)
 
 
 def _directory_size(path: Path | None) -> int:

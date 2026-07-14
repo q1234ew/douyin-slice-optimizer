@@ -229,9 +229,49 @@
         </div>
 
         <div id="feedback-calibration" v-show="state.feedbackSection === 'calibration'" class="feedback-block learning-block">
-          <h3><Icon name="file-clock" />V1 Beta-C 学习评估</h3>
+          <h3><Icon name="file-clock" />校准与算法实验</h3>
           <div class="inner">
-            <div class="sync-actions">
+            <div class="calibration-mode-tabs" role="tablist" aria-label="校准工作模式">
+              <button
+                v-for="mode in calibrationModes"
+                :key="mode.key"
+                type="button"
+                role="tab"
+                :aria-selected="calibrationMode === mode.key ? 'true' : 'false'"
+                :class="{ active: calibrationMode === mode.key }"
+                @click="calibrationMode = mode.key"
+              >
+                <Icon :name="mode.icon" />
+                <span>{{ mode.label }}</span>
+                <em v-if="mode.count !== undefined">{{ mode.count }}</em>
+              </button>
+            </div>
+            <div id="learning-result" class="learning-status-line">{{ state.learningResult }}</div>
+
+            <MaterialGoldReview v-show="calibrationMode === 'material'" />
+
+            <section v-show="calibrationMode === 'research'" class="research-mode-section">
+              <div class="research-primary-actions">
+                <button id="backtest-btn" class="primary" type="button" :disabled="state.busyKey === 'backtest'" @click="withBusy('backtest', runBacktest)">
+                  <span v-if="state.busyKey === 'backtest'" class="spinner"></span>
+                  <Icon v-else name="radar" />运行回测
+                </button>
+                <button id="semantic-experiment-btn" type="button" :disabled="state.busyKey === 'semantic-experiment'" @click="withBusy('semantic-experiment', runSemanticFeatureExperiment)">
+                  <span v-if="state.busyKey === 'semantic-experiment'" class="spinner"></span>
+                  <Icon v-else name="scan-search" />语义实验
+                </button>
+                <button id="slice-structure-eval-btn" type="button" :disabled="state.busyKey === 'slice-structure-eval'" @click="withBusy('slice-structure-eval', runSliceStructureEvaluation)">
+                  <span v-if="state.busyKey === 'slice-structure-eval'" class="spinner"></span>
+                  <Icon v-else name="list-checks" />结构评估
+                </button>
+                <button id="qwen-embedding-btn" type="button" :disabled="state.busyKey === 'qwen-embedding'" @click="withBusy('qwen-embedding', runQwenEmbeddingResearch)">
+                  <span v-if="state.busyKey === 'qwen-embedding'" class="spinner"></span>
+                  <Icon v-else name="search-code" />Qwen 回测
+                </button>
+              </div>
+              <details class="research-tools-details">
+                <summary><Icon name="settings-2" />数据与高级工具</summary>
+                <div class="sync-actions">
               <button id="memory-build-btn" type="button" :disabled="state.busyKey === 'memory-build'" @click="withBusy('memory-build', buildMemoryBank)">
                 <span v-if="state.busyKey === 'memory-build'" class="spinner"></span>
                 <Icon v-else name="graduation-cap" />重建记忆库
@@ -248,21 +288,9 @@
                 <span v-if="state.busyKey === 'prototype-bank'" class="spinner"></span>
                 <Icon v-else name="sparkles" />重建原型库
               </button>
-              <button id="backtest-btn" class="primary" type="button" :disabled="state.busyKey === 'backtest'" @click="withBusy('backtest', runBacktest)">
-                <span v-if="state.busyKey === 'backtest'" class="spinner"></span>
-                <Icon v-else name="radar" />运行回测
-              </button>
               <button id="semantic-backfill-btn" type="button" :disabled="state.busyKey === 'semantic-backfill'" @click="withBusy('semantic-backfill', backfillSemanticFeatures)">
                 <span v-if="state.busyKey === 'semantic-backfill'" class="spinner"></span>
                 <Icon v-else name="database" />语义回填
-              </button>
-              <button id="semantic-experiment-btn" type="button" :disabled="state.busyKey === 'semantic-experiment'" @click="withBusy('semantic-experiment', runSemanticFeatureExperiment)">
-                <span v-if="state.busyKey === 'semantic-experiment'" class="spinner"></span>
-                <Icon v-else name="radar" />语义实验
-              </button>
-              <button id="slice-structure-eval-btn" type="button" :disabled="state.busyKey === 'slice-structure-eval'" @click="withBusy('slice-structure-eval', runSliceStructureEvaluation)">
-                <span v-if="state.busyKey === 'slice-structure-eval'" class="spinner"></span>
-                <Icon v-else name="list-checks" />结构评估
               </button>
               <button id="multimodal-plan-btn" type="button" :disabled="state.busyKey === 'multimodal-plan'" @click="withBusy('multimodal-plan', buildMultimodalCollectionPlan)">
                 <span v-if="state.busyKey === 'multimodal-plan'" class="spinner"></span>
@@ -276,12 +304,8 @@
                 <span v-if="state.busyKey === 'multimodal-feature'" class="spinner"></span>
                 <Icon v-else name="audio-lines" />真实特征实验
               </button>
-              <button id="qwen-embedding-btn" type="button" :disabled="state.busyKey === 'qwen-embedding'" @click="withBusy('qwen-embedding', runQwenEmbeddingResearch)">
-                <span v-if="state.busyKey === 'qwen-embedding'" class="spinner"></span>
-                <Icon v-else name="search-code" />Qwen 索引/回测
-              </button>
-            </div>
-            <div id="learning-result" class="meta" style="margin-top:10px;">{{ state.learningResult }}</div>
+                </div>
+              </details>
             <div class="detail-metrics" style="margin-top:8px;">
               <span>源文件行数<strong>{{ countLabel(learningCounts.sourceRaw) }}</strong></span>
               <span>源去重<strong>{{ countLabel(learningCounts.sourceUnique) }}</strong></span>
@@ -321,6 +345,9 @@
               <span class="status" :class="qwenEmbeddingClass">Beta-D-3</span>
               <span>{{ qwenEmbeddingText }}</span>
             </div>
+            </section>
+
+            <section v-show="calibrationMode === 'semantic'" class="semantic-mode-section">
             <div class="calibration-toolbar">
               <div>
                 <strong>语义校准队列</strong>
@@ -350,7 +377,11 @@
                 </div>
                 <div class="meta calibration-reason">{{ calibrationReason(sample) }}</div>
                 <div class="calibration-tags">
-                  <span v-for="field in calibrationFields(sample)" :key="`${sampleId(sample)}-${field}`">{{ fieldLabel(field) }}</span>
+                  <span
+                    v-for="field in calibrationFields(sample)"
+                    :key="`${sampleId(sample)}-${field}`"
+                    :title="fieldDescription(sample, field)"
+                  >{{ fieldLabel(field, sample) }}</span>
                   <span v-if="sample.queue_reason">{{ queueReasonLabel(sample.queue_reason) }}</span>
                   <span v-if="Number(sample.risk_score || 0)">risk {{ Number(sample.risk_score || 0).toFixed(0) }}</span>
                   <span v-if="Number(sample.disagreement_score || 0)">gap {{ Number(sample.disagreement_score || 0).toFixed(0) }}</span>
@@ -415,6 +446,9 @@
                 </div>
               </div>
             </div>
+            </section>
+
+            <section v-show="calibrationMode === 'research'" class="research-results-section">
             <div v-if="topPrototypes.length" id="prototype-bank-summary" class="insight-grid">
               <div v-for="item in topPrototypes.slice(0, 3)" :key="item.prototype_key || item.prototype_name" class="insight-card">
                 <span>{{ prototypeLevel(item) }} / n={{ Number(item.sample_count || 0) }}</span>
@@ -456,6 +490,14 @@
                 <div class="meta">高互动 {{ item.highHit }} / 避低 {{ item.lowAvoid }}</div>
               </div>
             </div>
+            <div v-if="omniAccountPoolRows.length" class="insight-grid" style="margin-top:8px;">
+              <div v-for="item in omniAccountPoolRows" :key="item.accountId" class="insight-card">
+                <span>{{ item.accountId }} / n={{ item.cachedCount }}</span>
+                <strong>{{ item.liftDelta }}</strong>
+                <div class="meta"><span class="status" :class="item.className">{{ item.statusLabel }}</span> 高互动 {{ item.highDelta }} / 避低 {{ item.lowDelta }}</div>
+                <div class="meta">{{ item.nextStep }}</div>
+              </div>
+            </div>
             <div v-if="diagnosticRows.length" class="calibration-list" style="margin-top:8px;">
               <div v-for="item in diagnosticRows" :key="`${item.group}-${item.sampleId}`" class="calibration-row">
                 <div class="calibration-row-head">
@@ -473,6 +515,7 @@
               <span>{{ promotionGateText }}</span>
             </div>
             <div v-if="!recommendations.length && !latestBacktest && !topPrototypes.length" class="empty"><Icon name="file-clock" /><strong>暂无学习评估</strong><span>先刷新已发布研究样本，再生成记忆库、时间建议、原型库和离线回测。</span></div>
+            </section>
           </div>
         </div>
 
@@ -531,8 +574,9 @@
 import { computed, ref } from "vue";
 import Icon from "./Icon.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
-import type { AccountQuality, DouyinHistorySignal, LearningDataset, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
+import type { AccountQuality, AnnotationFieldGuide, DouyinHistorySignal, LearningDataset, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
 import { clipText } from "../utils";
+import MaterialGoldReview from "./MaterialGoldReview.vue";
 
 type CountSource = Record<string, unknown> | null | undefined;
 
@@ -579,6 +623,7 @@ const {
 
 const metricsFile = ref<HTMLInputElement | null>(null);
 const douyinFile = ref<HTMLInputElement | null>(null);
+const calibrationMode = ref<"material" | "semantic" | "research">("material");
 const feedbackSections = [
   { key: "overview", label: "概览", icon: "layout-dashboard" },
   { key: "samples", label: "研究样本", icon: "database" },
@@ -710,6 +755,19 @@ const recommendations = computed(() => {
 const latestBacktest = computed(() => state.backtestReports[0] || null);
 const latestMetrics = computed(() => latestBacktest.value?.metrics || {});
 const calibrationQueue = computed(() => state.semanticCalibrationQueue || {});
+const calibrationModes = computed(() => {
+  const materialSummary = state.materialGoldQueue?.batch_summary && typeof state.materialGoldQueue.batch_summary === "object"
+    ? state.materialGoldQueue.batch_summary as Record<string, unknown>
+    : {};
+  const semanticSummary = calibrationQueue.value.batch_summary && typeof calibrationQueue.value.batch_summary === "object"
+    ? calibrationQueue.value.batch_summary as Record<string, unknown>
+    : {};
+  return [
+    { key: "material" as const, label: "素材审核", icon: "badge-check", count: Number(materialSummary.pending_count ?? state.materialGoldQueue?.total_candidates ?? 0) },
+    { key: "semantic" as const, label: "语义校准", icon: "tags", count: Number(semanticSummary.pending_count ?? calibrationQueue.value.total_candidates ?? 0) },
+    { key: "research" as const, label: "算法回测", icon: "radar" }
+  ];
+});
 const calibrationSamples = computed<SemanticCalibrationSample[]>(() => {
   if (Array.isArray(calibrationQueue.value.samples)) return calibrationQueue.value.samples || [];
   if (Array.isArray(calibrationQueue.value.queue)) return calibrationQueue.value.queue || [];
@@ -917,7 +975,7 @@ const strategyComparison = computed<Record<string, Record<string, unknown>>>(() 
   const value = latestMetrics.value.strategy_comparison;
   return value && typeof value === "object" ? value as Record<string, Record<string, unknown>> : {};
 });
-const backtestStrategyRows = computed(() => ["ranker_plus_text_embedding", "ranker_plus_visual_embedding", "ranker_plus_text_visual_embedding", "research_ranker_v2_4", "research_ranker_v2_3", "research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
+const backtestStrategyRows = computed(() => ["research_ranker_v2_9_material_taxonomy", "research_ranker_v2_8_material_calibrated", "research_ranker_v2_7_material_shadow", "research_ranker_v2_6_pool", "research_ranker_v2_5_shadow", "ranker_plus_text_embedding", "ranker_plus_visual_embedding", "ranker_plus_text_visual_embedding", "research_ranker_v2_4", "research_ranker_v2_3", "research_ranker_v2_2", "semantic_baseline_v2", "research_ranker_v2_1", "research_ranker_v2", "current_rules"].map((strategy) => {
   const item = strategyComparison.value[strategy] || {};
   return {
     strategy,
@@ -928,6 +986,25 @@ const backtestStrategyRows = computed(() => ["ranker_plus_text_embedding", "rank
     lowAvoid: Number(item.low_interaction_avoidance_rate || 0).toFixed(2)
   };
 }).filter((item) => item.sampleCount > 0));
+const omniAccountPoolRows = computed(() => {
+  const value = latestMetrics.value.omni_account_pool_gates;
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).map((item) => {
+    const row = item as Record<string, unknown>;
+    const status = String(row.status || "");
+    const liftDelta = Number(row.lift_delta_vs_v2_4 || 0);
+    return {
+      accountId: String(row.account_id || "unknown"),
+      cachedCount: Number(row.cached_eval_count || 0),
+      liftDelta: `${liftDelta >= 0 ? "+" : ""}${liftDelta.toFixed(2)}`,
+      highDelta: `${Number(row.high_hit_delta_vs_v2_4 || 0) >= 0 ? "+" : ""}${Number(row.high_hit_delta_vs_v2_4 || 0).toFixed(2)}`,
+      lowDelta: `${Number(row.low_avoidance_delta_vs_v2_4 || 0) >= 0 ? "+" : ""}${Number(row.low_avoidance_delta_vs_v2_4 || 0).toFixed(2)}`,
+      statusLabel: omniPoolStatusLabel(status),
+      className: omniPoolStatusClass(status),
+      nextStep: String(row.recommended_next_step || row.reason || "")
+    };
+  });
+});
 const diagnosticRows = computed(() => {
   const diagnostics = latestMetrics.value.diagnostic_samples;
   if (!diagnostics || typeof diagnostics !== "object") return [];
@@ -1070,6 +1147,11 @@ function strategyLabel(value: string): string {
     ranker_plus_text_embedding: "Qwen 文本证据",
     ranker_plus_visual_embedding: "Qwen 视觉证据",
     ranker_plus_text_visual_embedding: "Qwen 文视证据",
+    research_ranker_v2_6_pool: "Omni 扩池 v2.6",
+    research_ranker_v2_7_material_shadow: "素材形态 v2.7",
+    research_ranker_v2_8_material_calibrated: "Gold 校准 v2.8",
+    research_ranker_v2_9_material_taxonomy: "形态层级 v2.9",
+    research_ranker_v2_5_shadow: "Omni Shadow v2.5",
     research_ranker_v2_4: "历史证据 v2.4",
     research_ranker_v2_3: "历史证据 v2.3",
     research_ranker_v2_2: "历史证据 v2.2",
@@ -1079,6 +1161,22 @@ function strategyLabel(value: string): string {
     semantic_baseline_v2: "语义基线"
   };
   return labels[value] || value;
+}
+
+function omniPoolStatusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    pool_boost_candidate: "可扩池",
+    quarantine: "隔离",
+    evidence_only: "解释",
+    low_confidence: "补覆盖"
+  };
+  return labels[value] || "研究";
+}
+
+function omniPoolStatusClass(value: string): string {
+  if (value === "pool_boost_candidate") return "ok";
+  if (value === "quarantine" || value === "low_confidence") return "warn";
+  return "neutral";
 }
 
 function sampleId(sample: SemanticCalibrationSample): string {
@@ -1144,12 +1242,16 @@ function queueReasonLabel(value?: unknown): string {
     semantic_ranker_disagreement: "排序分歧",
     high_interaction_missed_by_ranker: "高互动漏召",
     low_interaction_false_positive: "低互动误推",
-    near_duplicate_diversity_review: "近重复复核"
+    near_duplicate_diversity_review: "近重复复核",
+    material_conflict_review: "素材冲突复核",
+    material_shadow_gold_set: "素材形态 Gold Set"
   };
   return labels[key] || key || "校准";
 }
 
-function fieldLabel(value: string): string {
+function fieldLabel(value: string, sample?: SemanticCalibrationSample): string {
+  const guide = fieldGuide(value, sample);
+  if (guide?.short_label_zh || guide?.label_zh) return String(guide.short_label_zh || guide.label_zh);
   const labels: Record<string, string> = {
     content_category: "类别",
     hook_type: "Hook",
@@ -1157,9 +1259,77 @@ function fieldLabel(value: string): string {
     artist_names: "艺人",
     song_title: "歌名",
     tags: "标签",
-    classification_confidence: "可信度"
+    classification_confidence: "可信度",
+    domain_category: "领域",
+    material_type: "形态",
+    program_context: "节目",
+    presentation_style: "呈现",
+    material_label_verified: "确认"
   };
   return labels[value] || value;
+}
+
+function fieldDescription(sample: SemanticCalibrationSample, field: string): string {
+  const guide = fieldGuide(field, sample);
+  if (!guide) return fieldLabel(field, sample);
+  const parts = [
+    guide.label_zh || guide.short_label_zh || field,
+    guide.description_zh,
+    guide.annotation_hint_zh
+  ].map(item => String(item || "").trim()).filter(Boolean);
+  return parts.join("：");
+}
+
+function fieldGuide(field: string, sample?: SemanticCalibrationSample): AnnotationFieldGuide | null {
+  const fromSample = Array.isArray(sample?.recommended_field_guides)
+    ? sample.recommended_field_guides.find(item => String(item?.field || "") === field)
+    : null;
+  if (fromSample) return fromSample;
+  const guides = calibrationQueue.value.annotation_field_guides;
+  const fromQueue = guides && typeof guides === "object" ? guides[field] : null;
+  if (fromQueue) return fromQueue;
+  return localFieldGuide(field);
+}
+
+function localFieldGuide(field: string): AnnotationFieldGuide | null {
+  const guides: Record<string, AnnotationFieldGuide> = {
+    domain_category: {
+      field,
+      label_zh: "领域分类",
+      short_label_zh: "领域",
+      description_zh: "判断内容所属业务领域。",
+      annotation_hint_zh: "不要和素材形态混用。"
+    },
+    material_type: {
+      field,
+      label_zh: "素材形态",
+      short_label_zh: "形态",
+      description_zh: "判断素材是舞台片段、Reaction、教学、点评还是盘点。",
+      annotation_hint_zh: "同一领域下也要区分不同形态。"
+    },
+    program_context: {
+      field,
+      label_zh: "节目语境",
+      short_label_zh: "节目",
+      description_zh: "记录可靠识别的节目或赛段上下文。",
+      annotation_hint_zh: "不确定时保留 unknown。"
+    },
+    presentation_style: {
+      field,
+      label_zh: "呈现方式",
+      short_label_zh: "呈现",
+      description_zh: "判断直拍、解析、Reaction复盘、盘点、教学等表层表达方式。",
+      annotation_hint_zh: "用于解释同一素材形态下的表达差异。"
+    },
+    material_label_verified: {
+      field,
+      label_zh: "形态标注确认",
+      short_label_zh: "确认",
+      description_zh: "标记 material gold set 是否已经人工确认。",
+      annotation_hint_zh: "系统推断不能自动标记为已确认。"
+    }
+  };
+  return guides[field] || null;
 }
 
 function performanceLabel(value?: unknown): string {

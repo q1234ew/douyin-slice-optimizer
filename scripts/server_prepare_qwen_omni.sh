@@ -19,6 +19,7 @@ MODEL_DIR="${MODEL_DIR:-/home/aidev/models/Qwen2.5-Omni-7B-GPTQ-Int4}"
 PROXY_URL="${PROXY_URL:-}"
 GPTQMODEL_VERSION="${GPTQMODEL_VERSION:-2.0.0}"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR:-/home/aidev/.local/opt/ffmpeg-official-8.1.2/bin}"
 MAX_WORKERS="${MAX_WORKERS:-4}"
 HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
@@ -39,6 +40,7 @@ Important env vars:
   SERVICE_DIR=/home/aidev/dso_multimodal_model_service
   PROXY_URL=http://127.0.0.1:17892
   MODEL_DIR=/home/aidev/models/Qwen2.5-Omni-7B-GPTQ-Int4
+  FFMPEG_BIN_DIR=/home/aidev/.local/opt/ffmpeg-official-8.1.2/bin
   GPTQMODEL_VERSION=2.0.0
   HF_HUB_DISABLE_XET=1
 EOF
@@ -157,8 +159,13 @@ DSO_MODEL_ID=${MODEL_ID}
 DSO_MODEL_LOCAL_PATH=${MODEL_DIR}
 DSO_OMNI_LOW_VRAM=1
 DSO_OMNI_ATTN=sdpa
+DSO_OMNI_VIDEO_FPS=0.35
+DSO_OMNI_VIDEO_MIN_PIXELS=12544
+DSO_OMNI_VIDEO_MAX_PIXELS=50176
+DSO_OMNI_MEDIA_MAX_NEW_TOKENS=96
 HF_HOME=${HF_HOME}
 HF_HUB_OFFLINE=1
+PATH=${FFMPEG_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
 EOF
   echo "Wrote ${SERVICE_DIR}/qwen-omni.env"
 }
@@ -194,6 +201,13 @@ PY
     nvcc --version | sed -n '1,4p'
   else
     echo "nvcc: false"
+  fi
+  if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
+    "${FFMPEG_BIN_DIR}/ffmpeg" -version | sed -n '1,2p'
+  elif command -v ffmpeg >/dev/null 2>&1; then
+    ffmpeg -version | sed -n '1,2p'
+  else
+    echo "ffmpeg: false"
   fi
 }
 

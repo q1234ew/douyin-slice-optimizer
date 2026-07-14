@@ -35,6 +35,7 @@ dso training-samples --account main
 dso baselines --account main
 dso qwen-omni-status
 dso qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seconds 15 --load-model
+dso qwen-omni-media-batch --limit 20 --max-clip-seconds 8 --load-model
 dso web --reload
 ```
 
@@ -70,7 +71,9 @@ Vite 构建产物输出到 `src/dso/api/static/dashboard/`，FastAPI 会在 `/st
 - faster-whisper 兜底默认模型为 `base`，可用 `DSO_WHISPER_MODEL=small` 提高准确度；可通过 `DSO_WHISPER_DEVICE`、`DSO_WHISPER_COMPUTE_TYPE`、`DSO_WHISPER_CPU_THREADS` 调整运行参数。
 - Web UI 会在候选区展示最新导出的 9:16 MP4 在线预览；导出文件也可通过 `/exports/...` 静态路径访问。
 - Web UI 和 `GET /videos/{video_id}/quality?top_k=30` 会展示发布前质量哨兵：ASR 后端/VAD、重复幻觉、广告口播、Top 队列闭环率、质量复核候选和下一步动作。
-- Qwen2.5-Omni 低显存模式默认使用 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`，仅作为 15 秒以内短片段 shadow 分析和语义校准建议，不自动写人工标签，不进入生产排序权重；目标服务器准备脚本见 `scripts/open_server_proxy_tunnel.sh` 和 `scripts/server_prepare_qwen_omni.sh`。
+- Qwen2.5-Omni 低显存模式默认使用 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`，仅作为 15 秒以内短片段 shadow 分析和语义校准建议，不自动写人工标签，不进入生产排序权重；支持 `--use-media --allow-windowed-clips --visual-ready-only` 对本地历史视频切窗后上传真媒体 payload。V1 Beta-D-6 新增 `research_ranker_v2_6_pool`，只做 Omni Top30 扩池研究门控和 trust profile，不替代 v2.4 Top10 排序。目标服务器准备脚本见 `scripts/open_server_proxy_tunnel.sh` 和 `scripts/server_prepare_qwen_omni.sh`。
+- D10-B 使用 `material-evidence-extract` 对定向 Gold 优先队列真实执行 hook / middle / payoff 三窗口 ASR、中文 OCR 和 Omni 紧凑证据，并用 `material-resolver-shadow` 生成 cached-eval-only 策略对比。两者都只写 Shadow 缓存/报告，不会自动改 Gold、主语义标签或生产排序权重。
+- D10-A/B 的唯一冻结基准为 `dso-v1-beta-d10-ab-20260715-r1`。运行 `dso benchmark-verify` 检查历史样本、Gold、Omni、D10-B 证据和源码是否漂移；只有校验通过后才可用 `dso benchmark-run` 生成可比较报告。冻结文件位于 `benchmarks/`，不得原地修改。
 - 表现数据导入会同步生成指标快照、`reward_proxy`、训练样本和账号基线；公开数据仅建议作为人工研究和趋势先验，训练主数据应来自自有/授权/许可来源。
 
 ## Metrics CSV

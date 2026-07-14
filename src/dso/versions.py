@@ -27,6 +27,9 @@ MULTIMODAL_VALIDATION_VERSION = "multimodal_validation.v1"
 MULTIMODAL_FEATURE_VERSION = "multimodal_features.lightweight_v1"
 QWEN_EMBEDDING_VERSION = "qwen3_vl_embedding.evidence_v1"
 QWEN_OMNI_VERSION = "qwen2_5_omni_7b_gptq_int4.shadow_v1"
+MATERIAL_EVIDENCE_VERSION = "material_evidence.d10b.v1"
+MATERIAL_RESOLVER_VERSION = "material_confusion_resolver.shadow_v1"
+BENCHMARK_MANIFEST_VERSION = "benchmark_manifest.v1"
 RESEARCH_LABEL_VERSION = "research_labels.visible_engagement_v2"
 RESEARCH_RANKER_VERSION = "historical_research_ranker.v2.4"
 SEGMENTER_VERSION = "music_variety_segmenter.v1"
@@ -61,6 +64,9 @@ def component_versions() -> dict[str, str]:
         "multimodal_features": MULTIMODAL_FEATURE_VERSION,
         "qwen_embeddings": QWEN_EMBEDDING_VERSION,
         "qwen_omni": QWEN_OMNI_VERSION,
+        "material_evidence": MATERIAL_EVIDENCE_VERSION,
+        "material_resolver": MATERIAL_RESOLVER_VERSION,
+        "benchmark_manifest": BENCHMARK_MANIFEST_VERSION,
         "research_labels": RESEARCH_LABEL_VERSION,
         "research_ranker": RESEARCH_RANKER_VERSION,
         "segmenter": SEGMENTER_VERSION,

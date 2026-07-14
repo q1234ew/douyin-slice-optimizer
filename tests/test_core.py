@@ -38,13 +38,34 @@ from dso.feedback.reward import compute_reward_proxy, feedback_signal_rates
 from dso.learning.backtest import (
     RESEARCH_RANKER_V23_STRATEGY,
     RESEARCH_RANKER_V24_STRATEGY,
+    RESEARCH_RANKER_V25_SHADOW_STRATEGY,
+    RESEARCH_RANKER_V26_POOL_STRATEGY,
+    RESEARCH_RANKER_V27_MATERIAL_STRATEGY,
+    RESEARCH_RANKER_V28_MATERIAL_STRATEGY,
+    RESEARCH_RANKER_V29_TAXONOMY_STRATEGY,
     _apply_v23_diversity,
+    _candidate_history_rows,
+    _canonical_material_type,
+    _historical_holdout_split,
+    _history_candidate_index,
+    _history_tokens,
+    _material_gold_calibration_split,
+    _material_gold_quality_report,
+    _material_type_taxonomy_relation,
+    _omni_material_gold_set_queue,
+    _prepare_history_tokens,
+    _rank_rows,
     _score_v22_from_components,
     _v24_reliable_signal_row,
     backtest_rule_ranker,
     list_backtest_reports,
     run_ranker_tuning,
     semantic_feature_experiment,
+)
+from dso.learning.benchmark_manifest import (
+    freeze_benchmark_manifest,
+    run_frozen_benchmark,
+    verify_benchmark_manifest,
 )
 from dso.learning.historical_samples import (
     douyin_history_baselines,
@@ -54,16 +75,33 @@ from dso.learning.historical_samples import (
     historical_sample_summary,
     list_historical_samples,
     rebuild_research_labels,
+    omni_calibration_replay,
     research_field_coverage,
     reopen_historical_sample_calibration,
     semantic_calibration_queue,
     update_historical_sample_labels,
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
+from dso.learning.material_calibration import (
+    material_gold_annotation_index,
+    material_gold_set_queue,
+    reopen_material_gold_annotation,
+    update_material_gold_annotation,
+)
+from dso.learning.material_confusion import material_confusion_queue, material_taxonomy_contract
+from dso.learning.material_evidence import (
+    _gate_asr_payload,
+    _normalize_material_evidence_response,
+    run_material_evidence_batch,
+    run_material_resolver_shadow,
+)
+from dso.learning.material_taxonomy import material_taxonomy_derivation
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
 from dso.learning.multimodal_validation import (
+    DEFAULT_MULTIMODAL_COLLECTION_MAX_STORAGE_BYTES,
     build_multimodal_collection_plan,
     collect_multimodal_assets,
+    resolve_multimodal_storage_limit_bytes,
     run_multimodal_feature_experiment,
     run_multimodal_validation,
 )
@@ -78,6 +116,7 @@ from dso.learning.qwen_omni import (
     QWEN_OMNI_MODEL,
     analyze_candidate_with_qwen_omni,
     qwen_omni_status,
+    run_qwen_omni_media_batch,
     run_qwen_omni_shadow,
 )
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure, evaluate_slice_structure_row
@@ -192,11 +231,62 @@ class _FakeQwenOmniClient:
             "advice": "recommend_calibration",
         }
 
+    def analyze_clip_file(self, payload: dict, video_path: str | Path) -> dict:
+        payload = {**payload, "uploaded_video_path": str(video_path)}
+        self.payloads.append(payload)
+        return self.analyze_clip(payload)
+
 
 def _unit_vector(index: int, *, dim: int = 2048) -> list[float]:
     vector = [0.0] * dim
     vector[index] = 1.0
     return vector
+
+
+def _write_omni_cache(root: Path, sample_id: str, suggestions: dict, *, usable_fields: list[str] | None = None) -> Path:
+    usable = set(usable_fields or ["content_category", "hook_type", "slice_structure"])
+    cache_root = root / "data" / "cache" / "qwen_omni_results" / "historical_sample"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    field_quality = {}
+    for field in ["content_category", "hook_type", "slice_structure"]:
+        value = suggestions.get(field) or "unknown"
+        field_quality[field] = {
+            "field": field,
+            "raw_value": value,
+            "normalized_value": value,
+            "source": "test_cache",
+            "confidence": "high" if field in usable else "low",
+            "reason": "test_cache",
+            "usable_for_ranker": field in usable and value != "unknown",
+            "ranker_use_scope": "shadow" if field in usable and value != "unknown" else "none",
+            "production_weight_eligible": False,
+        }
+    quality = {
+        "normalization_version": "qwen_omni_semantic_normalizer.v2",
+        "ranker_usable_fields": [field for field in usable if suggestions.get(field) and suggestions.get(field) != "unknown"],
+        "ranker_usable_count": len([field for field in usable if suggestions.get(field) and suggestions.get(field) != "unknown"]),
+        "field_quality": field_quality,
+        "writes_labels": False,
+        "production_weight": False,
+    }
+    path = cache_root / f"{sample_id}_test.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entity_id": sample_id,
+                "status": "model",
+                "semantic_suggestions": suggestions,
+                "raw_semantic_suggestions": suggestions,
+                "semantic_quality": quality,
+                "writes_labels": False,
+                "production_weight": False,
+                "generated_at": "2026-07-07T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 class CoreWorkflowTest(unittest.TestCase):
@@ -2467,17 +2557,36 @@ class CoreWorkflowTest(unittest.TestCase):
             artist_names="",
             classification_confidence="low",
         )
+        _write_omni_cache(
+            self.root,
+            "hist_calibrate_1",
+            {
+                "content_category": "performance_clip",
+                "hook_type": "high_note",
+                "slice_structure": "climax_first",
+                "artist_names": "Grace",
+                "song_title": "测试歌曲",
+                "tags": ["高音"],
+            },
+        )
 
-        queue = semantic_calibration_queue(account_id="main", dataset_id="tianci_20260628", limit=5)
+        queue = semantic_calibration_queue(account_id="main", dataset_id="tianci_20260628", limit=5, strategy=RESEARCH_RANKER_V25_SHADOW_STRATEGY)
         self.assertEqual(queue["status"], "ready")
         self.assertEqual(queue["samples"][0]["id"], "hist_calibrate_1")
         self.assertTrue(any(item["field"] == "hook_type" for item in queue["samples"][0]["needs"]))
         self.assertIn("hook_type", queue["samples"][0]["suggested_fields"])
         self.assertIn("recommended_fields", queue["samples"][0])
+        self.assertIn("annotation_field_guides", queue)
+        self.assertIn("description_zh", queue["annotation_field_guides"]["hook_type"])
+        self.assertIn("recommended_field_guides", queue["samples"][0])
         self.assertIn("queue_reason", queue["samples"][0])
         self.assertIn("risk_score", queue["samples"][0])
         self.assertIn("disagreement_score", queue["samples"][0])
         self.assertIn("impact_reason", queue["samples"][0])
+        self.assertTrue(queue["samples"][0]["omni_shadow"]["available"])
+        self.assertEqual(queue["samples"][0]["omni_shadow"]["suggested_fields"]["hook_type"], "high_note")
+        self.assertIn("hook_type", queue["samples"][0]["omni_shadow"]["recommended_fields"])
+        self.assertEqual(queue["batch_summary"]["omni_shadow_available_count"], 1)
         self.assertFalse(queue["samples"][0]["manual_verified"])
         filtered = semantic_calibration_queue(
             account_id="main",
@@ -2548,18 +2657,41 @@ class CoreWorkflowTest(unittest.TestCase):
                 published_at=f"2026-05-{index + 1:02d}T00:00:00+00:00",
                 collected_at="2026-06-28T00:00:00+00:00",
             )
+            _write_omni_cache(
+                self.root,
+                f"hist_time_bt_{index}",
+                {
+                    "content_category": "performance_clip" if high else "music_variety",
+                    "hook_type": "high_note" if high else "topical_hook",
+                    "slice_structure": "climax_first" if high else "linear",
+                    "artist_names": "测试歌手",
+                    "song_title": "测试歌曲",
+                    "tags": ["高音"] if high else ["铺垫"],
+                },
+            )
 
         report = backtest_rule_ranker(account_id="main", k=5, strategy=RESEARCH_RANKER_V24_STRATEGY, holdout_policy="time")
 
         self.assertIn("strategy_comparison", report["metrics"])
         self.assertEqual(report["metrics"]["strategy"], RESEARCH_RANKER_V24_STRATEGY)
         self.assertIn(RESEARCH_RANKER_V24_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn(RESEARCH_RANKER_V25_SHADOW_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn(RESEARCH_RANKER_V26_POOL_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn(RESEARCH_RANKER_V27_MATERIAL_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn(RESEARCH_RANKER_V28_MATERIAL_STRATEGY, report["metrics"]["strategy_comparison"])
+        self.assertIn(RESEARCH_RANKER_V29_TAXONOMY_STRATEGY, report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2_3", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2_2", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2_1", report["metrics"]["strategy_comparison"])
         self.assertIn("research_ranker_v2", report["metrics"]["strategy_comparison"])
         self.assertIn("semantic_baseline_v2", report["metrics"]["strategy_comparison"])
         self.assertIn("ranker_without_prototypes", report["metrics"]["component_ablation"])
+        self.assertIn(RESEARCH_RANKER_V25_SHADOW_STRATEGY, report["metrics"]["component_ablation"])
+        self.assertIn(RESEARCH_RANKER_V26_POOL_STRATEGY, report["metrics"]["component_ablation"])
+        self.assertIn(RESEARCH_RANKER_V27_MATERIAL_STRATEGY, report["metrics"]["component_ablation"])
+        self.assertIn(RESEARCH_RANKER_V28_MATERIAL_STRATEGY, report["metrics"]["component_ablation"])
+        self.assertIn(RESEARCH_RANKER_V29_TAXONOMY_STRATEGY, report["metrics"]["component_ablation"])
+        self.assertIn("v27_without_material_type", report["metrics"]["component_ablation"])
         self.assertIn("promotion_gate", report["metrics"])
         self.assertIn("weight_config", report["metrics"])
         self.assertIn("baseline_gap", report["metrics"])
@@ -2569,10 +2701,169 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertIn("leakage_guard_summary", report["metrics"])
         self.assertIn("next_calibration_queue", report["metrics"])
         self.assertIn("calibration_summary", report["metrics"])
+        self.assertIn("omni_shadow_summary", report["metrics"])
+        self.assertIn("omni_shadow_ablation", report["metrics"])
+        self.assertIn("omni_shadow_account_metrics", report["metrics"])
+        self.assertIn("omni_pool_report", report["metrics"])
+        self.assertIn("omni_pool_gate", report["metrics"])
+        self.assertIn("omni_trust_profiles", report["metrics"])
+        self.assertIn("omni_account_pool_gates", report["metrics"])
+        self.assertIn("omni_account_pool_summary", report["metrics"])
+        self.assertIn("omni_material_report", report["metrics"])
+        self.assertIn("omni_material_gate", report["metrics"])
+        self.assertIn("omni_material_gold_set_queue", report["metrics"])
+        self.assertIn("omni_material_calibration", report["metrics"])
+        self.assertIn("omni_material_calibration_holdout", report["metrics"])
+        self.assertIn("omni_material_gold_split", report["metrics"])
+        self.assertIn("omni_material_router_profiles", report["metrics"])
+        self.assertIn("omni_material_v28_report", report["metrics"])
+        self.assertIn("omni_material_v28_gate", report["metrics"])
+        self.assertIn("omni_material_v29_report", report["metrics"])
+        self.assertIn("omni_material_v29_gate", report["metrics"])
         self.assertEqual(report["metrics"]["promotion_gate"]["strategy"], RESEARCH_RANKER_V24_STRATEGY)
         self.assertEqual(report["metrics"]["holdout_policy_key"], "time")
+
         self.assertTrue(report["top_rows"])
         self.assertIn("v24_signal_trust", report["top_rows"][0]["component_scores"])
+
+        shadow_report = backtest_rule_ranker(
+            account_id="main",
+            k=5,
+            strategy=RESEARCH_RANKER_V25_SHADOW_STRATEGY,
+            holdout_policy="time",
+        )
+        self.assertEqual(shadow_report["metrics"]["strategy"], RESEARCH_RANKER_V25_SHADOW_STRATEGY)
+        self.assertEqual(shadow_report["metrics"]["promotion_gate"]["status"], "research_only")
+        self.assertFalse(shadow_report["metrics"]["promotion_gate"]["passed"])
+        self.assertTrue(shadow_report["top_rows"])
+        self.assertIn("v25_omni_shadow_evidence_quality", shadow_report["top_rows"][0]["component_scores"])
+        self.assertEqual(shadow_report["metrics"]["omni_shadow_summary"]["mode"], "shadow_only")
+        self.assertGreater(shadow_report["metrics"]["omni_shadow_summary"]["eval_cache_available_count"], 0)
+        self.assertIn("v25_without_hook_type", shadow_report["metrics"]["omni_shadow_ablation"]["variants"])
+        self.assertTrue(shadow_report["metrics"]["omni_shadow_account_metrics"])
+        diagnostics = shadow_report["metrics"]["diagnostic_samples"]
+        diagnostic_rows = []
+        for key in ["missed_high_interaction", "low_interaction_false_positive", "semantic_disagreements"]:
+            diagnostic_rows.extend(diagnostics.get(key) or [])
+        if diagnostic_rows:
+            self.assertTrue(any("omni_shadow" in row for row in diagnostic_rows))
+
+        pool_report = backtest_rule_ranker(
+            account_id="main",
+            k=5,
+            strategy=RESEARCH_RANKER_V26_POOL_STRATEGY,
+            holdout_policy="time",
+        )
+        self.assertEqual(pool_report["metrics"]["strategy"], RESEARCH_RANKER_V26_POOL_STRATEGY)
+        self.assertEqual(pool_report["metrics"]["promotion_gate"]["status"], "pool_research_only")
+        self.assertFalse(pool_report["metrics"]["promotion_gate"]["passed"])
+        self.assertEqual(pool_report["metrics"]["weight_config"]["strategy"], RESEARCH_RANKER_V26_POOL_STRATEGY)
+        self.assertEqual(pool_report["metrics"]["omni_pool_gate"]["strategy"], RESEARCH_RANKER_V26_POOL_STRATEGY)
+        self.assertIn("topk", pool_report["metrics"]["omni_pool_report"])
+        self.assertTrue(pool_report["metrics"]["omni_account_pool_gates"])
+        self.assertEqual(pool_report["metrics"]["omni_account_pool_summary"]["strategy"], RESEARCH_RANKER_V26_POOL_STRATEGY)
+        self.assertIn(
+            pool_report["metrics"]["omni_account_pool_gates"][0]["status"],
+            {"low_confidence", "evidence_only", "pool_boost_candidate", "quarantine"},
+        )
+        self.assertTrue(pool_report["top_rows"])
+        self.assertIn("v26_omni_pool_evidence", pool_report["top_rows"][0]["component_scores"])
+
+        material_report = backtest_rule_ranker(
+            account_id="main",
+            k=5,
+            strategy=RESEARCH_RANKER_V27_MATERIAL_STRATEGY,
+            holdout_policy="time",
+        )
+        self.assertEqual(material_report["metrics"]["strategy"], RESEARCH_RANKER_V27_MATERIAL_STRATEGY)
+        self.assertEqual(material_report["metrics"]["promotion_gate"]["status"], "material_research_only")
+        self.assertFalse(material_report["metrics"]["promotion_gate"]["passed"])
+        self.assertEqual(material_report["metrics"]["weight_config"]["strategy"], RESEARCH_RANKER_V27_MATERIAL_STRATEGY)
+        self.assertEqual(material_report["metrics"]["omni_material_gate"]["strategy"], RESEARCH_RANKER_V27_MATERIAL_STRATEGY)
+        self.assertIn("material_distribution", material_report["metrics"]["omni_material_report"])
+        self.assertIn("annotation_field_guides", material_report["metrics"]["omni_material_report"])
+        self.assertIn("素材形态", material_report["metrics"]["omni_material_report"]["annotation_field_guides"]["material_type"]["label_zh"])
+        self.assertIn("topk", material_report["metrics"]["omni_material_report"])
+        material_queue = material_report["metrics"]["omni_material_gold_set_queue"]
+        if material_queue:
+            self.assertIn("recommended_field_guides", material_queue[0])
+            self.assertIn("description_zh", material_queue[0]["recommended_field_guides"][0])
+        self.assertTrue(material_report["top_rows"])
+        self.assertIn("v27_material_evidence", material_report["top_rows"][0]["component_scores"])
+
+        v28_report = backtest_rule_ranker(
+            account_id="main",
+            k=5,
+            strategy=RESEARCH_RANKER_V28_MATERIAL_STRATEGY,
+            holdout_policy="time",
+        )
+        self.assertEqual(v28_report["metrics"]["strategy"], RESEARCH_RANKER_V28_MATERIAL_STRATEGY)
+        self.assertEqual(v28_report["metrics"]["promotion_gate"]["status"], "material_calibration_research_only")
+        self.assertFalse(v28_report["metrics"]["promotion_gate"]["passed"])
+        self.assertEqual(v28_report["metrics"]["weight_config"]["strategy"], RESEARCH_RANKER_V28_MATERIAL_STRATEGY)
+        self.assertIn("topk", v28_report["metrics"]["omni_material_v28_report"])
+        self.assertIn("v28_material_router_multiplier", v28_report["top_rows"][0]["component_scores"])
+        self.assertEqual(
+            v28_report["metrics"]["strategy_comparison"][RESEARCH_RANKER_V28_MATERIAL_STRATEGY]["topk_lift_vs_random"],
+            v28_report["metrics"]["strategy_comparison"][RESEARCH_RANKER_V24_STRATEGY]["topk_lift_vs_random"],
+        )
+
+        v29_report = backtest_rule_ranker(
+            account_id="main",
+            k=5,
+            strategy=RESEARCH_RANKER_V29_TAXONOMY_STRATEGY,
+            holdout_policy="time",
+        )
+        self.assertEqual(v29_report["metrics"]["strategy"], RESEARCH_RANKER_V29_TAXONOMY_STRATEGY)
+        self.assertEqual(v29_report["metrics"]["promotion_gate"]["status"], "material_taxonomy_research_only")
+        self.assertFalse(v29_report["metrics"]["promotion_gate"]["passed"])
+        self.assertEqual(v29_report["metrics"]["weight_config"]["strategy"], RESEARCH_RANKER_V29_TAXONOMY_STRATEGY)
+        self.assertIn("topk", v29_report["metrics"]["omni_material_v29_report"])
+        self.assertIn("v29_material_router_multiplier", v29_report["top_rows"][0]["component_scores"])
+        self.assertEqual(
+            v29_report["metrics"]["strategy_comparison"][RESEARCH_RANKER_V29_TAXONOMY_STRATEGY]["topk_lift_vs_random"],
+            v29_report["metrics"]["strategy_comparison"][RESEARCH_RANKER_V24_STRATEGY]["topk_lift_vs_random"],
+        )
+
+        if material_queue:
+            material_sample_id = material_queue[0]["sample_id"]
+            with connect() as conn:
+                before = dict(conn.execute("SELECT reward_proxy, likes, comments, classification_confidence FROM historical_capture_samples WHERE id = ?", [material_sample_id]).fetchone())
+            confirmed = update_material_gold_annotation(
+                material_sample_id,
+                {
+                    "domain_category": "music_variety",
+                    "material_type": "performance_clip",
+                    "program_context": "天赐的声音",
+                    "presentation_style": "program_clip",
+                    "operator": "tester",
+                    "review_note": "material gold test",
+                },
+            )
+            with connect() as conn:
+                after = dict(conn.execute("SELECT reward_proxy, likes, comments, classification_confidence FROM historical_capture_samples WHERE id = ?", [material_sample_id]).fetchone())
+            self.assertEqual(before, after)
+            self.assertEqual(confirmed["status"], "confirmed")
+            self.assertEqual(material_gold_annotation_index()[material_sample_id]["material_type"], "performance_clip")
+            gold_queue = material_gold_set_queue(account_id="main", dataset_id="tianci_20260628", limit=60)
+            self.assertFalse(any(item["sample_id"] == material_sample_id for item in gold_queue["samples"]))
+            self.assertTrue(any(item["sample_id"] == material_sample_id for item in gold_queue["recently_confirmed_samples"]))
+            self.assertLessEqual(
+                int(gold_queue["batch_summary"]["pending_count"]) + int(gold_queue["batch_summary"]["confirmed_count"]),
+                int(gold_queue["batch_summary"]["review_target"]),
+            )
+            reopened_material = reopen_material_gold_annotation(material_sample_id, {"operator": "tester", "reason": "second pass"})
+            self.assertEqual(reopened_material["status"], "reopened")
+            self.assertNotIn(material_sample_id, material_gold_annotation_index())
+
+        replay = omni_calibration_replay(account_id="main", dataset_id="tianci_20260628", limit=5, k=5)
+        self.assertEqual(replay["mode"], "omni_shadow_calibration_replay")
+        self.assertFalse(replay["writes_labels"])
+        self.assertFalse(replay["production_weight"])
+        self.assertIn("before_after", replay)
+        self.assertIn("omni_shadow_ablation", replay)
+        self.assertIn("omni_shadow_account_metrics", replay)
+        self.assertEqual(replay["promotion_gate"]["status"], "research_only")
 
         tuning = run_ranker_tuning(account_id="main", k=5, holdout_policy="time", max_trials=2)
         self.assertEqual(tuning["strategy"], RESEARCH_RANKER_V24_STRATEGY)
@@ -2587,6 +2878,452 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertIn("base_metrics", experiment)
         self.assertIn("diagnosis", experiment)
         self.assertEqual(experiment["field_mask_ablation"], [])
+
+    def test_frozen_benchmark_manifest_replays_and_detects_data_drift(self) -> None:
+        _insert_historical_sample(
+            "benchmark_sample",
+            dataset_id="benchmark_dataset",
+            item_id="benchmark_item",
+            title="冻结基准样本",
+            likes=20,
+            reward_proxy=20,
+            normalized_reward=75,
+            performance_label="high",
+            content_category="performance_clip",
+            published_at="2026-06-01T00:00:00+00:00",
+        )
+        source_path = self.root / "src" / "dso" / "learning" / "backtest.py"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text("FROZEN = True\n", encoding="utf-8")
+        manifest_path = self.root / "benchmarks" / "test-benchmark-v1.json"
+
+        frozen = freeze_benchmark_manifest(
+            "test-benchmark-v1",
+            path=manifest_path,
+            source_files=["src/dso/learning/backtest.py"],
+        )
+        self.assertEqual(frozen["status"], "frozen")
+        self.assertTrue(verify_benchmark_manifest("test-benchmark-v1", path=manifest_path)["passed"])
+        replay = run_frozen_benchmark("test-benchmark-v1", path=manifest_path)
+        self.assertEqual(replay["status"], "ready")
+        self.assertEqual(
+            replay["report"]["metrics"]["benchmark_manifest"]["benchmark_id"],
+            "test-benchmark-v1",
+        )
+        with self.assertRaises(FileExistsError):
+            freeze_benchmark_manifest(
+                "test-benchmark-v1",
+                path=manifest_path,
+                source_files=["src/dso/learning/backtest.py"],
+            )
+
+        with connect() as conn:
+            conn.execute(
+                "UPDATE historical_capture_samples SET content_category = 'commentary' WHERE id = ?",
+                ["benchmark_sample"],
+            )
+            conn.commit()
+        drift = verify_benchmark_manifest("test-benchmark-v1", path=manifest_path)
+        self.assertEqual(drift["status"], "drift_detected")
+        self.assertIn("historical_samples", drift["drifted_sections"])
+
+    def test_backtest_tie_breaks_are_deterministic(self) -> None:
+        rows = [
+            {
+                "id": sample_id,
+                "account_id": "main",
+                "platform_item_id": sample_id,
+                "title": "同分样本",
+                "published_at": "2026-06-01T00:00:00+00:00",
+                "final_score": 50,
+            }
+            for sample_id in ["sample-c", "sample-a", "sample-b", "sample-f", "sample-e", "sample-d"]
+        ]
+        train_a, eval_a, _, _ = _historical_holdout_split(rows, "time")
+        train_b, eval_b, _, _ = _historical_holdout_split(list(reversed(rows)), "time")
+        self.assertEqual([row["id"] for row in train_a], [row["id"] for row in train_b])
+        self.assertEqual([row["id"] for row in eval_a], [row["id"] for row in eval_b])
+        self.assertEqual(
+            [row["id"] for row in _rank_rows(rows)],
+            ["sample-a", "sample-b", "sample-c", "sample-d", "sample-e", "sample-f"],
+        )
+
+        prepared = _prepare_history_tokens(list(reversed(rows)))
+        index = _history_candidate_index(prepared)
+        target = {"id": "target", "account_id": "main", "title": "同分样本"}
+        tokens = _history_tokens("同分样本")
+        candidates = _candidate_history_rows(target, tokens, prepared, index, limit=3)
+        self.assertEqual([row["id"] for row in candidates], ["sample-a", "sample-b", "sample-c"])
+
+    def test_material_gold_queue_collapses_same_account_title_variants(self) -> None:
+        def row(sample_id: str, account_id: str, title: str, reward: float, score_delta: float) -> dict:
+            return {
+                "training_sample_id": sample_id,
+                "platform_item_id": f"item_{sample_id}",
+                "account_id": account_id,
+                "dataset_id": "gold_queue_test",
+                "title": title,
+                "performance_label": "high",
+                "normalized_reward": reward,
+                "content_category": "performance_clip",
+                "strategy_scores": {
+                    RESEARCH_RANKER_V24_STRATEGY: 50.0,
+                    RESEARCH_RANKER_V27_MATERIAL_STRATEGY: 50.0 + score_delta,
+                },
+                "component_scores": {"v27_material_conflict": 0.0},
+                "omni_shadow": {
+                    "semantic_suggestions": {
+                        "domain_category": "music_variety",
+                        "material_type": "performance_clip",
+                        "program_context": "测试节目",
+                        "presentation_style": "program_clip",
+                    }
+                },
+            }
+
+        queue = _omni_material_gold_set_queue(
+            [
+                row("same_low", "tianci", "#同一舞台 合唱！", 70.0, 2.0),
+                row("same_high", "tianci", "同一舞台，合唱", 90.0, 8.0),
+                row("same_other_account", "other", "同一舞台 合唱", 80.0, 4.0),
+                row("unique", "tianci", "另一首歌现场", 75.0, 3.0),
+            ],
+            limit=10,
+        )
+
+        self.assertEqual(len(queue), 3)
+        selected_ids = {item["sample_id"] for item in queue}
+        self.assertIn("same_high", selected_ids)
+        self.assertNotIn("same_low", selected_ids)
+        self.assertIn("same_other_account", selected_ids)
+        representative = next(item for item in queue if item["sample_id"] == "same_high")
+        self.assertEqual(representative["duplicate_group_size"], 2)
+        self.assertEqual(representative["collapsed_variant_count"], 1)
+        self.assertNotIn("_priority_raw", representative)
+
+        confirmed = row("confirmed", "tianci", "已经确认的舞台", 88.0, 6.0)
+        confirmed["material_gold_annotation"] = {"review_status": "confirmed"}
+        after_confirmation = _omni_material_gold_set_queue(
+            [
+                confirmed,
+                row("same_confirmed_group", "tianci", "#已经确认的舞台！", 92.0, 9.0),
+                row("still_available", "tianci", "尚未确认的舞台", 72.0, 3.0),
+            ],
+            limit=10,
+        )
+        self.assertEqual([item["sample_id"] for item in after_confirmation], ["still_available"])
+
+    def test_material_gold_split_is_deterministic_deduplicated_and_disjoint(self) -> None:
+        def gold_row(sample_id: str, account_id: str, title: str, material_type: str = "performance_clip") -> dict:
+            return {
+                "id": sample_id,
+                "account_id": account_id,
+                "title": title,
+                "performance_label": "high",
+                "_material_gold": {
+                    "review_status": "confirmed",
+                    "domain_category": "music_variety",
+                    "material_type": material_type,
+                    "presentation_style": "program_clip",
+                    "updated_at": f"2026-07-12T00:00:{sample_id[-1:]}Z",
+                },
+                "_omni_shadow": {
+                    "semantic_suggestions": {
+                        "domain_category": "music_variety",
+                        "material_type": "performance_clip",
+                        "presentation_style": "program_clip",
+                    }
+                },
+            }
+
+        rows = [
+            gold_row("a1", "account_a", "同一舞台"),
+            gold_row("a2", "account_a", "#同一舞台！"),
+            gold_row("a3", "account_a", "第二舞台"),
+            gold_row("a4", "account_a", "第三舞台"),
+            gold_row("a5", "account_a", "第四舞台", "reaction"),
+            gold_row("b1", "account_b", "账号乙一"),
+            gold_row("b2", "account_b", "账号乙二"),
+        ]
+
+        first = _material_gold_calibration_split(rows)
+        second = _material_gold_calibration_split(list(reversed(rows)))
+        first_calibration = {row["id"] for row in first["calibration_rows"]}
+        first_audit = {row["id"] for row in first["audit_rows"]}
+        second_calibration = {row["id"] for row in second["calibration_rows"]}
+        second_audit = {row["id"] for row in second["audit_rows"]}
+
+        self.assertEqual(first_calibration, second_calibration)
+        self.assertEqual(first_audit, second_audit)
+        self.assertFalse(first_calibration & first_audit)
+        self.assertEqual(first["summary"]["raw_confirmed_count"], 7)
+        self.assertEqual(first["summary"]["effective_unique_count"], 6)
+        self.assertEqual(first["summary"]["collapsed_duplicate_count"], 1)
+        self.assertEqual(first["summary"]["group_overlap_count"], 0)
+        self.assertFalse(first["summary"]["performance_label_used_for_split"])
+
+        quality = _material_gold_quality_report(rows, scope="test")
+        self.assertEqual(quality["confirmed_count"], 7)
+        self.assertEqual(quality["effective_unique_count"], 6)
+        self.assertEqual(quality["collapsed_duplicate_count"], 1)
+        self.assertEqual(quality["scope"], "test")
+
+    def test_material_taxonomy_preserves_detail_and_scores_canonical_form_separately(self) -> None:
+        self.assertEqual(_canonical_material_type("performance_highlight"), "performance_clip")
+        self.assertEqual(_canonical_material_type("judge_comment"), "commentary")
+        self.assertEqual(_material_type_taxonomy_relation("performance_highlight", "performance_clip"), "coarse_match")
+        self.assertEqual(_material_type_taxonomy_relation("performance_clip", "performance_highlight"), "specific_match")
+        self.assertEqual(_material_type_taxonomy_relation("reaction", "vocal_teaching"), "mismatch")
+
+        rows = [
+            {
+                "id": "taxonomy_exact",
+                "account_id": "main",
+                "title": "准确舞台",
+                "_material_gold": {"material_type": "performance_clip", "review_status": "confirmed"},
+                "_omni_shadow": {"semantic_suggestions": {"material_type": "performance_clip"}},
+            },
+            {
+                "id": "taxonomy_coarse",
+                "account_id": "main",
+                "title": "高光舞台",
+                "_material_gold": {"material_type": "performance_highlight", "review_status": "confirmed"},
+                "_omni_shadow": {"semantic_suggestions": {"material_type": "performance_clip"}},
+            },
+            {
+                "id": "taxonomy_mismatch",
+                "account_id": "main",
+                "title": "教学误判",
+                "_material_gold": {"material_type": "reaction", "review_status": "confirmed"},
+                "_omni_shadow": {"semantic_suggestions": {"material_type": "vocal_teaching"}},
+            },
+        ]
+
+        quality = _material_gold_quality_report(rows, scope="taxonomy_test")
+        self.assertEqual(quality["material_type_accuracy"], 0.3333)
+        self.assertEqual(quality["canonical_material_type_accuracy"], 0.6667)
+        self.assertEqual(quality["taxonomy_partial_accuracy"], 0.5833)
+        self.assertEqual(quality["taxonomy_relation_counts"], {"exact": 1, "coarse_match": 1, "mismatch": 1})
+        self.assertEqual(quality["severe_error_rate"], 0.3333)
+        self.assertFalse(quality["rewrites_manual_annotations"])
+        self.assertEqual(rows[1]["_material_gold"]["material_type"], "performance_highlight")
+
+    def test_material_confusion_queue_is_balanced_local_and_does_not_rewrite_gold(self) -> None:
+        rows = [
+            ("conf_react", "account_a", "900000000000000001", "声乐老师reaction解析舞台唱法", "reaction"),
+            ("conf_teach", "account_b", "900000000000000002", "声乐教学 如何练习气息和高音", "vocal_teaching"),
+            ("conf_compile", "account_c", "900000000000000003", "盘点十大舞台名场面合集", "compilation"),
+            ("conf_news", "account_d", "900000000000000004", "音乐圈热点事件回应与争议", "entertainment_news"),
+            ("conf_behind", "account_e", "900000000000000005", "歌手后台彩排花絮采访", "behind_the_scenes"),
+            ("conf_stage", "account_f", "900000000000000006", "演唱会现场舞台直拍", "performance_clip"),
+            ("conf_program", "account_g", "900000000000000007", "歌手2026节目舞台第期排名", "program_context"),
+        ]
+        for row_id, account_id, item_id, title, category in rows:
+            _insert_historical_sample(
+                row_id,
+                account_id=account_id,
+                dataset_id="confusion_test",
+                item_id=item_id,
+                title=title,
+                normalized_reward=70.0,
+                performance_label="high",
+                content_category=category,
+                tags=title,
+            )
+
+        omni_index = {
+            row_id: {
+                "sample_id": row_id,
+                "status": "ready",
+                "semantic_suggestions": {
+                    "domain_category": "music_variety",
+                    "material_type": category,
+                    "program_context": "歌手2026" if category == "program_context" else "unknown",
+                    "presentation_style": "analysis",
+                },
+                "raw_semantic_suggestions": {
+                    "domain_category": "music_variety",
+                    "material_type": category,
+                    "program_context": "歌手2026" if category == "program_context" else "unknown",
+                    "presentation_style": "analysis",
+                },
+            }
+            for row_id, _account_id, _item_id, _title, category in rows
+        }
+        assets = {
+            item_id: {"video": [f"/tmp/{item_id}.mp4"], "frame": [f"/tmp/{item_id}.jpg"]}
+            for _row_id, _account_id, item_id, _title, _category in rows
+        }
+        with patch("dso.learning.material_confusion.qwen_omni_shadow_cache_index", return_value=omni_index), patch(
+            "dso.learning.material_confusion._build_asset_index", return_value=assets
+        ), patch(
+            "dso.learning.material_confusion.material_gold_annotation_index",
+            return_value={"conf_react": {"review_status": "confirmed", "material_type": "reaction"}},
+        ):
+            queue = material_confusion_queue(dataset_id="confusion_test", limit=20, local_media_only=True)
+
+        self.assertEqual(queue["status"], "ready")
+        self.assertNotIn("conf_react", {item["sample_id"] for item in queue["samples"]})
+        self.assertGreaterEqual(len(queue["samples"]), 5)
+        self.assertTrue(all(item["assets"]["ready_for_evidence"] for item in queue["samples"]))
+        self.assertGreaterEqual(len(queue["batch_summary"]["pair_counts"]), 3)
+        self.assertFalse(queue["rewrites_existing_gold"])
+        self.assertNotIn("performance_highlight", [item["value"] for item in queue["taxonomy"]["material_form_options"]])
+        self.assertNotIn("program_context", [item["value"] for item in queue["taxonomy"]["material_form_options"]])
+        program_sample = next(item for item in queue["samples"] if item["sample_id"] == "conf_program")
+        self.assertNotIn("program_context", program_sample["candidate_material_types"])
+        self.assertEqual(program_sample["candidate_context_fields"], ["program_context"])
+
+        taxonomy = material_taxonomy_contract()
+        self.assertEqual(taxonomy["legacy_derivations"]["performance_highlight"]["highlight_signal"], "highlight")
+        self.assertTrue(taxonomy["legacy_derivations"]["program_context"]["program_context_is_separate"])
+        self.assertFalse(taxonomy["rewrites_source_labels"])
+        self.assertEqual(material_taxonomy_derivation("program_context")["canonical_material_type"], "unknown")
+
+        with self.assertRaises(ValueError):
+            material_confusion_queue(confusion_pair="not_a_pair")
+
+    def test_material_evidence_executes_three_windows_and_resolver_stays_shadow_only(self) -> None:
+        video_path = self.root / "reaction_teaching.mp4"
+        video_path.write_bytes(b"test-video")
+        sample = {
+            "sample_id": "d10b_sample",
+            "platform_item_id": "900000000000000099",
+            "account_id": "account_teacher",
+            "dataset_id": "d10b_test",
+            "title": "老师 reaction 看完这段舞台",
+            "confusion_pair": "reaction_vocal_teaching",
+            "confusion_pair_label_zh": "Reaction / 声乐教学",
+            "candidate_material_types": ["reaction", "vocal_teaching"],
+            "omni_raw_material_type": "reaction",
+            "omni_program_context": "unknown",
+            "assets": {"paths": {"video": [str(video_path)]}},
+        }
+        queue = {
+            "status": "ready",
+            "batch_summary": {"selected_count": 1},
+            "samples": [sample],
+        }
+        client = _FakeQwenOmniClient(loaded_model=QWEN_OMNI_MODEL)
+
+        def analyze_evidence(payload: dict, path: str | Path) -> dict:
+            client.payloads.append({**payload, "uploaded_video_path": str(path)})
+            return {
+                "status": "model",
+                "media_used": True,
+                "media_payload": {"use_audio_in_video": False},
+                "semantic_suggestions": {
+                    "material_type": "vocal_teaching",
+                    "program_context": "unknown",
+                    "confidence": 0.91,
+                    "spoken_text_summary": "",
+                    "visible_text": ["气息练习", "发声示范"],
+                    "evidence_signals": {
+                        "teaching_instruction": 0.95,
+                        "viewing_reaction": 0.1,
+                        "list_structure": 0,
+                        "news_narration": 0,
+                        "backstage_context": 0,
+                        "sustained_performance": 0.2,
+                    },
+                    "evidence": ["画面包含气息练习和发声示范"],
+                    "uncertainty_reason": "",
+                },
+            }
+
+        client.analyze_clip_file = analyze_evidence  # type: ignore[method-assign]
+
+        def create_clip(_video: Path, output: Path, *, start_seconds: float, duration_seconds: float) -> None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(f"{start_seconds}:{duration_seconds}".encode("utf-8"))
+
+        with patch("dso.learning.material_evidence.material_confusion_queue", return_value=queue), patch(
+            "dso.learning.material_evidence.probe_video",
+            return_value={"duration_seconds": 60.0, "audio_streams": 0},
+        ), patch(
+            "dso.learning.material_evidence._transcode_material_window",
+            side_effect=create_clip,
+        ), patch(
+            "dso.learning.material_evidence._extract_window_frames",
+            return_value=[],
+        ), patch(
+            "dso.learning.material_evidence._ocr_images",
+            return_value={"status": "ready", "engine": "mock", "lines": ["气息练习", "发声示范"], "frame_count": 3},
+        ), patch(
+            "dso.learning.material_evidence._transcribe_window",
+            return_value={"status": "audio_missing", "source": "missing_audio", "text": "", "segments": []},
+        ):
+            batch = run_material_evidence_batch(
+                dataset_id="d10b_test",
+                limit=1,
+                window_seconds=8,
+                client=client,
+                output_path=self.root / "d10b_batch.json",
+            )
+            with patch(
+                "dso.learning.material_evidence.material_gold_annotation_index",
+                return_value={
+                    "d10b_sample": {
+                        "sample_id": "d10b_sample",
+                        "material_type": "vocal_teaching",
+                        "review_status": "confirmed",
+                    }
+                },
+            ):
+                resolver = run_material_resolver_shadow(
+                    dataset_id="d10b_test",
+                    limit=1,
+                    include_reviewed=True,
+                    output_path=self.root / "d10b_resolver.json",
+                )
+
+        self.assertEqual(batch["status"], "ready")
+        self.assertEqual(batch["coverage"]["multi_window_ready_count"], 1)
+        self.assertEqual(batch["coverage"]["asr_ready_count"], 0)
+        self.assertEqual(batch["coverage"]["ocr_ready_count"], 1)
+        self.assertEqual(len(client.payloads), 3)
+        self.assertTrue(all(payload["prompt_profile"] == "material_evidence_d10b" for payload in client.payloads))
+        self.assertEqual(
+            batch["samples"][0]["resolver_strategies"]["multi_window"]["predicted_material_type"],
+            "vocal_teaching",
+        )
+        self.assertEqual(resolver["strategy_comparison"]["multi_window"]["canonical_accuracy"], 1.0)
+        self.assertEqual(resolver["strategy_comparison"]["omni_only"]["canonical_accuracy"], 0.0)
+        self.assertEqual(resolver["status"], "resolver_research_only")
+        self.assertFalse(resolver["writes_main_semantic_labels"])
+        self.assertFalse(resolver["rewrites_existing_gold"])
+        self.assertFalse(resolver["production_weight"])
+
+        parsed = _normalize_material_evidence_response(client.analyze_clip_file({}, video_path))
+        self.assertTrue(parsed["prompt_supported"])
+        self.assertEqual(parsed["material_type"], "vocal_teaching")
+        self.assertEqual(parsed["evidence_signals"]["teaching_instruction"], 0.95)
+
+        compact = _normalize_material_evidence_response(
+            {
+                "status": "model",
+                "semantic_suggestions": {
+                    "m": "vocal_teaching",
+                    "p": "unknown",
+                    "c": 0.9,
+                    "e": [1, 0, 0, 0, 0, 0],
+                },
+            }
+        )
+        self.assertTrue(compact["prompt_supported"])
+        self.assertEqual(compact["material_type"], "vocal_teaching")
+        self.assertEqual(compact["evidence_signals"]["teaching_instruction"], 1.0)
+
+        prompt_echo = _gate_asr_payload(
+            {
+                "status": "ready",
+                "text": "音乐综艺节目中文转写。",
+                "metadata": {"prompt": "音乐综艺节目中文转写。常见词包括：歌手、导师。"},
+            }
+        )
+        self.assertEqual(prompt_echo["status"], "low_information")
+        self.assertEqual(prompt_echo["text"], "")
+        self.assertEqual(prompt_echo["raw_text"], "音乐综艺节目中文转写。")
 
     def test_research_ranker_v24_quarantines_weak_semantic_signals(self) -> None:
         gated = _v24_reliable_signal_row(
@@ -2723,6 +3460,7 @@ class CoreWorkflowTest(unittest.TestCase):
         validation = run_multimodal_validation(account_id="main", dataset_id="tianci_20260628", limit=10, min_samples=1, min_asset_coverage=0.8)
         dry_run = collect_multimodal_assets(plan_path=plan["plan_path"], limit=1, dry_run=True)
 
+        report = json.loads(Path(dry_run["report_json"]).read_text(encoding="utf-8"))
         self.assertEqual(plan["validation_version"], MULTIMODAL_VALIDATION_VERSION)
         self.assertTrue(Path(plan["plan_path"]).exists())
         self.assertEqual(plan["sample_count"], 2)
@@ -2733,6 +3471,14 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(validation["promotion_gate"]["decision"], "collect_assets_first")
         self.assertEqual(dry_run["collection_mode"], "dry_run")
         self.assertEqual(dry_run["planned"], 1)
+        self.assertEqual(report["summary"]["storage"]["limit_bytes"], DEFAULT_MULTIMODAL_COLLECTION_MAX_STORAGE_BYTES)
+
+    def test_multimodal_storage_limit_env_override(self) -> None:
+        with patch.dict(os.environ, {"DSO_MULTIMODAL_COLLECTION_MAX_STORAGE_GB": "6"}, clear=False):
+            resolved = resolve_multimodal_storage_limit_bytes()
+        self.assertEqual(resolved, 6 * 1024 * 1024 * 1024)
+        self.assertEqual(resolve_multimodal_storage_limit_bytes(max_storage_gb=0), 0)
+        self.assertEqual(resolve_multimodal_storage_limit_bytes(max_storage_bytes=12345), 12345)
 
     def test_multimodal_feature_experiment_extracts_real_audio_features(self) -> None:
         high_id = "7651111111111111111"
@@ -3014,6 +3760,428 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(result["skipped_count"], 1)
         self.assertFalse(result["samples"][0]["production_weight"])
         self.assertFalse(result["samples"][0]["writes_labels"])
+
+    def test_qwen_omni_shadow_run_can_upload_windowed_media_payload(self) -> None:
+        _insert_historical_sample(
+            "hist_omni_media",
+            dataset_id="tianci_20260628",
+            item_id="7650000000000000001",
+            title="长视频开场高音爆发",
+            reward_proxy=98,
+            normalized_reward=98,
+            performance_label="high",
+            duration_seconds=46,
+        )
+        client = _FakeQwenOmniClient()
+        source_path = self.root / "data" / "douyin_media_assets" / "tianci" / "videos" / "7650000000000000001.mp4"
+        cover_path = self.root / "data" / "douyin_media_assets" / "tianci" / "covers" / "7650000000000000001.jpg"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        cover_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"fake-video")
+        cover_path.write_bytes(b"fake-cover")
+        with patch(
+            "dso.learning.qwen_omni._build_asset_index",
+            return_value={"7650000000000000001": {"video": [str(source_path)], "cover": [str(cover_path)]}},
+        ), patch(
+            "dso.learning.qwen_omni._prepare_omni_clip",
+            return_value={
+                "clip_path": "/tmp/window.mp4",
+                "source_path": str(source_path),
+                "source_duration_seconds": 46.0,
+                "clip_duration_seconds": 15.0,
+                "window_start_seconds": 0.0,
+                "window_end_seconds": 15.0,
+                "windowed_clip": True,
+                "normalized_clip": True,
+                "cache_hit": False,
+            },
+        ):
+            result = run_qwen_omni_shadow(
+                account_id="main",
+                dataset_id="tianci_20260628",
+                limit=5,
+                max_clip_seconds=15,
+                load_model=True,
+                use_media=True,
+                allow_windowed_clips=True,
+                visual_ready_only=True,
+                client=client,
+            )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["analyzed_count"], 1)
+        self.assertTrue(result["media_used"])
+        self.assertEqual(result["media_summary"]["windowed_clip_count"], 1)
+        self.assertEqual(client.payloads[0]["uploaded_video_path"], "/tmp/window.mp4")
+        self.assertEqual(client.payloads[0]["duration_seconds"], 15.0)
+        self.assertTrue(result["samples"][0]["media_used"])
+        self.assertFalse(result["samples"][0]["writes_labels"])
+
+    def test_qwen_omni_media_batch_writes_and_reuses_result_cache(self) -> None:
+        _insert_historical_sample(
+            "hist_omni_batch",
+            dataset_id="tianci_20260628",
+            item_id="7650000000000000002",
+            title="批量长视频开场高音爆发",
+            reward_proxy=99,
+            normalized_reward=99,
+            performance_label="high",
+            duration_seconds=52,
+        )
+        source_path = self.root / "data" / "douyin_media_assets" / "tianci" / "videos" / "7650000000000000002.mp4"
+        cover_path = self.root / "data" / "douyin_media_assets" / "tianci" / "covers" / "7650000000000000002.jpg"
+        clip_path = self.root / "data" / "cache" / "qwen_omni_clips" / "historical_sample" / "window.mp4"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        cover_path.parent.mkdir(parents=True, exist_ok=True)
+        clip_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"fake-video")
+        cover_path.write_bytes(b"fake-cover")
+        clip_path.write_bytes(b"fake-window")
+        client = _FakeQwenOmniClient()
+        media_context = {
+            "clip_path": str(clip_path),
+            "source_path": str(source_path),
+            "source_duration_seconds": 52.0,
+            "clip_duration_seconds": 8.0,
+            "window_start_seconds": 0.0,
+            "window_end_seconds": 8.0,
+            "windowed_clip": True,
+            "normalized_clip": True,
+            "cache_hit": False,
+            "has_audio": True,
+            "audio_source": "embedded_audio",
+            "active_window": "hook",
+            "multi_window_policy": "hook_active_middle_payoff_planned",
+            "planned_window_count": 3,
+            "window_plan": [
+                {"window": "hook", "start_seconds": 0.0, "end_seconds": 8.0, "duration_seconds": 8.0, "status": "active"},
+                {"window": "middle", "start_seconds": 22.0, "end_seconds": 30.0, "duration_seconds": 8.0, "status": "planned"},
+                {"window": "payoff", "start_seconds": 40.0, "end_seconds": 48.0, "duration_seconds": 8.0, "status": "planned"},
+            ],
+        }
+        asset_index = {"7650000000000000002": {"video": [str(source_path)], "cover": [str(cover_path)]}}
+        with patch("dso.learning.qwen_omni._build_asset_index", return_value=asset_index), patch(
+            "dso.learning.qwen_omni._prepare_omni_clip",
+            return_value=media_context,
+        ):
+            first = run_qwen_omni_media_batch(
+                account_id="main",
+                dataset_id="tianci_20260628",
+                limit=1,
+                max_clip_seconds=8,
+                load_model=True,
+                client=client,
+            )
+            calls_after_first = len(client.payloads)
+            second = run_qwen_omni_media_batch(
+                account_id="main",
+                dataset_id="tianci_20260628",
+                limit=1,
+                max_clip_seconds=8,
+                load_model=True,
+                client=client,
+            )
+
+        self.assertEqual(first["status"], "ready")
+        self.assertEqual(first["created"], 1)
+        self.assertEqual(first["reused"], 0)
+        self.assertEqual(second["status"], "ready")
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["reused"], 1)
+        self.assertEqual(len(client.payloads), calls_after_first)
+        self.assertTrue(Path(first["samples"][0]["result_cache_path"]).exists())
+        self.assertEqual(first["media_summary"]["audio_source_counts"]["embedded_audio"], 1)
+        self.assertEqual(first["media_summary"]["multi_window_planned_count"], 1)
+        self.assertEqual(first["samples"][0]["media"]["active_window"], "hook")
+        self.assertEqual(first["samples"][0]["media"]["planned_window_count"], 3)
+        self.assertFalse(first["samples"][0]["writes_labels"])
+
+    def test_qwen_omni_payload_schema_and_semantic_normalization(self) -> None:
+        class FreeformOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "音乐",
+                        "hook_type": "音乐分析",
+                        "slice_structure": "single",
+                        "artist_names": "@测试账号创作的原声",
+                        "song_title": "未知",
+                        "tags": ["unknown", "声乐解析", "single"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_freeform",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_freeform",
+            title="声乐老师解析刘宪华《How To Love》神级舞台",
+            reward_proxy=88,
+            normalized_reward=88,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        client = FreeformOmniClient()
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=client,
+        )
+        sample = result["samples"][0]
+        payload = client.payloads[0]
+
+        self.assertIn("semantic_schema", payload)
+        self.assertIn("analysis_prompt", payload)
+        self.assertIn("material_type", payload["semantic_schema"]["optional_fields"])
+        self.assertIn("field_descriptions_zh", payload["semantic_schema"])
+        self.assertIn("annotation_field_guides", payload["semantic_schema"])
+        self.assertIn("素材形态", payload["semantic_schema"]["annotation_field_guides"]["material_type"]["label_zh"])
+        self.assertIn("music_variety", payload["semantic_schema"]["auxiliary_allowed_values"]["domain_category"])
+        self.assertIn("vocal_teaching", payload["semantic_schema"]["auxiliary_allowed_values"]["material_type"])
+        self.assertIn("performance_highlight", payload["semantic_schema"]["allowed_values"]["content_category"])
+        self.assertEqual(sample["raw_semantic_suggestions"]["content_category"], "音乐")
+        self.assertEqual(sample["semantic_suggestions"]["content_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["domain_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["material_type"], "commentary")
+        self.assertEqual(sample["semantic_suggestions"]["presentation_style"], "analysis")
+        self.assertEqual(sample["semantic_suggestions"]["hook_type"], "expert_comment")
+        self.assertEqual(sample["semantic_suggestions"]["slice_structure"], "unknown")
+        self.assertEqual(sample["semantic_quality"]["field_quality"]["slice_structure"]["gate"]["decision"], "conflict_review")
+        self.assertEqual(sample["semantic_quality"]["field_quality"]["material_type"]["ranker_use_scope"], "none")
+        self.assertEqual(sample["semantic_suggestions"]["artist_names"], "")
+        self.assertEqual(sample["semantic_suggestions"]["song_title"], "")
+        self.assertFalse(sample["semantic_quality"]["production_weight"])
+
+    def test_qwen_omni_splits_music_variety_domain_and_material_type(self) -> None:
+        class MusicVarietyOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "音乐",
+                        "hook_type": "音乐",
+                        "slice_structure": "unknown",
+                        "artist_names": "陈楚生, 张靓颖",
+                        "song_title": "巴拉莱卡",
+                        "tags": ["天赐的声音", "直拍"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_music_variety_split",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_music_variety_split",
+            title="陈楚生张靓颖天赐的声音《巴拉莱卡》4k直拍 神级合唱",
+            reward_proxy=92,
+            normalized_reward=92,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=MusicVarietyOmniClient(),
+        )
+        sample = result["samples"][0]
+        quality = sample["semantic_quality"]["field_quality"]
+
+        self.assertEqual(sample["semantic_suggestions"]["content_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["domain_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["material_type"], "performance_clip")
+        self.assertEqual(sample["semantic_suggestions"]["program_context"], "天赐的声音")
+        self.assertEqual(sample["semantic_suggestions"]["presentation_style"], "direct_cam")
+        self.assertFalse(quality["material_type"]["usable_for_ranker"])
+        self.assertFalse(sample["writes_labels"])
+
+    def test_qwen_omni_material_type_detects_vocal_teaching(self) -> None:
+        class VocalTeachingOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "music",
+                        "hook_type": "music",
+                        "slice_structure": "unknown",
+                        "artist_names": "林俊杰, 邓紫棋",
+                        "song_title": "unknown",
+                        "tags": ["声乐教学", "唱歌技巧"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_vocal_teaching_split",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_vocal_teaching_split",
+            title="一招让你拥有邓紫棋林俊杰的唱歌共鸣 声乐教学 唱歌技巧",
+            reward_proxy=90,
+            normalized_reward=90,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=VocalTeachingOmniClient(),
+        )
+        sample = result["samples"][0]
+
+        self.assertEqual(sample["semantic_suggestions"]["content_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["domain_category"], "music_variety")
+        self.assertEqual(sample["semantic_suggestions"]["material_type"], "vocal_teaching")
+        self.assertEqual(sample["semantic_suggestions"]["presentation_style"], "vocal_lesson")
+        self.assertFalse(sample["production_weight"])
+
+    def test_qwen_omni_slice_structure_gate_rescues_high_confidence_rule_signal(self) -> None:
+        class DriftedStructureOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "entertainment",
+                        "hook_type": "highlight",
+                        "slice_structure": "lyric",
+                        "artist_names": "侯明昊",
+                        "song_title": "笼",
+                        "tags": ["高音", "爆发"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_rule_rescue",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_rule_rescue",
+            title="一开口高音爆发全场尖叫 侯明昊《笼》舞台封神",
+            reward_proxy=96,
+            normalized_reward=96,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=DriftedStructureOmniClient(),
+        )
+        sample = result["samples"][0]
+        quality = sample["semantic_quality"]["field_quality"]["slice_structure"]
+
+        self.assertEqual(sample["semantic_suggestions"]["content_category"], "performance_clip")
+        self.assertEqual(sample["semantic_suggestions"]["hook_type"], "high_note")
+        self.assertEqual(sample["semantic_suggestions"]["slice_structure"], "climax_first")
+        self.assertEqual(quality["gate"]["decision"], "rule_rescue_high_confidence")
+        self.assertGreaterEqual(quality["gate"]["rule_confidence_score"], 32.0)
+        self.assertFalse(sample["writes_labels"])
+        self.assertFalse(sample["production_weight"])
+
+    def test_qwen_omni_normalizer_marks_context_rescued_fields_shadow_usable(self) -> None:
+        class BroadLabelOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "entertainment",
+                        "hook_type": "lyric",
+                        "slice_structure": "unknown",
+                        "artist_names": "黄霄雲",
+                        "song_title": "是你没选我啊",
+                        "tags": ["歌词", "遗憾"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_context_usable",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_context_usable",
+            title="这句歌词唱尽遗憾 黄霄雲《是你没选我啊》太戳心",
+            reward_proxy=93,
+            normalized_reward=93,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=BroadLabelOmniClient(),
+        )
+        sample = result["samples"][0]
+        fields = sample["semantic_quality"]["field_quality"]
+
+        self.assertEqual(sample["semantic_suggestions"]["content_category"], "performance_clip")
+        self.assertEqual(sample["semantic_suggestions"]["hook_type"], "emotional_story")
+        self.assertTrue(fields["content_category"]["usable_for_ranker"])
+        self.assertTrue(fields["hook_type"]["usable_for_ranker"])
+        self.assertEqual(fields["content_category"]["ranker_use_scope"], "shadow")
+        self.assertFalse(fields["content_category"]["production_weight_eligible"])
+        self.assertFalse(sample["writes_labels"])
+        self.assertFalse(sample["production_weight"])
+
+    def test_qwen_omni_slice_rule_rescue_is_shadow_usable_only(self) -> None:
+        class MissingStructureOmniClient(_FakeQwenOmniClient):
+            def analyze_clip(self, payload: dict) -> dict:
+                self.payloads.append(payload)
+                return {
+                    "status": "ready",
+                    "semantic_suggestions": {
+                        "content_category": "music",
+                        "hook_type": "highlight",
+                        "slice_structure": "unknown",
+                        "artist_names": "测试歌手",
+                        "song_title": "测试歌曲",
+                        "tags": ["副歌", "爆发"],
+                    },
+                }
+
+        _insert_historical_sample(
+            "hist_omni_structure_shadow",
+            dataset_id="tianci_20260628",
+            item_id="hist_omni_structure_shadow",
+            title="副歌高音爆发 全场尖叫进入高潮",
+            reward_proxy=94,
+            normalized_reward=94,
+            performance_label="high",
+            duration_seconds=9,
+        )
+
+        result = run_qwen_omni_shadow(
+            account_id="main",
+            dataset_id="tianci_20260628",
+            limit=1,
+            max_clip_seconds=15,
+            load_model=True,
+            client=MissingStructureOmniClient(),
+        )
+        sample = result["samples"][0]
+        quality = sample["semantic_quality"]["field_quality"]["slice_structure"]
+
+        self.assertEqual(sample["semantic_suggestions"]["slice_structure"], "chorus_first")
+        self.assertEqual(quality["gate"]["decision"], "rule_rescue_high_confidence")
+        self.assertTrue(quality["usable_for_ranker"])
+        self.assertEqual(quality["ranker_use_scope"], "shadow")
+        self.assertFalse(quality["production_weight_eligible"])
 
     def test_research_ranker_v22_uses_semantic_weight_and_positive_evidence(self) -> None:
         base_components = {
