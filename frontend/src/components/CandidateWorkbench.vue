@@ -2,13 +2,15 @@
   <section id="candidates" class="panel candidate-workbench">
     <div class="panel-head">
       <div>
-        <h2 class="panel-title"><Icon name="list-video" />候选审核</h2>
+        <h2 class="panel-title"><Icon name="list-video" />候选列表</h2>
         <p id="candidate-source" class="panel-subtitle">{{ selectedVideo ? `来自：${selectedVideo.title}` : "未选择节目" }}</p>
       </div>
       <select id="candidate-video-select" :value="state.selectedVideoId" aria-label="候选节目" @change="changeVideo">
         <option v-for="video in state.videos" :key="video.id" :value="video.id">{{ video.title }}</option>
       </select>
     </div>
+
+    <QualitySentinel compact />
 
     <div id="candidate-review-brief" class="review-brief" aria-live="polite">
       <div class="review-brief-main">
@@ -29,8 +31,8 @@
         <button v-else type="button" class="primary" data-guide-action="process" @click="handleGuideAction('process')">
           <Icon name="wand-sparkles" />处理选中
         </button>
-        <button v-if="selectedSegment" type="button" data-guide-action="candidate:history" @click="handleGuideAction('candidate:history')"><Icon name="history" />历史先验</button>
-        <button v-else type="button" data-guide-action="simulation" @click="handleGuideAction('simulation')"><Icon name="radar" />推荐模拟</button>
+        <button v-if="selectedSegment" type="button" data-guide-action="candidate:history" @click="handleGuideAction('candidate:history')"><Icon name="history" />判断依据</button>
+        <button v-else type="button" data-guide-action="candidates" @click="handleGuideAction('candidates')"><Icon name="clipboard-check" />开始复核</button>
       </div>
     </div>
 
@@ -46,52 +48,28 @@
         :key="row.id"
         class="candidate-card"
         :class="{ selected: row.id === state.selectedSegmentId }"
-        tabindex="0"
-        role="button"
-        :aria-label="`候选片段 ${index + 1}`"
         :data-segment-id="row.id"
-        @click="selectCandidate(row.id)"
-        @keydown.enter.prevent="selectCandidate(row.id)"
-        @keydown.space.prevent="selectCandidate(row.id)"
       >
-        <div class="rank">{{ index + 1 }}</div>
-        <div class="candidate-main">
-          <div class="candidate-time">{{ fmtTimeRange(row) }}</div>
-          <div class="candidate-title">{{ firstTitle(row) }}</div>
-          <div class="candidate-copy">{{ clipText(row.transcript || row.summary, 96) }}</div>
-        </div>
-        <div class="candidate-signal">
-          <div class="meta">结构 / 爆点</div>
-          <div class="candidate-copy">{{ clipText(row.short_video_structure || row.summary, 74) }}</div>
-          <div class="tags">
-            <span class="tag">{{ row.music_slice_type || "短视频切片" }}</span>
-            <span class="tag blue">{{ row.emotion_type || "情绪" }}</span>
-          </div>
-        </div>
+        <button class="candidate-select" type="button" :aria-label="`查看候选 ${index + 1}：${firstTitle(row)}`" @click="selectCandidate(row.id)">
+          <span class="rank">{{ index + 1 }}</span>
+          <span class="candidate-main">
+            <span class="candidate-time">{{ fmtTimeRange(row) }}</span>
+            <strong class="candidate-title">{{ firstTitle(row) }}</strong>
+            <span class="candidate-copy">{{ clipText(row.score_explanation || row.short_video_structure || row.summary, 82) }}</span>
+          </span>
+        </button>
         <div class="candidate-score">
           <strong>{{ Number(row.final_score || 0).toFixed(1) }}</strong>
           <span>综合分</span>
           <div class="score-meter"><span :style="{ width: `${Math.max(0, Math.min(100, Number(row.final_score || 0)))}%` }"></span></div>
         </div>
         <div class="candidate-status">
-          <span class="status" :class="reviewStatusClass(row.review_status)">{{ row.review_status_label || "待审核" }}</span>
-          <div class="meta">{{ clipText(row.review_status_reason || "等待人工扫读", 36) }}</div>
-          <template v-if="qualityFlagsFor(row.id).length">
-            <span class="status warn">质量复核</span>
-            <div class="meta">{{ clipText(qualityFlagsFor(row.id).join(" / "), 32) }}</div>
-          </template>
-          <span v-if="row.review_status !== 'exported'" class="status" :class="row.latest_export ? 'ok' : 'warn'">{{ row.latest_export ? "已导出" : "待导出" }}</span>
-          <div class="meta">封面 {{ row.cover_time ? fmtSeconds(row.cover_time) : "-" }}</div>
+          <span class="status" :class="cardStatus(row).tone">{{ cardStatus(row).label }}</span>
+          <span v-if="qualityFlagsFor(row.id).length" class="candidate-risk-note">{{ clipText(qualityFlagsFor(row.id)[0], 24) }}</span>
         </div>
-        <div class="candidate-actions" @click.stop>
-          <div class="mini-actions">
-            <button class="icon-only" title="字幕" aria-label="复制字幕" :data-copy="row.transcript || ''" @click="copyText(row.transcript || '')"><Icon name="captions" /></button>
-            <button class="icon-only" title="标题" aria-label="复制标题建议" :data-copy="titleText(row)" @click="copyText(titleText(row))"><Icon name="text" /></button>
-            <button v-if="row.latest_export?.export_url" class="icon-only" title="预览" aria-label="打开导出预览" :data-preview-segment="row.id" @click="selectCandidate(row.id, row.latest_export)"><Icon name="play" /></button>
-          </div>
-          <button class="primary" :data-export-segment="row.id" :disabled="Boolean(state.busyKey)" @click="exportRow(row.id)">
-            <span v-if="state.busyKey === `export-${row.id}`" class="spinner"></span>
-            <Icon v-else :name="row.latest_export ? 'refresh-cw' : 'download'" />{{ row.latest_export ? "重导" : "导出" }}
+        <div class="candidate-actions">
+          <button type="button" :class="{ primary: row.id === state.selectedSegmentId }" @click="selectCandidate(row.id, row.latest_export || null)">
+            <Icon :name="row.latest_export?.export_url ? 'play' : 'panel-right-open'" />{{ row.latest_export?.export_url ? "查看预览" : row.id === state.selectedSegmentId ? "正在复核" : "查看详情" }}
           </button>
         </div>
       </article>
@@ -102,9 +80,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import Icon from "./Icon.vue";
+import QualitySentinel from "./QualitySentinel.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
 import type { CandidateRow } from "../types";
-import { clipText, fmtSeconds, fmtTimeRange, reviewStatusClass } from "../utils";
+import { clipText, fmtTimeRange, reviewStatusClass } from "../utils";
 
 const {
   state,
@@ -114,7 +93,6 @@ const {
   selectCandidate,
   handleGuideAction,
   exportSegment,
-  copyText,
   qualityFlagsFor,
   withBusy,
   toast
@@ -131,9 +109,12 @@ function firstTitle(row: CandidateRow): string {
   return titles[0] || row.summary || "候选片段";
 }
 
-function titleText(row: CandidateRow): string {
-  const titles = Array.isArray(row.title_suggestions) ? row.title_suggestions : [];
-  return titles.join("\n");
+function cardStatus(row: CandidateRow): { label: string; tone: string } {
+  if (qualityFlagsFor(row.id).length) return { label: "质量复核", tone: "warn" };
+  if (row.latest_export?.export_url || row.review_status === "exported") return { label: "已导出", tone: "ok" };
+  if (row.review_status === "approved") return { label: "已通过", tone: "ok" };
+  if (row.review_status === "blocked") return { label: "暂缓", tone: "risk" };
+  return { label: row.review_status_label || "待审核", tone: reviewStatusClass(row.review_status) };
 }
 
 function changeVideo(event: Event): void {

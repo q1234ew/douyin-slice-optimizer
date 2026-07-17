@@ -113,7 +113,9 @@ http://127.0.0.1:8000/
 - Material Router v2.8：`research_ranker_v2_8_material_calibrated` 将已确认 Gold Set 按账号和稳定标题确定性拆为校准 70% / 独立审计 30%；校准样本从性能验证行排除，审计样本只用于质量门槛。无 Gold 支持时严格回退 v2.4。
 - V1 Beta-D-9 Material Taxonomy Shadow：`research_ranker_v2_9_material_taxonomy` 保留人工原始 `material_type`，另派生 canonical 素材形态用于路由。当前仅将 `performance_highlight -> performance_clip`、`judge_comment -> commentary` 视为明确父子关系；报告同时返回严格准确率、canonical 准确率、部分得分、严重错判率和 v2.9 对 v2.8/v2.4 的 Top20/30/50 差值，不改写人工标注。
 - V1 Beta-D-10A Confusion Queue：新增 `material_taxonomy.py` 和 `/learning/material-confusions/queue`。规范素材形态不再包含 `performance_highlight / judge_comment / program_context`；三者分别派生为 `performance_clip + highlight_signal`、`commentary + judge detail` 和独立 `program_context`，源标签保持不变。定向队列覆盖五类主要混淆，按账号与稳定标题去重并平衡抽样，只返回有 Omni 结果且默认有本地视频的样本。
-- V1 Beta-D-10B Evidence Resolver Shadow：新增 `material_evidence.py`、`/learning/material-evidence/status`、`/learning/material-evidence/extract` 和 `/learning/material-resolver/shadow`。每条样本真实执行 hook / middle / payoff 三个 8 秒窗口，组合本地 Whisper ASR、macOS Vision 中文 OCR 和 Omni 紧凑证据；只写独立缓存与研究报告，不改 Gold、主语义标签或排序权重。Resolver 并排报告 title-only、Omni-only、ASR/OCR 和 multi-window，并以“已有完整证据的 confirmed Gold”作为 promotion 指标口径。
+- V1 Beta-D-10B Evidence Resolver Shadow：新增 `material_evidence.py`、`/learning/material-evidence/status`、`/learning/material-evidence/extract` 和 `/learning/material-resolver/shadow`。每条样本真实执行 hook / middle / payoff 三个 8 秒窗口，组合本地 Whisper ASR、macOS Vision 中文 OCR 和 Omni 紧凑证据；只写独立缓存与研究报告，不改 Gold、主语义标签或排序权重。Resolver 并排报告 title-only、Omni-only、ASR/OCR 和 multi-window；Gold 口径固定为“confirmed、material form 已知、按账号与稳定标题去重”，并分别报告入队覆盖、证据覆盖、作答覆盖、端到端准确率、选择性准确率和 `unknown` 弃权率。
+- V1 Beta-D-10C 描述特征实验：新增 `material_description_experiment.py` 和 `material-description-experiment` CLI。第二组实验固定 15 秒，比较单 hook 与 hook/middle/payoff 三窗口的描述文本、命名信号和弱标题；描述生成不读取标题，缓存和报告独立于 D10-B，仍为 Shadow。
+- V1 Beta-D-11 Visual Window Scout：新增模态感知准入、FFmpeg 全视频低成本候选窗、三帧视觉窗口、Qwen3-VL embedding 原型检索、文本辅助动态融合和窗口级 Gold。视觉路线不要求音轨，舞台、彩排和后台样本不再因 ASR/OCR 低信息被挡掉；Omni 仅接收融合 Top2 manifest。窗口标注独立写入 `material_window_annotations`，不改主语义标签、Material Gold 或生产排序权重。
 - 轻量权重调参：`/learning/ranker-tuning/run` 只搜索已有可解释组件权重，不训练 Logistic / LightGBM，不写候选生产分数。
 - 原型库口径加固：无 `source_path` 时不再自动混读旧工作簿。
 - 发布时间趋势：无训练样本时可用历史样本生成低/中置信趋势。
@@ -133,7 +135,13 @@ http://127.0.0.1:8000/
 - v2.9 继续保持 shadow/research 口径：canonical 质量通过只表示素材大类可用于研究路由，不代表高光等细粒度标签已识别，也不等于通过最终 promotion gate。
 - v2.9 首轮真实回放：独立审计严格准确率 `72.22%`、canonical 准确率 `77.78%`、部分得分 `76.39%`、严重错判率 `22.22%`；canonical 质量门槛通过。119 条 cached eval 上 v2.9 相对 v2.4 的 Top30 lift/high/low 为 `+0.0442 / +0.0333 / +0.0333`，但相对 v2.8 三项均为 `0`，说明层级修正改善了测量口径，没有新增排序收益。
 - D10-A 真实队列：默认 80 条，候选池 491 条，五类混淆分别 15–17 条，覆盖 18 个账号，80/80 本地媒体就绪；已确认的首批 60 条 Gold 自动排除。该队列是下一步 ASR/OCR 与多窗口证据实验的定向输入，不自动写 Gold 或排序权重。
-- D10-B 当前仍是低覆盖 Shadow：包含已审核样本时，100 条证据队列可优先纳入 51 条 confirmed Gold；当前只有 1 条 Gold 完成三窗口证据，因此 gate 使用 `cached_gold_evaluable_count=1` 并保持 `research_only`。首条真实 Gold 上 title-only / Omni-only 与人工 `reaction` 一致，ASR/OCR 偏向 `vocal_teaching`，multi-window 因两侧证据接近而弃权为 `unknown`，尚不能证明 Resolver 优于旧 Omni。
+- D10-B 当前仍是低证据覆盖 Shadow：60 条 confirmed Gold 去重后为 59 组，其中 2 组人工标签为 `unknown`，最终可评估 57 组。Gold 优先与动态跨形态准入修正后，100 条 Resolver 队列已覆盖 57/57 可评估 Gold；当前只有 1/57 完成三窗口证据，证据覆盖率 `1.75%`，因此仍为 `research_only`。该 cached Gold 上 multi-window 弃权率为 `100%`、严重错判率为 `0%`；弃权不再被误计为严重错判，但样本量仍不足以证明 Resolver 优于旧 Omni。
+- D10-C 首轮仅为 6 条、6 个混淆类型的单窗口 pilot：描述 schema 成功率 `100%`，Omni 实际使用音频 `4/6`。直接分类准确率/覆盖率/严重错误率为 `50% / 100% / 50%`；结构化描述为 `33.33% / 33.33% / 0%`；结构化描述加弱标题为 `50% / 50% / 0%`。六维数组有 3/6 出现“舞台表演被写入幕后信号位”的一致性问题，因此当前描述特征只能作为弃权和风险证据，不能替代多窗口 Resolver。
+- D10-C 第二组 15 秒三窗口实验完成 6 条 Gold、18 个窗口：schema `18/18`，有音轨窗口的音频实际使用覆盖 `12/12`，命名信号一致性告警 `2/18`。15 秒单 hook 纯文本与 8 秒纯文本同为 `16.67%` 准确率、`33.33%` 作答覆盖；三窗口结构化描述将覆盖提高到 `50%`，但没有增加正确命中，反而新增两次严重错判，准确率仍为 `16.67%`。结构化描述加弱标题为 `33.33%` 准确率、`66.67%` 覆盖、`50%` 选择性严重错判率，弱于 8 秒首轮。结论是瓶颈主要在盲选窗口和任务信号丢失，不是窗口只有 8 秒。
+- D10-D 本地选窗 smoke：对一条 389 秒 `reaction / vocal_teaching` 视频，仅用本机 FFmpeg、Whisper.cpp small、Silero VAD 和 macOS Vision OCR，在 `18.82` 秒内生成 76 个候选窗口；ASR 得到 26 段/828 字，OCR 30 帧中 24 帧非空，临时峰值约 15MB且未持久化媒体。自适应窗口为 `15–30s` 和 `330–345s`，均明显高于固定 middle 的信息分；视觉复核同时发现“reaction” Gold 与“教你们唱歌/发声讲解”强教学证据冲突，因此该样本应进入标签边界复核，不能直接作为分类胜负结论。
+- D10-D 冻结盲测未通过 selector gate：清单 `dso-v1-beta-d10d-selector-blind6-20260717-r1` 固定 1 条已调参 pilot 和 5 条盲样本，运行期间未改线索词典。6/6 均完成，合计 `94.90s`，自适应/固定窗口平均信息分为 `0.3390 / 0.2083`，但 5 条盲样本只有 1 条同时满足信息增益与混淆对相关性门槛。根因分层后发现 2 条本地视频无音轨、1 条舞台视频无可用语音、1 条本地素材内容与数据库标题/时长明显错配；因此当前结果只能证明低成本扫描可运行，不能证明词表式选窗具有泛化收益，也不能进入正式 Resolver 或排序权重。
+- D10-D 媒体替换 r2 仍未通过：对 60 条 confirmed Gold 执行音轨、实际/历史时长和本地文件准入，只有 26 条合格，33 条缺音轨、2 条时长不一致；合格样本只覆盖 `performance_program_context / reaction_vocal_teaching / behind_the_scenes_performance`。r2 保留 r1，替换 2 条无音轨和 1 条错片资产，5 条盲样本均通过媒体与人工身份核验。盲样本自适应/固定平均信息分为 `0.3569 / 0.2970`，平均样本增益仅 `+0.0302`，相关窗口 `2/5`、通过预注册代理门槛 `1/5`。这证明资产质量不是唯一瓶颈：纯舞台、彩排和节目语境主要依赖视觉场景，词表式 ASR/OCR selector 不能稳定泛化。
+- D11 首轮真实准入：60 条 confirmed Gold 中 58 条视频满足视觉路线，27 条有音轨；即视觉可评估覆盖由音频路线的 `45.0%` 提升为 `96.67%`。一条 493.9 秒无音轨视频已完成 3 个 15 秒候选窗和 9 张帧图，新增缓存约 1.11MB。当前 Qwen 服务不可达，因此该轮只验证到帧级候选，embedding 为 0，状态为 `frames_ready_service_unavailable`，继续保持 `research_only`。
 
 ## 7. 关键目录和模块
 
@@ -148,6 +156,7 @@ http://127.0.0.1:8000/
 | `src/dso/learning/prototypes.py` | 原型发现和原型匹配 |
 | `src/dso/learning/interest_clock.py` | 发布时间趋势 |
 | `src/dso/learning/backtest.py` | 轻量离线回测 |
+| `src/dso/learning/visual_window_scout.py` | D11 视觉候选窗、窗口原型、动态融合和冻结实验 |
 | `frontend/src/components/FeedbackView.vue` | 数据反馈与学习面板 |
 | `frontend/src/components/InspectorPanel.vue` | 候选详情和历史相似展示 |
 | `data/db/dso.sqlite3` | 本地 SQLite 数据库 |
@@ -193,6 +202,7 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qw
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-analyze <segment_id> --max-clip-seconds 15 --load-model
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-shadow-run --account main --dataset all --limit 20 --max-clip-seconds 15 --load-model
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli qwen-omni-media-batch --limit 20 --max-clip-seconds 8 --load-model
+PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli material-description-experiment --limit 6 --window-seconds 15 --windows-per-sample 3 --no-direct
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli backtest --account main --k 30 --strategy research_ranker_v2_6_pool --holdout-policy time
 ```
 
@@ -214,6 +224,10 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli ba
 | `POST /segments/{segment_id}/qwen-omni/analyze` | 对 15 秒以内候选片段执行 Omni shadow 分析，只返回建议 |
 | `POST /learning/qwen-omni/shadow-run` | 对历史样本批量执行低显存 Omni shadow-run，不写生产标签 |
 | `POST /learning/qwen-omni/media-batch` | 对本地真视频样本做切窗、上传、逐条缓存和可恢复报告 |
+| `GET /learning/visual-window-scout/status` | 查询视觉准入、窗口向量、原型和窗口 Gold 状态 |
+| `POST /learning/visual-window-scout/build` | 生成 15 秒视觉候选窗、三帧预览、embedding 和 Omni Top2 manifest |
+| `PATCH /learning/material-window-gold/{sample_id}` | 保存独立窗口级视觉形态与选窗质量 Gold |
+| `POST /learning/visual-window-scout/experiment` | 对比 fixed/text/visual/fusion 的 Recall@2 与严重漏选率 |
 | `GET /learning/semantic-calibration/queue?account_id=&dataset_id=&min_priority=&label=&queue_type=&strategy=&min_disagreement=` | 人工语义校准队列 |
 | `PATCH /learning/historical-samples/{sample_id}/labels` | 人工修正历史样本语义标签并写 change log |
 | `POST /learning/historical-samples/{sample_id}/calibration/reopen` | 将已保存人工标签的样本重新打开，回到语义校准队列 |
@@ -259,16 +273,22 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli ba
 - 2026-07-12 Beta-D-8 完整回放：60 条人工确认去重后有效 59 条，41 条校准、18 条独立审计、分组重叠 0；v2.8 已不再退化为 v2.4，但严格素材形态准确率和高互动增益仍未达到最终门槛。
 - 2026-07-12 Beta-D-9：新增不改写 Gold 的素材形态 canonical taxonomy、严格/规范双口径质量审计、严重错判率和 `research_ranker_v2_9_material_taxonomy` shadow 对照。
 - 2026-07-12 Beta-D-9 首轮回放结论：canonical 质量通过，但 Top20/30/50 相对 v2.8 均无新增 lift/high/low；继续 `material_taxonomy_research_only`，下一步转向 4 条独立审计严重错判，而不是继续放大 taxonomy 路由权重。
-- 2026-07-12 Beta-D-10A：完成规范素材形态契约、五类定向错判候选、跨账号平衡抽样、本地媒体门控、API 和工作台筛选视图。真实运行得到 80 条媒体就绪样本，可直接进入 D10-B 证据抽取。
+- 2026-07-12 Beta-D-10A：完成规范素材形态契约、五类定向错判候选、跨账号平衡抽样、本地媒体门控、API 和工作台筛选视图。后续增加动态跨领域/形态分歧准入，并在包含已审核样本时先保留去重后的可评估 Gold，避免混淆对平衡配额压低 Gold 覆盖。真实运行得到 80 条媒体就绪样本，可直接进入 D10-B 证据抽取。
 - 2026-07-13 Beta-D-10B：完成三窗口证据缓存、Whisper 低信息/提示词回声门控、macOS Vision 中文 OCR、Omni 紧凑证据协议、Gold 优先证据队列、cached-eval-only Resolver 报告、API/CLI 和工作台入口。8 秒单窗经 2 fps / 448px / 64 token 优化后由约 149.7 秒降到 31.2 秒；真实三窗口样本约 107–112 秒。
 - 2026-07-15 建立 D10-A/B Git 检查点与唯一冻结基准 `dso-v1-beta-d10-ab-20260715-r1`。manifest 固定 10,984 条 `visible_engagement_v2` 样本、60 条 confirmed Gold、623 条 Omni 缓存、2 条 D10-B 证据、关键算法源码指纹、账号内时间切分和 `k=30`；内容 SHA-256 为 `4b1fe0594dd30c4ba2e2b9c027a7d62d467b4201478fad49c8bea1b539170c04`。
+- 2026-07-15 D10-C 描述特征 pilot：远端服务增加受限 `material_description_d10c` prompt profile，并验证自定义 prompt 与真音频输入生效。6 条单窗口实验中，结构化描述加弱标题与直接分类同为 3/6 命中，但前者将 3 次直接分类严重错判改为弃权；代价是作答覆盖降到 50%。平均每窗直接分类约 56 秒、描述约 82 秒，暂不适合交互式全量处理。
+- 2026-07-15 D10-C 第二组实验：命名信号修复数组错位后，完成 6 条 Gold 的 15 秒三窗口回放。18 窗平均推理 `127.44` 秒、总推理 `2293.95` 秒；相比 8 秒，延长 hook 没有提升，三窗口只增加错误作答。D10-B 的任务型提示词在 reaction 样本上仍能识别编辑语境，而通用事实描述偏向前景舞台画面，因此描述字段暂时只保留为解释证据。
+- 2026-07-17 D10-D selector-only 冻结盲测：新增顺序执行、断点复用和无音轨 OCR-only 降级。5 条盲样本仅《年轮》事件样本通过预注册代理门槛；`reaction / vocal_teaching` pilot 不计入盲测胜负。视觉复核确认 `performance / program_context` 本身非互斥，`behind_the_scenes` 依赖视觉场景而非关键词，另有一条跨领域样本为错误/截断媒体。结论为 `selector_gate_not_met`，不扩大到 30 条，不调用远端 Omni。
+- 2026-07-17 D10-D 媒体准入与 r2：新增 `material_gold_media_audit.v1`，从 60 条 confirmed Gold 中识别出 26 条 selector-ready。由于原三类混淆没有任何同类音轨完整样本，r2 明确记录覆盖降级，改用声乐教学、后台访谈和舞台直拍替换，不伪装成同类准确率对照。媒体完整后仍只有声乐教学样本通过 selector gate，因此停止扩大词表，后续应验证视觉 embedding/场景变化候选生成。
+- 2026-07-17 D11 模型服务恢复：服务器以严格离线模式加载 `Qwen/Qwen3-VL-Embedding-2B`，`transformers` 升级至 `4.57.1`；文本和真实三帧探针均返回 `status=model`、2048 维。首批 5 条样本生成 15 个视觉窗口，15/15 embedding 成功并形成 11 条待审核队列。历史库中 11,296 条 64 维 fallback 已标记失败，不再计入 Qwen3 覆盖率、原型或回测；工作台默认预算收紧为每条 3 个代表窗口。
 - 冻结前已修复 token set、同分排名和相同发布时间样本的非确定性顺序；`PYTHONHASHSEED=101/202` 两个独立全量进程指标完全一致。冻结参考报告 `bt_3eb5b599720f480e` 的可比口径为：`current_rules=1.4905`、`semantic_baseline_v2=1.4856`、`research_ranker_v2_2=1.5941`、`v2.4=1.4305`、`v2.8/v2.9=1.4356`。7 月 1–2 日的旧 lift 只保留为历史记录，不再与该 manifest 下的结果直接比较。
-- 后端全量测试通过：`129 tests OK (15 skipped)`。前端生产构建通过：`npm run build`。
+- 后端全量测试通过：`145 tests OK`。前端类型检查与生产构建通过：`npm run build`；D11 已完成桌面和 390px 窄屏浏览器检查，无横向溢出或控制台错误。
 
 ## 11. 下一步优先级
 
-1. 按混淆对分层补齐至少 30 条 confirmed Gold 的 D10-B 三窗口证据；使用断点缓存、batch=1，不在工作台同步启动大批次。
-2. 在 cached-eval-only 子集复核 Resolver 分歧，优先处理 `reaction / vocal_teaching` 和 `performance / program_context`；对 `unknown` 弃权与严重错判分开计量。
-3. 只有当证据覆盖至少 85%、cached Gold 至少 30、canonical accuracy 至少 85%、严重错判不高于 10%，且相对 Omni 至少提升 3%，才进入排序器 ablation；仍不直接修改生产权重。
-4. 持续跟踪 v2.4 与 `semantic_baseline_v2` 的差距；未稳定达到生产门槛前，v2.8-v2.10 都只作为研究证据排序。
-5. 接入官方或授权账号窗口指标，补齐 6h / 24h / 72h / 7d / 30d；在此之前不把结果表述为播放量或发布效果承诺。
+1. 在已完成的 5 条、15 个窗口基础上，再补 5–15 条跨 `stage_performance / rehearsal / backstage_interview / vocal_teaching / compilation / news_document` 样本，优先平衡视觉形态而非追求总量。
+2. 在工作台先确认当前 11 条队列，再将窗口 Gold 补到至少 20 条；优先确认融合、视觉与固定策略发生分歧的窗口，`unknown/mixed` 保留为合法弃权。
+3. 有至少 10 条完整评估样本后运行 fixed/text/visual/fusion 冻结对比；门槛固定为 Fusion Recall@2 `>=70%`、相对 fixed `+10pp`、相对 text `+15pp`、严重漏选 `<=10%`。
+4. 未过门槛前不调用 Omni 扩大样本、不写生产排序权重；过门槛后只将 Top2 manifest 送入 Omni Shadow，验证窗口质量而非重做全视频扫描。
+5. ASR/OCR 继续只负责解释和文本事件检索，不再独立承担舞台、彩排和后台选窗；`performance / program_context` 继续按非互斥字段评估。
+6. 接入官方或授权账号窗口指标，补齐 6h / 24h / 72h / 7d / 30d；在此之前不把结果表述为播放量或发布效果承诺。

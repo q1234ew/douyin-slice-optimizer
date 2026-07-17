@@ -688,6 +688,14 @@ export interface MaterialGoldQueue {
 export interface MaterialConfusionSample extends MaterialGoldSample {
   confusion_pair?: string;
   confusion_pair_label_zh?: string;
+  pair_definition?: {
+    left?: string;
+    right?: string;
+    left_cues?: string[];
+    right_cues?: string[];
+    dynamic?: boolean;
+  };
+  queue_reason?: string;
   candidate_material_types?: string[];
   candidate_material_labels_zh?: string[];
   candidate_context_fields?: string[];
@@ -773,6 +781,87 @@ export interface MaterialResolverReport {
   disagreement_samples?: Array<Record<string, unknown>>;
   promotion_gate?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export interface MaterialWindowAnnotation {
+  id?: string;
+  window_id?: string;
+  sample_id?: string;
+  start_seconds?: number;
+  end_seconds?: number;
+  scene_form?: string;
+  program_context_mode?: string;
+  selection_quality?: string;
+  review_status?: string;
+  review_note?: string;
+  [key: string]: unknown;
+}
+
+export interface VisualWindowReviewSample {
+  sample_id?: string;
+  window_id?: string;
+  window_key?: string;
+  account_id?: string;
+  title?: string;
+  platform_url?: string;
+  gold_material_type?: string;
+  audio_source?: string;
+  start_seconds?: number;
+  end_seconds?: number;
+  frame_urls?: string[];
+  selected_by?: string[];
+  embedding_status?: string;
+  predicted_scene_form?: string;
+  visual_score?: number;
+  text_score?: number;
+  fusion_score?: number;
+  annotation?: MaterialWindowAnnotation | null;
+  [key: string]: unknown;
+}
+
+export interface VisualWindowScoutStatus {
+  contract_version?: string;
+  status?: string;
+  mode?: string;
+  media_readiness?: Record<string, unknown>;
+  annotation_summary?: Record<string, unknown>;
+  prototype_summary?: Record<string, unknown>;
+  latest_build?: Record<string, unknown>;
+  review_queue?: {
+    status?: string;
+    count?: number;
+    pending_count?: number;
+    samples?: VisualWindowReviewSample[];
+  };
+  scene_form_options?: Array<Record<string, unknown>>;
+  program_context_options?: Array<Record<string, unknown>>;
+  selection_quality_options?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface VisualWindowScoutReport extends VisualWindowScoutStatus {
+  sample_count?: number;
+  candidate_count?: number;
+  embedding_ready_count?: number;
+  build_counts?: Record<string, number>;
+  samples?: Array<Record<string, unknown>>;
+  omni_top2_queue?: Array<Record<string, unknown>>;
+  service_status?: Record<string, unknown>;
+}
+
+export interface VisualWindowExperiment {
+  contract_version?: string;
+  status?: string;
+  strategy_comparison?: Record<string, Record<string, unknown>>;
+  promotion_gate?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface MaterialWindowDraft {
+  scene_form: string;
+  program_context_mode: string;
+  selection_quality: string;
+  review_note: string;
 }
 
 export interface MaterialGoldDraft {
@@ -1149,6 +1238,7 @@ export interface LearningDatasetList {
   contract_version?: string;
   count?: number;
   datasets?: LearningDataset[];
+  historical_summary?: HistoricalSampleSummary;
   [key: string]: unknown;
 }
 

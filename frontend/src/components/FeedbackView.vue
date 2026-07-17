@@ -2,8 +2,8 @@
   <section id="feedback" class="panel feedback-panel">
     <div class="panel-head">
       <div>
-        <h2 class="panel-title"><Icon name="database" />研究学习</h2>
-        <p class="panel-subtitle">研究样本、历史先验、校准回测与平台账号</p>
+        <h2 class="panel-title"><Icon name="database" />研究中心</h2>
+        <p class="panel-subtitle">样本与标注、评测校准、平台连接和模型环境</p>
       </div>
       <div class="toolbar-actions">
         <label class="account-switcher" for="feedback-account">
@@ -30,7 +30,7 @@
       </div>
     </div>
     <div class="panel-body">
-      <div class="feedback-tabs" role="tablist" aria-label="研究学习分区">
+      <div class="feedback-tabs" role="tablist" aria-label="研究中心分区">
         <button
           v-for="section in feedbackSections"
           :key="section.key"
@@ -38,7 +38,7 @@
           role="tab"
           :aria-selected="state.feedbackSection === section.key ? 'true' : 'false'"
           :class="{ active: state.feedbackSection === section.key }"
-          @click="state.feedbackSection = section.key"
+          @click="selectFeedbackSection(section.key)"
         >
           <Icon :name="section.icon" />{{ section.label }}
         </button>
@@ -50,7 +50,13 @@
         </div>
       </div>
 
-      <div v-if="state.feedbackSection === 'overview'" id="feedback-overview" class="research-overview-strip">
+      <div v-if="feedbackWorkspaceLoading" class="empty feedback-loading-state" role="status" aria-live="polite">
+        <span class="spinner"></span>
+        <strong>{{ feedbackLoadingTitle }}</strong>
+        <span>{{ feedbackLoadingText }}</span>
+      </div>
+
+      <div v-if="state.feedbackSection === 'overview' && !feedbackWorkspaceLoading" id="feedback-overview" class="research-overview-strip">
         <div>
           <span>样本覆盖</span>
           <strong>{{ countLabel(learningCounts.historical) }}</strong>
@@ -73,7 +79,7 @@
         </div>
       </div>
 
-      <div class="feedback-grid">
+      <div v-show="!feedbackWorkspaceLoading" class="feedback-grid">
         <div v-show="state.feedbackSection === 'overview' || state.feedbackSection === 'samples'" class="feedback-block lineage-block">
           <h3><Icon name="database" />数据口径</h3>
           <div class="inner">
@@ -228,7 +234,7 @@
           </div>
         </div>
 
-        <div id="feedback-calibration" v-show="state.feedbackSection === 'calibration'" class="feedback-block learning-block">
+        <div id="feedback-calibration" v-if="state.feedbackSection === 'calibration'" class="feedback-block learning-block">
           <h3><Icon name="file-clock" />校准与算法实验</h3>
           <div class="inner">
             <div class="calibration-mode-tabs" role="tablist" aria-label="校准工作模式">
@@ -243,14 +249,14 @@
               >
                 <Icon :name="mode.icon" />
                 <span>{{ mode.label }}</span>
-                <em v-if="mode.count !== undefined">{{ mode.count }}</em>
+                <em v-if="mode.badge">{{ mode.badge }}</em>
               </button>
             </div>
             <div id="learning-result" class="learning-status-line">{{ state.learningResult }}</div>
 
-            <MaterialGoldReview v-show="calibrationMode === 'material'" />
+            <MaterialGoldReview v-if="calibrationMode === 'material'" />
 
-            <section v-show="calibrationMode === 'research'" class="research-mode-section">
+            <section v-if="calibrationMode === 'research'" class="research-mode-section">
               <div class="research-primary-actions">
                 <button id="backtest-btn" class="primary" type="button" :disabled="state.busyKey === 'backtest'" @click="withBusy('backtest', runBacktest)">
                   <span v-if="state.busyKey === 'backtest'" class="spinner"></span>
@@ -347,7 +353,7 @@
             </div>
             </section>
 
-            <section v-show="calibrationMode === 'semantic'" class="semantic-mode-section">
+            <section v-if="calibrationMode === 'semantic'" class="semantic-mode-section">
             <div class="calibration-toolbar">
               <div>
                 <strong>语义校准队列</strong>
@@ -448,7 +454,7 @@
             </div>
             </section>
 
-            <section v-show="calibrationMode === 'research'" class="research-results-section">
+            <section v-if="calibrationMode === 'research'" class="research-results-section">
             <div v-if="topPrototypes.length" id="prototype-bank-summary" class="insight-grid">
               <div v-for="item in topPrototypes.slice(0, 3)" :key="item.prototype_key || item.prototype_name" class="insight-card">
                 <span>{{ prototypeLevel(item) }} / n={{ Number(item.sample_count || 0) }}</span>
@@ -574,7 +580,7 @@
 import { computed, ref } from "vue";
 import Icon from "./Icon.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
-import type { AccountQuality, AnnotationFieldGuide, DouyinHistorySignal, LearningDataset, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
+import type { AccountQuality, AnnotationFieldGuide, DouyinHistorySignal, FeedbackSectionName, LearningDataset, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
 import { clipText } from "../utils";
 import MaterialGoldReview from "./MaterialGoldReview.vue";
 
@@ -611,6 +617,7 @@ const {
   runMultimodalValidation,
   runMultimodalFeatureExperiment,
   runQwenEmbeddingResearch,
+  loadCalibrationWorkspace,
   loadSemanticCalibrationQueue,
   saveCalibrationLabels,
   reopenCalibrationSample,
@@ -626,10 +633,10 @@ const douyinFile = ref<HTMLInputElement | null>(null);
 const calibrationMode = ref<"material" | "semantic" | "research">("material");
 const feedbackSections = [
   { key: "overview", label: "概览", icon: "layout-dashboard" },
-  { key: "samples", label: "研究样本", icon: "database" },
-  { key: "calibration", label: "校准与回测", icon: "radar" },
-  { key: "platform", label: "平台账号", icon: "radio-tower" },
-  { key: "runtime", label: "运行环境", icon: "cpu" }
+  { key: "samples", label: "样本与标注", icon: "database" },
+  { key: "calibration", label: "评测与校准", icon: "radar" },
+  { key: "platform", label: "平台连接", icon: "radio-tower" },
+  { key: "runtime", label: "模型与环境", icon: "cpu" }
 ] as const;
 const moduleAlerts = computed(() => [
   { key: "feedback", label: "研究样本", error: state.moduleStatus.feedback.error },
@@ -637,6 +644,21 @@ const moduleAlerts = computed(() => [
   { key: "douyin", label: "平台账号", error: state.moduleStatus.douyin.error },
   { key: "runtime", label: "运行环境", error: state.moduleStatus.runtime.error }
 ].filter(item => item.error));
+const calibrationWorkspaceHasData = computed(() => Boolean(
+  state.materialGoldQueue
+  || state.materialConfusionQueue
+  || state.materialEvidenceStatus
+  || state.visualWindowScoutStatus
+  || state.semanticCalibrationQueue
+));
+const calibrationWorkspaceLoading = computed(() => state.moduleStatus.history.loading && !calibrationWorkspaceHasData.value);
+const feedbackWorkspaceLoading = computed(() => state.feedbackSection === "calibration"
+  ? calibrationWorkspaceLoading.value
+  : state.moduleStatus.feedback.loading && !state.historicalSummary);
+const feedbackLoadingTitle = computed(() => state.feedbackSection === "calibration" ? "正在加载评测数据" : "正在加载研究数据");
+const feedbackLoadingText = computed(() => state.feedbackSection === "calibration"
+  ? "正在同步审核队列、证据状态和视觉候选窗。"
+  : "正在同步历史样本、账号质量和回测摘要。");
 
 const runtime = computed(() => state.runtime || {});
 const asr = computed(() => runtime.value.asr || {});
@@ -762,10 +784,14 @@ const calibrationModes = computed(() => {
   const semanticSummary = calibrationQueue.value.batch_summary && typeof calibrationQueue.value.batch_summary === "object"
     ? calibrationQueue.value.batch_summary as Record<string, unknown>
     : {};
+  const materialPending = Number(materialSummary.pending_count ?? state.materialGoldQueue?.total_candidates ?? 0);
+  const materialConfirmed = Number(materialSummary.confirmed_count || 0);
+  const semanticPending = Number(semanticSummary.pending_count ?? calibrationQueue.value.total_candidates ?? 0);
+  const semanticSaved = Number(semanticSummary.saved_count || 0);
   return [
-    { key: "material" as const, label: "素材审核", icon: "badge-check", count: Number(materialSummary.pending_count ?? state.materialGoldQueue?.total_candidates ?? 0) },
-    { key: "semantic" as const, label: "语义校准", icon: "tags", count: Number(semanticSummary.pending_count ?? calibrationQueue.value.total_candidates ?? 0) },
-    { key: "research" as const, label: "算法回测", icon: "radar" }
+    { key: "material" as const, label: "素材审核", icon: "badge-check", badge: materialPending > 0 ? `${materialPending} 待审` : materialConfirmed > 0 ? "已完成" : "待生成" },
+    { key: "semantic" as const, label: "语义校准", icon: "tags", badge: semanticPending > 0 ? `${semanticPending} 待校准` : semanticSaved > 0 ? "已完成" : "待生成" },
+    { key: "research" as const, label: "算法回测", icon: "radar", badge: "" }
   ];
 });
 const calibrationSamples = computed<SemanticCalibrationSample[]>(() => {
@@ -1612,7 +1638,18 @@ function prototypeStability(item: PrototypeBankItem): string {
 }
 
 function loadFeedbackSafe(): void {
-  loadFeedback().catch(error => toast(error.message));
+  const requests: Promise<void>[] = [loadFeedback()];
+  if (state.feedbackSection === "calibration") {
+    requests.push(loadCalibrationWorkspace(false));
+  }
+  Promise.all(requests).catch(error => toast(error.message));
+}
+
+function selectFeedbackSection(section: FeedbackSectionName): void {
+  state.feedbackSection = section;
+  if (section === "calibration" && !calibrationWorkspaceHasData.value) {
+    loadCalibrationWorkspace(false).catch(error => toast(error.message));
+  }
 }
 
 function onFeedbackAccountChange(): void {

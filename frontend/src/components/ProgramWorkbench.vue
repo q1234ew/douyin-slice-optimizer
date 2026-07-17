@@ -32,7 +32,7 @@
         <div class="focus-current">
           <span class="meta">当前节目</span>
           <strong>{{ selectedVideo?.title || "未选择节目" }}</strong>
-          <p>{{ selectedVideo ? `${selectedVideo.account_id || "未设置账号"} / ${fmtSeconds(selectedVideo.duration_seconds)} / ${selectedVideo.status || "待处理"}` : "从左侧导入节目，或在下方列表选择已有节目。" }}</p>
+          <p>{{ selectedVideo ? `${selectedVideo.account_id || "未设置账号"} / ${fmtSeconds(selectedVideo.duration_seconds)} / ${statusLabel(selectedVideo.status)}` : "从上方导入素材，或在下方列表选择已有节目。" }}</p>
         </div>
         <button type="button" class="primary" :data-guide-action="workflowGuide.action" @click="handleGuideAction(workflowGuide.action)">
           <Icon name="arrow-right" />{{ workflowGuide.actionLabel }}
@@ -81,18 +81,21 @@
               class="video-row"
               :class="{ selected: video.id === state.selectedVideoId }"
               :data-video-id="video.id"
-              @click="selectVideo(video.id)"
             >
-              <td><div class="video-title">{{ video.title }}</div><code>{{ video.id }}</code></td>
+              <td>
+                <button type="button" class="video-select-btn" :aria-pressed="video.id === state.selectedVideoId" @click="selectVideo(video.id)">
+                  <span class="video-title">{{ video.title }}</span><code>{{ video.id }}</code>
+                </button>
+              </td>
               <td>{{ video.account_id }}</td>
               <td>{{ fmtSeconds(video.duration_seconds) }}</td>
               <td>{{ Number(video.width || 0) }}x{{ Number(video.height || 0) }}</td>
-              <td><span class="status" :class="statusClass(video.status)">{{ video.status }}</span></td>
+              <td><span class="status" :class="statusClass(video.status)">{{ statusLabel(video.status) }}</span></td>
               <td>
-                <div class="row-actions" @click.stop>
-                  <button class="icon-only" title="提取" data-action="extract" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'extract')"><Icon name="scan-line" /></button>
-                  <button class="icon-only" title="生成候选" data-action="segments" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'segments')"><Icon name="list-video" /></button>
-                  <button class="icon-only" title="评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
+                <div class="row-actions">
+                  <button class="icon-only" title="提取" aria-label="提取节目素材" data-action="extract" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'extract')"><Icon name="scan-line" /></button>
+                  <button class="icon-only" title="生成候选" aria-label="生成节目候选" data-action="segments" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'segments')"><Icon name="list-video" /></button>
+                  <button class="icon-only" title="评分" aria-label="为节目候选评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
                   <button class="primary" data-action="run-all" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runWholeVideo(video.id)">
                     <span v-if="state.busyKey === `run-all-${video.id}`" class="spinner"></span>
                     <Icon v-else name="wand-sparkles" />处理
@@ -102,7 +105,7 @@
             </tr>
             <tr v-if="!filteredVideos.length">
               <td colspan="6">
-                <div class="empty"><Icon name="video" /><strong>暂无节目</strong><span>先展开左侧导入节目，再进入候选审核。</span></div>
+                <div class="empty"><Icon name="video" /><strong>暂无节目</strong><span>先从上方流程区导入素材，再进入候选审核。</span></div>
               </td>
             </tr>
           </tbody>
@@ -125,7 +128,7 @@ const {
   accountOptions,
   statusOptions,
   refreshVideos,
-  loadSuggestions,
+  loadQuality,
   runStep,
   runAll,
   selectedVideo,
@@ -141,8 +144,21 @@ function statusClass(status?: string): string {
   return "warn";
 }
 
+function statusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    ingested: "已导入",
+    extracted: "已提取",
+    segmented: "已生成候选",
+    scored: "已评分",
+    transcribed: "已转写",
+    processing: "处理中",
+    failed: "处理失败"
+  };
+  return labels[String(status || "")] || status || "待处理";
+}
+
 function selectVideo(videoId: string): void {
-  loadSuggestions(videoId).catch(error => toast(error.message));
+  loadQuality(videoId, true).catch(error => toast(error.message));
 }
 
 async function runSelected(): Promise<void> {

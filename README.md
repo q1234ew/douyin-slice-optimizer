@@ -72,7 +72,9 @@ Vite 构建产物输出到 `src/dso/api/static/dashboard/`，FastAPI 会在 `/st
 - Web UI 会在候选区展示最新导出的 9:16 MP4 在线预览；导出文件也可通过 `/exports/...` 静态路径访问。
 - Web UI 和 `GET /videos/{video_id}/quality?top_k=30` 会展示发布前质量哨兵：ASR 后端/VAD、重复幻觉、广告口播、Top 队列闭环率、质量复核候选和下一步动作。
 - Qwen2.5-Omni 低显存模式默认使用 `Qwen/Qwen2.5-Omni-7B-GPTQ-Int4`，仅作为 15 秒以内短片段 shadow 分析和语义校准建议，不自动写人工标签，不进入生产排序权重；支持 `--use-media --allow-windowed-clips --visual-ready-only` 对本地历史视频切窗后上传真媒体 payload。V1 Beta-D-6 新增 `research_ranker_v2_6_pool`，只做 Omni Top30 扩池研究门控和 trust profile，不替代 v2.4 Top10 排序。目标服务器准备脚本见 `scripts/open_server_proxy_tunnel.sh` 和 `scripts/server_prepare_qwen_omni.sh`。
-- D10-B 使用 `material-evidence-extract` 对定向 Gold 优先队列真实执行 hook / middle / payoff 三窗口 ASR、中文 OCR 和 Omni 紧凑证据，并用 `material-resolver-shadow` 生成 cached-eval-only 策略对比。两者都只写 Shadow 缓存/报告，不会自动改 Gold、主语义标签或生产排序权重。
+- D10-B 使用 `material-evidence-extract` 对定向 Gold 优先队列真实执行 hook / middle / payoff 三窗口 ASR、中文 OCR 和 Omni 紧凑证据，并用 `material-resolver-shadow` 生成 cached-eval-only 策略对比。Gold 报告区分去重后可评估数、入队覆盖和证据覆盖；`unknown` 单独计为弃权，不并入严重错判。两者都只写 Shadow 缓存/报告，不会自动改 Gold、主语义标签或生产排序权重。
+- D10-C 描述特征实验可用 `dso material-description-experiment --limit 6 --window-seconds 15 --windows-per-sample 3 --no-direct` 复现。它比较单 hook 与 hook/middle/payoff 三窗口的纯描述、命名信号和弱标题策略；结果写入独立缓存，不改 Gold 或生产排序权重。15 秒三窗口仅用于离线 Shadow，默认请求超时为 480 秒。
+- D11 Visual Window Scout 已接入研究中心：视觉路线不要求音轨，使用 15 秒候选窗和三帧预览建立窗口级 Gold；Qwen3-VL embedding 只接受目标模型返回的 2048 维真实向量，fallback 不计入覆盖率或原型，Omni 只接收动态融合 Top2。该流程保持 `research_only`，不改主语义标签或生产排序权重。
 - D10-A/B 的唯一冻结基准为 `dso-v1-beta-d10-ab-20260715-r1`。运行 `dso benchmark-verify` 检查历史样本、Gold、Omni、D10-B 证据和源码是否漂移；只有校验通过后才可用 `dso benchmark-run` 生成可比较报告。冻结文件位于 `benchmarks/`，不得原地修改。
 - 表现数据导入会同步生成指标快照、`reward_proxy`、训练样本和账号基线；公开数据仅建议作为人工研究和趋势先验，训练主数据应来自自有/授权/许可来源。
 

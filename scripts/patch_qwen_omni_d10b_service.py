@@ -8,6 +8,11 @@ from pathlib import Path
 
 FIELDS_MARKER = "    analysis_prompt: list[str] = []\n"
 HELPER_MARKER = "def _clip_analysis_prompt(payload: ClipAnalyzeRequest) -> str:\n"
+LEGACY_PROFILE_CONDITION = 'if payload.prompt_profile == "material_evidence_d10b" and payload.analysis_prompt:'
+CUSTOM_PROFILE_CONDITION = (
+    'if payload.prompt_profile in {"material_evidence_d10b", "material_description_d10c"} '
+    "and payload.analysis_prompt:"
+)
 
 
 def patch_service(path: Path) -> Path:
@@ -57,7 +62,7 @@ def _clip_analysis_prompt(payload: ClipAnalyzeRequest) -> str:
         "entity_type": payload.entity_type,
         "semantic_schema": payload.semantic_schema,
     }
-    if payload.prompt_profile == "material_evidence_d10b" and payload.analysis_prompt:
+    if payload.prompt_profile in {"material_evidence_d10b", "material_description_d10c"} and payload.analysis_prompt:
         return "\n".join(payload.analysis_prompt) + "\n\n输入：" + json.dumps(input_payload, ensure_ascii=False)
     return (
         "你是短视频语义校准助手。请根据标题、转写文本、标签和时长，"
@@ -69,6 +74,8 @@ def _clip_analysis_prompt(payload: ClipAnalyzeRequest) -> str:
         if marker not in source:
             raise RuntimeError("Omni helper insertion marker not found")
         source = source.replace(marker, helper + marker, 1)
+    elif LEGACY_PROFILE_CONDITION in source:
+        source = source.replace(LEGACY_PROFILE_CONDITION, CUSTOM_PROFILE_CONDITION, 1)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = path.with_suffix(path.suffix + f".pre_d10b_{stamp}.bak")
@@ -79,7 +86,7 @@ def _clip_analysis_prompt(payload: ClipAnalyzeRequest) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Patch the deployed Qwen Omni service for D10-B evidence prompts.")
+    parser = argparse.ArgumentParser(description="Patch the deployed Qwen Omni service for controlled D10 evidence prompts.")
     parser.add_argument("--app", default="/home/aidev/dso_multimodal_model_service/app.py")
     args = parser.parse_args()
     path = Path(args.app).expanduser()

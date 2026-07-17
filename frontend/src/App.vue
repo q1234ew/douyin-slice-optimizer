@@ -31,9 +31,7 @@ const dashboard = useDashboard();
 provide(dashboardKey, dashboard);
 
 onMounted(() => {
-  const { loadRuntime, loadFeedback, refreshVideos } = dashboard;
-  loadRuntime().catch(() => {});
-  loadFeedback().catch(() => {});
+  const { refreshVideos } = dashboard;
   refreshVideos().catch(() => {});
 });
 </script>

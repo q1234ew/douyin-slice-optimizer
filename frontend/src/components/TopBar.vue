@@ -3,28 +3,20 @@
     <div class="brand">
       <div class="mark"><Icon name="scissors" /></div>
       <h1>音乐综艺切片优化系统</h1>
-      <span class="status-pill"><Icon name="sparkles" />Vue 3</span>
     </div>
-    <nav class="nav" aria-label="主导航" role="tablist">
-      <button
-        v-for="tab in tabs"
-        :key="tab.view"
-        :class="{ active: state.view === tab.view }"
-        type="button"
-        role="tab"
-        :aria-selected="state.view === tab.view ? 'true' : 'false'"
-        :data-view-tab="tab.view"
-        @click="setView(tab.view)"
-      >
-        <Icon :name="tab.icon" />{{ tab.label }}
+    <nav class="nav mode-nav" aria-label="工作模式">
+      <button type="button" :class="{ active: workspaceActive }" :aria-current="workspaceActive ? 'page' : undefined" data-view-tab="workbench" @click="setView('workbench')">
+        <Icon name="layout-dashboard" />剪辑工作台
+      </button>
+      <button type="button" :class="{ active: state.view === 'feedback' }" :aria-current="state.view === 'feedback' ? 'page' : undefined" data-view-tab="feedback" @click="setView('feedback')">
+        <Icon name="database" />研究中心
       </button>
     </nav>
     <div class="top-right">
-      <button class="topbar-account-btn" type="button" aria-label="打开研究学习里的平台账号分区" data-douyin-account-entry @click="openDouyinAccount">
-        <Icon name="radio-tower" />抖音账号
+      <button class="topbar-account-btn" type="button" :title="`当前账号：${activeAccountLabel}`" aria-label="抖音已连接，打开研究中心的平台连接" data-douyin-account-entry @click="openDouyinAccount">
+        <span class="dot"></span>抖音已连接
       </button>
-      <span class="db-chip"><span class="dot"></span>SQLite</span>
-      <span class="db-chip"><Icon name="user-circle" /><span id="active-account-chip">{{ activeAccountLabel }}</span></span>
+      <span class="db-chip"><span class="dot"></span>本地运行</span>
     </div>
   </header>
 </template>
@@ -33,16 +25,10 @@
 import { computed } from "vue";
 import Icon from "./Icon.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
-import type { ViewName } from "../types";
 
 const { state, setView, handleGuideAction } = useDashboardContext();
 
-const tabs: Array<{ view: ViewName; label: string; icon: string }> = [
-  { view: "workbench", label: "节目处理", icon: "layout-dashboard" },
-  { view: "candidates", label: "候选审核", icon: "play-square" },
-  { view: "simulation", label: "推荐模拟", icon: "radar" },
-  { view: "feedback", label: "研究学习", icon: "database" }
-];
+const workspaceActive = computed(() => state.view !== "feedback");
 
 const activeAccountLabel = computed(() => {
   const id = state.feedbackAccount.trim();

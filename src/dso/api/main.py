@@ -68,6 +68,13 @@ from dso.learning.material_evidence import (
     run_material_evidence_batch,
     run_material_resolver_shadow,
 )
+from dso.learning.visual_window_scout import (
+    build_visual_window_scout,
+    run_visual_window_experiment,
+    update_material_window_annotation,
+    visual_window_frame_path,
+    visual_window_scout_status,
+)
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
 from dso.learning.multimodal_validation import (
     DEFAULT_MULTIMODAL_COLLECTION_TARGET,
@@ -706,8 +713,8 @@ def post_backtest(payload: dict = Body(default_factory=dict)) -> dict:
 
 
 @app.get("/learning/backtest")
-def get_backtests(account_id: str | None = None, limit: int = 10) -> dict:
-    return list_backtest_reports(account_id=account_id, limit=limit)
+def get_backtests(account_id: str | None = None, limit: int = 10, compact: bool = False) -> dict:
+    return list_backtest_reports(account_id=account_id, limit=limit, compact=compact)
 
 
 @app.get("/learning/benchmark-manifest/{benchmark_id}")
@@ -750,7 +757,7 @@ def post_omni_calibration_replay(payload: dict = Body(default_factory=dict)) -> 
 
 
 @app.get("/learning/datasets")
-def get_learning_datasets(account_id: str | None = None) -> dict:
+def get_learning_datasets(account_id: str | None = None, compact: bool = False) -> dict:
     catalog = list_capture_datasets()
     history = historical_sample_summary(account_id=account_id)
     datasets = _attach_history_summary_to_datasets(catalog.get("datasets") or [], history)
@@ -778,7 +785,7 @@ def get_learning_datasets(account_id: str | None = None) -> dict:
         "duplicate_item_groups",
     ]:
         enriched[key] = history.get(key)
-    return enriched
+    return _compact_learning_datasets(enriched) if compact else enriched
 
 
 @app.get("/learning/research/coverage")
@@ -936,6 +943,65 @@ def post_material_resolver_shadow(payload: dict = Body(default_factory=dict)) ->
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/visual-window-scout/status")
+def get_visual_window_scout_status(
+    account_id: str | None = None,
+    dataset_id: str | None = None,
+    limit: int = 60,
+    summary_only: bool = False,
+) -> dict:
+    return visual_window_scout_status(
+        account_id=account_id,
+        dataset_id=dataset_id,
+        limit=limit,
+        summary_only=summary_only,
+    )
+
+
+@app.post("/learning/visual-window-scout/build")
+def post_visual_window_scout_build(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return build_visual_window_scout(
+            account_id=payload.get("account_id"),
+            dataset_id=payload.get("dataset_id"),
+            sample_ids=payload.get("sample_ids") if isinstance(payload.get("sample_ids"), list) else None,
+            limit=int(payload.get("limit") or 5),
+            window_seconds=float(payload.get("window_seconds") or 15.0),
+            stride_seconds=float(payload.get("stride_seconds") or 5.0),
+            max_windows_per_sample=int(payload.get("max_windows_per_sample") or 3),
+            force=bool(payload.get("force", False)),
+            load_model=bool(payload.get("load_model", False)),
+            scan_scenes=bool(payload.get("scan_scenes", True)),
+            frame_cache_limit_bytes=int(payload.get("frame_cache_limit_bytes") or 512 * 1024 * 1024),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/learning/material-window-gold/{sample_id}")
+def patch_material_window_gold(sample_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return update_material_window_annotation(sample_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/visual-window-scout/experiment")
+def post_visual_window_scout_experiment() -> dict:
+    return run_visual_window_experiment()
+
+
+@app.get("/learning/visual-window-scout/frames/{sample_id}/{window_key}/{frame_name}")
+def get_visual_window_scout_frame(sample_id: str, window_key: str, frame_name: str) -> FileResponse:
+    try:
+        path = visual_window_frame_path(sample_id, window_key, frame_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="window frame not found") from exc
+    return FileResponse(path)
 
 
 @app.patch("/learning/material-gold-set/{sample_id}")
@@ -1142,6 +1208,37 @@ def _attach_history_summary_to_datasets(datasets: list[dict], history: dict) -> 
     return enriched
 
 
+def _compact_learning_datasets(payload: dict) -> dict:
+    result = dict(payload)
+    result["datasets"] = [_compact_learning_dataset(item) for item in payload.get("datasets") or []]
+    result["historical_summary"] = _compact_history_summary(payload.get("historical_summary") or {})
+    result.pop("duplicate_item_groups", None)
+    return result
+
+
+def _compact_learning_dataset(dataset: dict) -> dict:
+    item = dict(dataset)
+    item.pop("historical_summary", None)
+    item.pop("duplicate_item_groups", None)
+    item.pop("source_paths", None)
+    lineage = dict(item.get("data_lineage") or {})
+    lineage.pop("source_paths", None)
+    if lineage:
+        item["data_lineage"] = lineage
+    return item
+
+
+def _compact_history_summary(history: dict) -> dict:
+    item = dict(history)
+    item.pop("duplicate_item_groups", None)
+    item["datasets"] = [_compact_learning_dataset(dataset) for dataset in history.get("datasets") or []]
+    lineage = dict(item.get("data_lineage") or {})
+    lineage.pop("source_paths", None)
+    if lineage:
+        item["data_lineage"] = lineage
+    return item
+
+
 def _dataset_with_history_fields(dataset: dict, history_item: dict | None) -> dict:
     item = dict(dataset)
     if history_item:
@@ -1268,7 +1365,13 @@ def get_douyin_history_baselines(
     min_count: int = 2,
     limit: int = 80,
 ) -> dict:
-    return douyin_history_baselines(account_id=account_id, dataset_id=dataset_id, min_count=min_count, limit=limit)
+    return douyin_history_baselines(
+        account_id=account_id,
+        dataset_id=dataset_id,
+        min_count=min_count,
+        limit=limit,
+        include_groups=False,
+    )
 
 
 @app.post("/learning/douyin-history/export")

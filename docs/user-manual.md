@@ -450,14 +450,19 @@ dso douyin-history-import \
 | 运行 v2.9 回放 | 将 Gold 拆为校准/独立审计，比较严格标签与 canonical 形态，并对照 v2.4/v2.8 的 Top20/30/50 |
 | 3 条 Smoke | 对 confirmed Gold 优先队列执行 hook / middle / payoff 三窗口 ASR、OCR 和 Omni 证据抽取 |
 | Resolver 回放 | 在已有 D10-B 缓存上比较 title-only、Omni-only、ASR/OCR 和多窗口 Resolver；不会改标签或权重 |
+| 扫描 5 条 | 对视觉可评估素材执行约 5 秒步进、15 秒候选窗和三帧抽取；缺音轨不会阻断 |
+| 保存窗口 Gold | 确认视觉形态、节目语境和选窗质量，只写独立窗口标注 |
+| 冻结对比 | 比较固定窗、文本窗、视觉窗和动态融合的 Recall@2 与严重漏选率 |
 
 保存人工标签后，样本会被标记为 `manual_verified`，因此会从“语义校准队列”的待处理列表中消失。这是已完成状态，不是刷新失败。页面会在“最近已保存”里保留最近样本；如果误保存或需要二次校准，点击“重新打开校准”，样本会恢复为低置信校准样本并重新出现在队列里。
 
 “素材形态 Gold Set”与上述主语义校准相互独立。确认素材形态只写入 `material_gold_annotations`，不会修改互动数、`reward_proxy`、主语义标签或 `classification_confidence`。v2.9 不会把 `performance_highlight` 等人工细粒度标签改写掉；它只在排序路由侧派生 canonical 形态，并继续单独报告细节缺失。无法确定时保留 `unknown`，不要为了提高覆盖率强行归类。
 
-素材审核页底部的“定向错判队列”用于 D10-A。它默认从已有 Omni 缓存和本地视频中平衡选择 80 条样本，可按五类混淆筛选，并显示原始 Omni 形态、规范形态、关键词证据和媒体就绪状态。`performance_highlight` 在此派生为 `performance_clip + highlight_signal`，`program_context` 作为独立字段；队列候选不会自动写入 Gold。
+素材审核页底部的“定向错判队列”用于 D10-A。它默认从已有 Omni 缓存和本地视频中平衡选择 80 条样本，可按五类固定混淆和“跨领域/形态分歧”筛选，并显示原始 Omni 形态、规范形态、关键词证据和媒体就绪状态。包含已审核样本时，去重后且标签已知的 confirmed Gold 会先于普通候选占位；动态跨领域候选只使用已有标签与 Omni 分歧准入，不读取 Gold 真值反推候选。`performance_highlight` 在此派生为 `performance_clip + highlight_signal`，`program_context` 作为独立字段；队列候选不会自动写入 Gold。
 
-“三窗口证据与 Resolver Shadow”用于 D10-B。证据抽取默认包含并优先选择已确认 Gold，每条真实执行三个 8 秒窗口；ASR 提示词回声或纯音乐低信息结果会保留原文审计，但不参与语义投票。页面中的准确率来自同时具备完整 D10-B 证据和 confirmed Gold 的 cached-eval-only 子集；“Gold 证据 1/51”表示 51 条 Gold 中只有 1 条已有完整证据，不等于 51 条都已验证。大批量抽取应使用 CLI 断点执行，工作台的 Smoke 只用于小批验证。
+“三窗口证据与 Resolver Shadow”用于 D10-B。证据抽取默认包含并优先选择已确认 Gold，每条真实执行三个 8 秒窗口；ASR 提示词回声或纯音乐低信息结果会保留原文审计，但不参与语义投票。页面分别显示 Gold 入队覆盖与 Gold 证据覆盖，分母是 confirmed、素材形态已知且按账号与稳定标题去重后的 Gold。`unknown` 预测计为弃权：端到端准确率仍把弃权留在分母，作答准确率只看非 `unknown` 结果，严重错判率也只在实际作答中统计。大批量抽取应使用 CLI 断点执行，工作台的 Smoke 只用于小批验证。
+
+“视觉候选窗与窗口 Gold”用于 D11。视觉路径只要求本地视频、可读取时长且与历史时长基本一致，音轨是可选证据。每个候选窗展示起止时间和三张帧图；人工需确认 `视觉形态 / 节目语境 / 选窗质量`，无法稳定判断时选“未知”或“暂不确定”。窗口 Gold 写入 `material_window_annotations`，不会改写历史样本主标签。Qwen 服务不可用时仍可生成帧级审核队列，但视觉向量和原型分保持为空，不应把零分理解为负面判断。
 
 常用 CLI：
 
@@ -721,6 +726,10 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `GET /learning/material-evidence/status` | 获取 D10-B 三窗口证据覆盖与最近 Resolver 摘要 |
 | `POST /learning/material-evidence/extract` | 抽取 ASR、OCR、Omni 三窗口证据；只写 Shadow 缓存 |
 | `POST /learning/material-resolver/shadow` | 运行 cached-eval-only Resolver 策略对比与研究门控 |
+| `GET /learning/visual-window-scout/status` | 查询 D11 视觉准入、窗口 Gold、原型和最近扫描状态 |
+| `POST /learning/visual-window-scout/build` | 生成 15 秒视觉候选窗、三帧预览和 Top2 Shadow 清单 |
+| `PATCH /learning/material-window-gold/{sample_id}` | 保存窗口级视觉形态、节目语境和选窗质量 |
+| `POST /learning/visual-window-scout/experiment` | 比较 fixed/text/visual/fusion 四种选窗策略 |
 | `POST /learning/backtest` | 运行离线回测 |
 | `GET /learning/qwen-omni/status` | 检查 Omni 低显存服务状态 |
 | `POST /learning/qwen-omni/shadow-run` | 执行 Omni shadow-run |

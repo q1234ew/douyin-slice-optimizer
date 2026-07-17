@@ -21,7 +21,9 @@ from dso.utils import utc_now
 from dso.versions import DOUYIN_HISTORY_VERSION
 
 
-MATERIAL_CONFUSION_QUEUE_VERSION = "material_confusion_queue.v1"
+MATERIAL_CONFUSION_QUEUE_VERSION = "material_confusion_queue.v2"
+CROSS_DOMAIN_CONFUSION_PAIR = "cross_domain_material"
+CROSS_DOMAIN_CONFUSION_LABEL_ZH = "跨领域/形态分歧"
 MATERIAL_CONFUSION_PAIRS: dict[str, dict[str, Any]] = {
     "reaction_vocal_teaching": {
         "label_zh": "Reaction / 声乐教学",
@@ -72,8 +74,9 @@ def material_confusion_queue(
 ) -> dict:
     cap = max(1, min(100, int(limit or 80)))
     pair_key = str(confusion_pair or "").strip()
-    if pair_key and pair_key not in MATERIAL_CONFUSION_PAIRS:
-        raise ValueError(f"confusion_pair must be one of: {', '.join(MATERIAL_CONFUSION_PAIRS)}")
+    allowed_pairs = [*MATERIAL_CONFUSION_PAIRS, CROSS_DOMAIN_CONFUSION_PAIR]
+    if pair_key and pair_key not in allowed_pairs:
+        raise ValueError(f"confusion_pair must be one of: {', '.join(allowed_pairs)}")
     rows = _historical_confusion_rows(account_id=account_id, dataset_id=dataset_id)
     omni_index = qwen_omni_shadow_cache_index()
     annotations = material_gold_annotation_index(confirmed_only=False)
@@ -110,6 +113,12 @@ def material_confusion_queue(
     account_counts = Counter(str(item.get("account_id") or "unknown") for item in selected)
     ready_count = sum(1 for item in selected if (item.get("assets") or {}).get("ready_for_evidence"))
     known_confusions = _known_gold_confusion_summary(rows, omni_index=omni_index, annotations=annotations)
+    gold_scope = _gold_queue_coverage_summary(
+        rows,
+        annotations=annotations,
+        selected=selected,
+        eligible_sample_ids={str(item.get("sample_id") or "") for item in candidates} if pair_key else None,
+    )
     return {
         "contract_version": DOUYIN_HISTORY_VERSION,
         "queue_version": MATERIAL_CONFUSION_QUEUE_VERSION,
@@ -118,6 +127,7 @@ def material_confusion_queue(
         "account_id": account_id or "all",
         "dataset_id": dataset_id or "all",
         "confusion_pair": pair_key or "all",
+        "include_reviewed": bool(include_reviewed),
         "count": len(selected),
         "total_candidates": len(candidates),
         "taxonomy": {
@@ -135,6 +145,15 @@ def material_confusion_queue(
                 "right": value["right"],
             }
             for key, value in MATERIAL_CONFUSION_PAIRS.items()
+        ]
+        + [
+            {
+                "key": CROSS_DOMAIN_CONFUSION_PAIR,
+                "label_zh": CROSS_DOMAIN_CONFUSION_LABEL_ZH,
+                "left": "dynamic_observed_label",
+                "right": "dynamic_omni_label",
+                "dynamic": True,
+            }
         ],
         "batch_summary": {
             "selected_count": len(selected),
@@ -148,6 +167,9 @@ def material_confusion_queue(
             "no_omni_excluded_count": no_omni_excluded,
             "no_local_media_excluded_count": no_local_media_excluded,
             "known_gold_confusions": known_confusions,
+            "gold_queue_includes_reviewed": bool(include_reviewed),
+            "gold_coverage_scope": "confusion_pair" if pair_key else "account_dataset",
+            **gold_scope,
         },
         "samples": selected,
         "recommended_next_action": "review_pair_evidence_then_run_confusion_resolver_shadow",
@@ -214,7 +236,7 @@ def _confusion_candidate(row: dict, *, omni: dict, assets: dict, annotation: dic
     derivation = material_taxonomy_derivation(raw_material, program_context=suggestions.get("program_context"))
     existing_category = str(row.get("content_category") or "unknown").strip().lower()
     text = _confusion_text(row, suggestions)
-    matches: list[tuple[float, str, dict[str, Any]]] = []
+    matches: list[tuple[float, str, dict[str, Any], dict[str, Any]]] = []
     for key, definition in MATERIAL_CONFUSION_PAIRS.items():
         left = str(definition["left"])
         right = str(definition["right"])
@@ -241,12 +263,42 @@ def _confusion_candidate(row: dict, *, omni: dict, assets: dict, annotation: dic
                     "left_type": left,
                     "right_type": right,
                 },
+                definition,
             )
         )
     if not matches:
+        observed_material = canonical_material_type(existing_category)
+        omni_material = canonical_material_type(raw_material)
+        if observed_material and omni_material and observed_material != omni_material:
+            left_cues = _material_type_cues(observed_material)
+            right_cues = _material_type_cues(omni_material)
+            left_hits = _cue_hits(text, left_cues)
+            right_hits = _cue_hits(text, right_cues)
+            definition = {
+                "label_zh": CROSS_DOMAIN_CONFUSION_LABEL_ZH,
+                "left": observed_material,
+                "right": omni_material,
+                "left_cues": left_cues,
+                "right_cues": right_cues,
+                "dynamic": True,
+            }
+            score = 42.0 + min(18.0, len(left_hits) * 4.5) + min(18.0, len(right_hits) * 4.5)
+            matches.append(
+                (
+                    score,
+                    CROSS_DOMAIN_CONFUSION_PAIR,
+                    {
+                        "left_hits": left_hits,
+                        "right_hits": right_hits,
+                        "left_type": observed_material,
+                        "right_type": omni_material,
+                    },
+                    definition,
+                )
+            )
+    if not matches:
         return None
-    score, pair_key, evidence = max(matches, key=lambda item: (item[0], item[1]))
-    definition = MATERIAL_CONFUSION_PAIRS[pair_key]
+    score, pair_key, evidence, definition = max(matches, key=lambda item: (item[0], item[1]))
     pair_values = [str(definition["left"]), str(definition["right"])]
     material_candidates = [value for value in pair_values if value in MATERIAL_FORM_TYPES and value != "unknown"]
     media_bonus = 12.0 if assets.get("video") else 0.0
@@ -276,6 +328,13 @@ def _confusion_candidate(row: dict, *, omni: dict, assets: dict, annotation: dic
         "taxonomy_derivation_reason": derivation["derivation_reason"],
         "confusion_pair": pair_key,
         "confusion_pair_label_zh": definition["label_zh"],
+        "pair_definition": {
+            "left": definition["left"],
+            "right": definition["right"],
+            "left_cues": list(definition.get("left_cues") or []),
+            "right_cues": list(definition.get("right_cues") or []),
+            "dynamic": bool(definition.get("dynamic")),
+        },
         "candidate_material_types": material_candidates,
         "candidate_material_labels_zh": [
             MATERIAL_FORM_LABELS_ZH.get(value, value)
@@ -285,8 +344,16 @@ def _confusion_candidate(row: dict, *, omni: dict, assets: dict, annotation: dic
         "cue_evidence": evidence,
         "assets": assets,
         "priority_score": round(priority, 2),
-        "queue_reason": "targeted_material_confusion",
-        "recommended_fields": ["material_type", "highlight_signal", "program_context"],
+        "queue_reason": (
+            "cross_domain_material_disagreement"
+            if pair_key == CROSS_DOMAIN_CONFUSION_PAIR
+            else "targeted_material_confusion"
+        ),
+        "recommended_fields": (
+            ["material_type", "domain_category"]
+            if pair_key == CROSS_DOMAIN_CONFUSION_PAIR
+            else ["material_type", "highlight_signal", "program_context"]
+        ),
         "annotation": annotation or None,
         "writes_main_semantic_labels": False,
         "production_weight": False,
@@ -304,24 +371,37 @@ def _balanced_confusion_selection(
         grouped[str(candidate.get("confusion_pair") or "unknown")].append(candidate)
     for items in grouped.values():
         items.sort(
-            key=lambda item: (
-                1
-                if prioritize_reviewed
-                and ((item.get("annotation") or {}).get("review_status") == "confirmed")
-                else 0,
-                float(item.get("priority_score") or 0.0),
-                float(item.get("normalized_reward") or 0.0),
-                str(item.get("sample_id") or ""),
-            ),
+            key=lambda item: _confusion_selection_sort_key(item, prioritize_reviewed=prioritize_reviewed),
             reverse=True,
         )
-    pair_keys = [key for key in MATERIAL_CONFUSION_PAIRS if grouped.get(key)]
+    pair_keys = [key for key in [*MATERIAL_CONFUSION_PAIRS, CROSS_DOMAIN_CONFUSION_PAIR] if grouped.get(key)]
     selected: list[dict] = []
     seen_groups: set[str] = set()
     account_counts: Counter[str] = Counter()
     per_account_cap = max(3, int(math.ceil(limit / 10)))
     pair_target = max(8, int(math.ceil(limit / max(1, len(pair_keys)))))
     pair_counts: Counter[str] = Counter()
+
+    if prioritize_reviewed:
+        reviewed = sorted(
+            (
+                item
+                for item in candidates
+                if (item.get("annotation") or {}).get("review_status") == "confirmed"
+            ),
+            key=lambda item: _confusion_selection_sort_key(item, prioritize_reviewed=True),
+            reverse=True,
+        )
+        for item in reviewed:
+            group_key = _stable_confusion_group_key(item)
+            if group_key in seen_groups:
+                continue
+            selected.append(item)
+            seen_groups.add(group_key)
+            account_counts[str(item.get("account_id") or "unknown")] += 1
+            pair_counts[str(item.get("confusion_pair") or "unknown")] += 1
+            if len(selected) >= limit:
+                return selected
 
     for relaxed in (False, True):
         made_progress = True
@@ -351,6 +431,90 @@ def _balanced_confusion_selection(
                 if len(selected) >= limit:
                     break
     return selected
+
+
+def _confusion_selection_sort_key(item: dict, *, prioritize_reviewed: bool) -> tuple[Any, ...]:
+    annotation = item.get("annotation") if isinstance(item.get("annotation"), dict) else {}
+    confirmed = annotation.get("review_status") == "confirmed"
+    gold_evaluable = bool(canonical_material_type(annotation.get("material_type"))) if confirmed else False
+    return (
+        1 if prioritize_reviewed and gold_evaluable else 0,
+        1 if prioritize_reviewed and confirmed else 0,
+        float(item.get("priority_score") or 0.0),
+        float(item.get("normalized_reward") or 0.0),
+        str(item.get("sample_id") or ""),
+    )
+
+
+def _material_type_cues(material_type: str) -> list[str]:
+    cues: list[str] = []
+    for definition in MATERIAL_CONFUSION_PAIRS.values():
+        if str(definition.get("left") or "") == material_type:
+            cues.extend(str(value) for value in definition.get("left_cues") or [])
+        if str(definition.get("right") or "") == material_type:
+            cues.extend(str(value) for value in definition.get("right_cues") or [])
+    return list(dict.fromkeys(cues))
+
+
+def _gold_queue_coverage_summary(
+    rows: list[dict],
+    *,
+    annotations: dict[str, dict],
+    selected: list[dict],
+    eligible_sample_ids: set[str] | None = None,
+) -> dict:
+    row_index = {str(row.get("id") or ""): row for row in rows}
+    grouped: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    raw_evaluable_count = 0
+    raw_confirmed_count = 0
+    for sample_id, annotation in annotations.items():
+        if annotation.get("review_status") != "confirmed":
+            continue
+        if eligible_sample_ids is not None and str(sample_id) not in eligible_sample_ids:
+            continue
+        row = row_index.get(str(sample_id))
+        if not row:
+            continue
+        raw_confirmed_count += 1
+        if canonical_material_type(annotation.get("material_type")):
+            raw_evaluable_count += 1
+        grouped[_stable_confusion_group_key(row)].append((str(sample_id), annotation))
+
+    evaluable_groups = {
+        group_key
+        for group_key, members in grouped.items()
+        if any(canonical_material_type(annotation.get("material_type")) for _sample_id, annotation in members)
+    }
+    selected_group_keys = {
+        _stable_confusion_group_key(item)
+        for item in selected
+        if canonical_material_type(((item.get("annotation") or {}).get("material_type")))
+    }
+    admitted_groups = evaluable_groups & selected_group_keys
+    cross_domain_groups = {
+        _stable_confusion_group_key(item)
+        for item in selected
+        if item.get("confusion_pair") == CROSS_DOMAIN_CONFUSION_PAIR
+        and canonical_material_type(((item.get("annotation") or {}).get("material_type")))
+    }
+    effective_confirmed_count = len(grouped)
+    effective_evaluable_count = len(evaluable_groups)
+    admitted_count = len(admitted_groups)
+    return {
+        "gold_confirmed_count": raw_confirmed_count,
+        "gold_effective_confirmed_count": effective_confirmed_count,
+        "gold_raw_evaluable_count": raw_evaluable_count,
+        "gold_evaluable_count": effective_evaluable_count,
+        "gold_label_abstention_count": max(0, effective_confirmed_count - effective_evaluable_count),
+        "gold_duplicate_collapsed_count": max(0, raw_confirmed_count - effective_confirmed_count),
+        "gold_evaluable_duplicate_collapsed_count": max(0, raw_evaluable_count - effective_evaluable_count),
+        "gold_admitted_count": admitted_count,
+        "gold_outside_queue_count": max(0, effective_evaluable_count - admitted_count),
+        "gold_queue_coverage": round(admitted_count / max(1, effective_evaluable_count), 4)
+        if effective_evaluable_count
+        else 0.0,
+        "gold_cross_domain_admitted_count": len(admitted_groups & cross_domain_groups),
+    }
 
 
 def _asset_contract(raw: dict[str, list[str]]) -> dict:
@@ -423,10 +587,14 @@ def _known_gold_confusion_summary(rows: list[dict], *, omni_index: dict[str, dic
         if relation != "mismatch":
             continue
         values = {expected, predicted}
+        matched_pair = False
         for key, definition in MATERIAL_CONFUSION_PAIRS.items():
             if values <= {str(definition["left"]), str(definition["right"])}:
                 pair_counts[key] += 1
+                matched_pair = True
                 break
+        if not matched_pair:
+            pair_counts[CROSS_DOMAIN_CONFUSION_PAIR] += 1
     return {
         "relation_counts": dict(relations),
         "pair_counts": dict(pair_counts),

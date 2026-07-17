@@ -26,6 +26,7 @@ from dso.versions import QWEN_EMBEDDING_VERSION, RESEARCH_RANKER_VERSION
 
 
 QWEN_EMBEDDING_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
+QWEN_EMBEDDING_DIM = 2048
 DEFAULT_EMBEDDING_SERVICE_URL = "http://192.168.31.143:8001"
 TEXT_EMBEDDING_STRATEGY = "ranker_plus_text_embedding"
 VISUAL_EMBEDDING_STRATEGY = "ranker_plus_visual_embedding"
@@ -63,16 +64,36 @@ class QwenEmbeddingClient:
     def health(self) -> dict:
         try:
             payload = self._json_request("GET", "/health")
-            status = "ready" if _service_ready(payload) else str(payload.get("status") or "unknown")
-            return {"status": status, "service_url": self.service_url, "raw": payload}
+            status = _embedding_service_status(payload)
+            return {
+                "status": status,
+                "service_url": self.service_url,
+                "model_id": _loaded_model_id(payload),
+                "model_loaded": _model_loaded(payload),
+                "raw": payload,
+            }
         except Exception as exc:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
     def load(self) -> dict:
         try:
-            payload = self._json_request("POST", "/load", {"model": QWEN_EMBEDDING_MODEL})
-            status = "ready" if _service_ready(payload) else str(payload.get("status") or "unknown")
-            return {"status": status, "service_url": self.service_url, "raw": payload}
+            payload = self._json_request(
+                "POST",
+                "/load",
+                {
+                    "model": QWEN_EMBEDDING_MODEL,
+                    "model_id": QWEN_EMBEDDING_MODEL,
+                    "backend": "sentence_transformers",
+                },
+            )
+            status = _embedding_service_status(payload)
+            return {
+                "status": status,
+                "service_url": self.service_url,
+                "model_id": _loaded_model_id(payload),
+                "model_loaded": _model_loaded(payload),
+                "raw": payload,
+            }
         except Exception as exc:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
@@ -84,7 +105,7 @@ class QwenEmbeddingClient:
         for payload in [{"texts": [text], "model": QWEN_EMBEDDING_MODEL}, {"text": text, "model": QWEN_EMBEDDING_MODEL}]:
             try:
                 data = self._json_request("POST", "/embed/text", payload)
-                embeddings = _extract_embedding_vectors(data)
+                embeddings = _validated_embedding_vectors(data, endpoint="embed/text")
                 if embeddings:
                     return embeddings[0]
             except urllib.error.HTTPError as exc:
@@ -101,7 +122,7 @@ class QwenEmbeddingClient:
 
     def embed_image(self, image_path: Path) -> list[float]:
         data = self._multipart_request("/embed/image", [("file", image_path)])
-        embeddings = _extract_embedding_vectors(data)
+        embeddings = _validated_embedding_vectors(data, endpoint="embed/image")
         if not embeddings:
             raise RuntimeError("image_embedding_response_empty")
         return embeddings[0]
@@ -110,7 +131,7 @@ class QwenEmbeddingClient:
         if not frame_paths:
             raise ValueError("empty_frame_paths")
         data = self._multipart_request("/embed/video-frames", [("files", path) for path in frame_paths])
-        embeddings = _extract_embedding_vectors(data)
+        embeddings = _validated_embedding_vectors(data, endpoint="embed/video-frames")
         if not embeddings:
             raise RuntimeError("video_frame_embedding_response_empty")
         if len(embeddings) == 1:
@@ -206,6 +227,7 @@ def build_qwen_embedding_index(
     force: bool = False,
     client: QwenEmbeddingClient | None = None,
 ) -> dict:
+    quarantined_invalid = quarantine_invalid_qwen_embedding_records()
     selected_modalities = _modalities(modality)
     rows = _entity_rows(entity_type, account_id=account_id, dataset_id=dataset_id, limit=int(limit or 0))
     client = client or QwenEmbeddingClient()
@@ -255,6 +277,7 @@ def build_qwen_embedding_index(
         "reused": int(counts.get("reused", 0)),
         "skipped": int(counts.get("skipped", 0)),
         "failed": int(counts.get("failed", 0)),
+        "quarantined_invalid": quarantined_invalid,
         "coverage": {
             "ready_records": ready_count,
             "total_slots": total_slots,
@@ -941,10 +964,10 @@ def _embedding_records_for_entities(entity_type: str, entity_ids: list[str]) -> 
             """
             SELECT *
             FROM embedding_records
-            WHERE entity_type = ? AND model_name = ? AND status = 'ready'
+            WHERE entity_type = ? AND model_name = ? AND status = 'ready' AND vector_dim = ?
             ORDER BY updated_at DESC
             """,
-            [entity_type, QWEN_EMBEDDING_MODEL],
+            [entity_type, QWEN_EMBEDDING_MODEL, QWEN_EMBEDDING_DIM],
         )
     result: dict[str, dict[str, dict]] = {}
     for row in rows:
@@ -965,12 +988,28 @@ def _find_ready_record(entity_type: str, entity_id: str, modality: str, source_h
             """
             SELECT *
             FROM embedding_records
-            WHERE entity_type = ? AND entity_id = ? AND modality = ? AND model_name = ? AND source_hash = ? AND status = 'ready'
+            WHERE entity_type = ? AND entity_id = ? AND modality = ? AND model_name = ?
+              AND source_hash = ? AND status = 'ready' AND vector_dim = ?
             ORDER BY updated_at DESC
             LIMIT 1
             """,
-            [entity_type, entity_id, modality, QWEN_EMBEDDING_MODEL, source_hash],
+            [entity_type, entity_id, modality, QWEN_EMBEDDING_MODEL, source_hash, QWEN_EMBEDDING_DIM],
         )
+
+
+def quarantine_invalid_qwen_embedding_records() -> int:
+    now = utc_now()
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE embedding_records
+            SET status = 'failed', error = ?, updated_at = ?
+            WHERE model_name = ? AND status = 'ready' AND COALESCE(vector_dim, 0) <> ?
+            """,
+            ["invalid_qwen_embedding_dimension", now, QWEN_EMBEDDING_MODEL, QWEN_EMBEDDING_DIM],
+        )
+        conn.commit()
+    return max(0, int(cursor.rowcount or 0))
 
 
 def _store_embedding_record(
@@ -1022,8 +1061,8 @@ def _store_embedding_record(
 
 
 def _ready_record_count(entity_type: str, *, account_id: str | None, dataset_id: str | None, modalities: list[str]) -> int:
-    clauses = ["entity_type = ?", "model_name = ?", "status = 'ready'"]
-    params: list[Any] = [entity_type, QWEN_EMBEDDING_MODEL]
+    clauses = ["entity_type = ?", "model_name = ?", "status = 'ready'", "vector_dim = ?"]
+    params: list[Any] = [entity_type, QWEN_EMBEDDING_MODEL, QWEN_EMBEDDING_DIM]
     account = str(account_id or "").strip()
     dataset = str(dataset_id or "").strip()
     if account and account.lower() != "all":
@@ -1075,10 +1114,11 @@ def _load_vector(record: dict) -> list[float]:
         return []
     data = read_json(path, default={}) or {}
     vector = data.get("vector") or data.get("embedding")
-    if not isinstance(vector, list):
+    if not isinstance(vector, list) or len(vector) != QWEN_EMBEDDING_DIM:
         return []
     try:
-        return [float(value) for value in vector]
+        parsed = [float(value) for value in vector]
+        return parsed if all(math.isfinite(value) for value in parsed) else []
     except (TypeError, ValueError):
         return []
 
@@ -1263,6 +1303,26 @@ def _extract_embedding_vectors(payload: Any) -> list[list[float]]:
     return []
 
 
+def _validated_embedding_vectors(payload: Any, *, endpoint: str) -> list[list[float]]:
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{endpoint}_invalid_response")
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"fallback", "heuristic", "mock"}:
+        raise RuntimeError(f"{endpoint}_fallback_rejected")
+    vectors = _extract_embedding_vectors(payload)
+    if not vectors:
+        return []
+    response_dim = int(payload.get("embedding_dim") or 0)
+    for vector in vectors:
+        if len(vector) != QWEN_EMBEDDING_DIM:
+            raise RuntimeError(f"{endpoint}_unexpected_dimension:{len(vector)}")
+        if not all(math.isfinite(value) for value in vector):
+            raise RuntimeError(f"{endpoint}_non_finite_vector")
+    if response_dim and response_dim != QWEN_EMBEDDING_DIM:
+        raise RuntimeError(f"{endpoint}_unexpected_response_dimension:{response_dim}")
+    return vectors
+
+
 def _parse_vector_candidate(value: Any) -> list[list[float]]:
     if not isinstance(value, list) or not value:
         return []
@@ -1301,17 +1361,73 @@ def _scope(value: str | None) -> str:
     return text if text else "all"
 
 
-def _service_ready(payload: dict | None) -> bool:
+def embedding_service_ready(payload: dict | None) -> bool:
     if not isinstance(payload, dict):
         return False
     status = str(payload.get("status") or "").strip().lower()
-    if status in {"ready", "ok", "loaded", "model", "healthy"}:
-        return True
+    if status in {"service_unavailable", "model_switch_required", "model_not_loaded", "load_failed", "error"}:
+        return False
     raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
     if not isinstance(raw, dict):
         return False
+    model_id = _loaded_model_id(raw)
+    if model_id and _normalize_model_id(model_id) != _normalize_model_id(QWEN_EMBEDDING_MODEL):
+        return False
+    model = raw.get("model") if isinstance(raw.get("model"), dict) else None
+    if model is not None and not _model_loaded(raw):
+        return False
+    backend = str((model or raw).get("backend") or raw.get("backend") or "").strip().lower()
+    if backend == "qwen_omni":
+        return False
     raw_status = str(raw.get("status") or "").strip().lower()
-    return raw_status in {"ready", "ok", "loaded", "model", "healthy"} or bool(raw.get("model_loaded") or raw.get("loaded"))
+    return status in {"ready", "ok", "loaded", "model", "healthy"} or raw_status in {
+        "ready",
+        "ok",
+        "loaded",
+        "model",
+        "healthy",
+    }
+
+
+def _service_ready(payload: dict | None) -> bool:
+    return embedding_service_ready(payload)
+
+
+def _embedding_service_status(payload: dict) -> str:
+    raw_status = str(payload.get("status") or "").strip().lower()
+    if raw_status not in {"ready", "ok", "loaded", "model", "healthy"}:
+        return raw_status or "unknown"
+    model_id = _loaded_model_id(payload)
+    if model_id and _normalize_model_id(model_id) != _normalize_model_id(QWEN_EMBEDDING_MODEL):
+        return "model_switch_required"
+    model = payload.get("model") if isinstance(payload.get("model"), dict) else None
+    if model is not None and not _model_loaded(payload):
+        return "model_not_loaded"
+    backend = str((model or payload).get("backend") or payload.get("backend") or "").strip().lower()
+    if backend == "qwen_omni":
+        return "model_switch_required"
+    return "ready"
+
+
+def _loaded_model_id(payload: dict) -> str:
+    model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
+    env = payload.get("env") if isinstance(payload.get("env"), dict) else {}
+    return str(model.get("model_id") or payload.get("model_id") or env.get("model_id") or "").strip()
+
+
+def _model_loaded(payload: dict) -> bool:
+    model = payload.get("model") if isinstance(payload.get("model"), dict) else None
+    if model is not None:
+        return bool(model.get("loaded"))
+    if "model_loaded" in payload:
+        return bool(payload.get("model_loaded"))
+    if "loaded" in payload:
+        return bool(payload.get("loaded"))
+    return str(payload.get("status") or "").strip().lower() in {"loaded", "model"}
+
+
+def _normalize_model_id(value: str) -> str:
+    return str(value or "").strip().lower().rstrip("/")
 
 
 def _existing_paths(values: list[str]) -> list[Path]:

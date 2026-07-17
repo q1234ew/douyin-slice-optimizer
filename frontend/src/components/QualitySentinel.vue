@@ -19,94 +19,63 @@
     </div>
 
     <template v-else>
-      <div class="quality-summary">
-        <div class="quality-score gate" :class="gateClass">
-          <span>当前结论</span>
-          <strong>{{ gateStatusLabel(gateStatus) }}</strong>
-          <em>{{ primaryAction.label || gate?.label || gateStatusLabel(gateStatus) }}</em>
-        </div>
-        <div class="quality-score" :class="level">
-          <span>质量分</span>
-          <strong>{{ score.toFixed(0) }}</strong>
-          <em>{{ healthLevelLabel(level) }}</em>
-        </div>
-        <div class="quality-main quality-brief">
-          <span class="quality-kicker">导出前检查</span>
-          <strong>{{ selectedVideo.title || report.video_title || "当前节目" }}</strong>
-          <p>{{ keyRiskLine }}</p>
-          <div class="quality-route-brief">
-            <Icon name="route" />
-            <span>{{ asrRoutingSummary }}</span>
-          </div>
-          <div class="quality-actions">
-            <button type="button" class="primary-action" @click="handlePrimaryReview">
-              <Icon :name="primaryReview.icon" />{{ primaryReview.label }}
-            </button>
-            <button type="button" :disabled="state.busyKey === 'quality-refresh'" :data-refresh-quality="state.selectedVideoId" @click="refresh">
-              <span v-if="state.busyKey === 'quality-refresh'" class="spinner"></span>
-              <Icon v-else name="refresh-cw" />刷新
-            </button>
-          </div>
+      <div class="quality-gate-strip">
+        <div class="quality-gate-name"><Icon name="shield-check" /><strong>质量门禁</strong></div>
+        <div class="quality-gate-stat" :class="level"><span>质量分</span><strong>{{ score.toFixed(0) }}</strong></div>
+        <div class="quality-gate-stat"><span>风险</span><strong>{{ issues.length }} 类</strong></div>
+        <div class="quality-gate-stat"><span>待复核</span><strong>{{ reviewSignalCount }} 条</strong></div>
+        <div class="quality-gate-message" :class="gateClass"><Icon name="circle-alert" /><span>{{ clipText(keyRiskLine, 72) }}</span></div>
+        <div class="quality-gate-actions">
+          <button type="button" class="primary" @click="handlePrimaryReview"><Icon :name="primaryReview.icon" />开始复核</button>
+          <button type="button" :aria-expanded="expanded ? 'true' : 'false'" @click="expanded = !expanded"><Icon name="file-clock" />{{ expanded ? "收起报告" : "查看报告" }}</button>
         </div>
       </div>
 
-      <div class="quality-metrics">
-        <div v-for="metric in metricCards" :key="metric.label" class="quality-metric" :class="metric.tone">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <em>{{ metric.caption }}</em>
-        </div>
-      </div>
-
-      <div class="quality-bottom">
-        <div class="quality-list quality-panel">
-          <div class="quality-panel-head">
-            <div>
-              <strong>需要处理的风险</strong>
-              <span>{{ issues.length ? `${issues.length} 类风险会影响导出判断` : "当前没有明显阻断项" }}</span>
-            </div>
+      <div v-if="expanded" class="quality-report">
+        <div class="quality-report-head">
+          <div>
+            <span class="quality-kicker">导出前检查 · {{ gateStatusLabel(gateStatus) }}</span>
+            <strong>{{ selectedVideo.title || report.video_title || "当前节目" }}</strong>
+            <p>{{ asrRoutingSummary }}</p>
           </div>
-          <div v-if="!issues.length" class="quality-row calm"><Icon name="shield-check" /><span>暂无明显质量风险</span></div>
-          <div v-for="issue in issues.slice(0, 3)" :key="`${issue.label}-${issue.evidence}`" class="quality-row">
-            <span class="status" :class="issueStatus(issue.severity)">{{ issue.label || "质量提示" }}</span>
-            <span>{{ clipText(issue.evidence || issue.recommendation || "", 110) }}</span>
+          <button type="button" :disabled="state.busyKey === 'quality-refresh'" :data-refresh-quality="state.selectedVideoId" @click="refresh">
+            <span v-if="state.busyKey === 'quality-refresh'" class="spinner"></span>
+            <Icon v-else name="refresh-cw" />刷新报告
+          </button>
+        </div>
+
+        <div class="quality-metrics">
+          <div v-for="metric in metricCards" :key="metric.label" class="quality-metric" :class="metric.tone">
+            <span>{{ metric.label }}</span>
+            <strong>{{ metric.value }}</strong>
+            <em>{{ metric.caption }}</em>
           </div>
         </div>
 
-        <div class="quality-list quality-panel">
-          <div class="quality-panel-head">
-            <div>
-              <strong>建议动作</strong>
-              <span>按顺序处理，避免直接批量导出</span>
+        <div class="quality-bottom">
+          <div class="quality-list quality-panel">
+            <div class="quality-panel-head"><div><strong>需要处理的风险</strong><span>{{ issues.length ? `${issues.length} 类风险会影响导出判断` : "当前没有明显阻断项" }}</span></div></div>
+            <div v-if="!issues.length" class="quality-row calm"><Icon name="shield-check" /><span>暂无明显质量风险</span></div>
+            <div v-for="issue in issues.slice(0, 3)" :key="`${issue.label}-${issue.evidence}`" class="quality-row">
+              <span class="status" :class="issueStatus(issue.severity)">{{ issue.label || "质量提示" }}</span>
+              <span>{{ clipText(issue.evidence || issue.recommendation || "", 110) }}</span>
             </div>
           </div>
-          <div v-if="!actionItems.length" class="quality-row calm"><Icon name="check-circle-2" /><span>可进入标题、封面和导出审核。</span></div>
-          <div v-for="item in actionItems" :key="item.key" class="quality-row">
-            <Icon :name="item.icon" />
-            <span>{{ clipText(item.text, 118) }}</span>
-          </div>
-        </div>
 
-        <div class="quality-list quality-panel">
-          <div class="quality-panel-head">
-            <div>
-              <strong>待处理片段</strong>
-              <span>{{ reviewQueue.length ? "点击进入候选详情定位处理" : "暂无片段级复核队列" }}</span>
-            </div>
+          <div class="quality-list quality-panel">
+            <div class="quality-panel-head"><div><strong>建议动作</strong><span>按顺序处理，避免直接批量导出</span></div></div>
+            <div v-if="!actionItems.length" class="quality-row calm"><Icon name="check-circle-2" /><span>可进入标题、封面和导出审核。</span></div>
+            <div v-for="item in actionItems" :key="item.key" class="quality-row"><Icon :name="item.icon" /><span>{{ clipText(item.text, 118) }}</span></div>
           </div>
-          <div v-if="!reviewQueue.length" class="quality-row calm"><Icon name="shield-check" /><span>当前没有片段级复核项。</span></div>
-          <div v-for="item in reviewQueue" :key="item.key" class="quality-row">
-            <span class="status" :class="item.tone">{{ item.label }}</span>
-            <span>{{ clipText(item.text, 96) }}</span>
-            <button
-              v-if="item.segmentId"
-              type="button"
-              aria-label="打开候选详情"
-              :data-open-quality-segment="item.segmentId"
-              @click="openSegmentInCandidates(item.segmentId, item.section)"
-            >
-              <Icon name="panel-right-open" />
-            </button>
+
+          <div class="quality-list quality-panel">
+            <div class="quality-panel-head"><div><strong>待处理片段</strong><span>{{ reviewQueue.length ? "点击进入候选详情定位处理" : "暂无片段级复核队列" }}</span></div></div>
+            <div v-if="!reviewQueue.length" class="quality-row calm"><Icon name="shield-check" /><span>当前没有片段级复核项。</span></div>
+            <div v-for="item in reviewQueue" :key="item.key" class="quality-row">
+              <span class="status" :class="item.tone">{{ item.label }}</span>
+              <span>{{ clipText(item.text, 96) }}</span>
+              <button v-if="item.segmentId" type="button" aria-label="打开候选详情" :data-open-quality-segment="item.segmentId" @click="openSegmentInCandidates(item.segmentId, item.section)"><Icon name="panel-right-open" /></button>
+            </div>
           </div>
         </div>
       </div>
@@ -115,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import Icon from "./Icon.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
 import type { InspectorSectionName } from "../types";
@@ -156,6 +125,7 @@ type ReviewQueueItem = {
 };
 
 const { state, selectedVideo, loadQuality, openSegmentInCandidates, handleGuideAction, withBusy } = useDashboardContext();
+const expanded = ref(false);
 
 const report = computed(() => state.quality);
 const health = computed(() => report.value?.health || {});
@@ -173,6 +143,7 @@ const englishPreserveRoutes = computed(() => Array.isArray(asrRouting.value.engl
 const asrRouteItems = computed(() => [...verifyRoutes.value, ...englishPreserveRoutes.value]);
 const level = computed(() => health.value.level || "warn");
 const score = computed(() => Number(health.value.score || 0));
+const reviewSignalCount = computed(() => watchlist.value.length + Number(asrRouting.value.verify_count || 0));
 const gateStatus = computed(() => gate.value.status || (level.value === "good" ? "allow" : "review"));
 const gateClass = computed(() => gateLevelClass(gate.value));
 const primaryAction = computed(() => gateAction(gate.value));

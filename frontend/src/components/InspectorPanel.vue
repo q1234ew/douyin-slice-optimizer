@@ -2,9 +2,23 @@
   <aside id="inspector" class="panel inspector">
     <div class="panel-head">
       <div>
-        <h2 class="panel-title"><Icon name="play-square" />预览与评分详情</h2>
-        <p class="panel-subtitle">在线预览、字幕、标题、封面和风险说明</p>
+        <h2 class="panel-title"><Icon name="play-square" />当前候选概览</h2>
+        <p class="panel-subtitle">决策、预览与证据在同一处完成</p>
       </div>
+    </div>
+
+    <div v-if="row" class="inspector-decision-summary">
+      <div>
+        <span class="candidate-time">{{ state.preview?.timeRange || "当前候选" }}</span>
+        <strong>{{ titles[0] || row.summary || "候选片段" }}</strong>
+        <div class="inspector-decision-meta">
+          <span>综合分 {{ Number(row.final_score || 0).toFixed(1) }}</span>
+          <span class="status" :class="decisionStatusClass(advisorySeverity)">{{ advisoryTitle }}</span>
+        </div>
+      </div>
+      <button class="primary" type="button" :data-primary-decision="row.id" :disabled="Boolean(state.busyKey)" @click="runPrimaryDecision">
+        <Icon :name="decisionCta.icon" />{{ decisionCta.label }}
+      </button>
     </div>
 
     <div id="preview-panel" class="preview-panel">
@@ -12,30 +26,6 @@
         <div class="preview-empty"><Icon name="play-square" /><strong>在线预览</strong><span>选择候选后查看时段、评分和导出预览。</span></div>
       </div>
       <template v-else>
-        <div class="preview-meta"><strong>{{ state.preview.title }}</strong><span>{{ state.preview.timeRange }} / 综合分 {{ state.preview.score }}</span></div>
-        <div class="preview-kpis">
-          <span>综合分<strong>{{ state.preview.score }}</strong></span>
-          <span>时长<strong>{{ state.preview.duration }}</strong></span>
-          <span>类型<strong>{{ state.preview.type }}</strong></span>
-        </div>
-        <div class="preview-advisory">
-          <strong><span class="status" :class="decisionStatusClass(advisorySeverity)">{{ advisoryTitle }}</span><Icon name="info" /></strong>
-          <span>{{ advisoryDetail }}</span>
-        </div>
-        <div v-if="history" class="research-prior-summary">
-          <div>
-            <span>历史先验</span>
-            <strong>{{ baselineCompactText }}</strong>
-          </div>
-          <div>
-            <span>高互动原型</span>
-            <strong>{{ topPrototypeName }}</strong>
-          </div>
-          <div>
-            <span>低互动风险</span>
-            <strong>{{ topRiskName }}</strong>
-          </div>
-        </div>
         <template v-if="!state.preview.url">
           <div class="preview-shell preview-shell-empty"><div class="preview-empty"><Icon name="play-square" /><strong>尚未导出</strong><span>点击下方按钮生成 9:16 MP4 后即可在线播放。</span></div></div>
         </template>
@@ -60,7 +50,10 @@
             :key="tab.key"
             type="button"
             role="tab"
+            :id="`inspector-tab-${tab.key}`"
             :aria-selected="state.inspectorSection === tab.key ? 'true' : 'false'"
+            :aria-controls="`inspector-panel-${tab.key}`"
+            :tabindex="state.inspectorSection === tab.key ? 0 : -1"
             :class="{ active: state.inspectorSection === tab.key }"
             @click="state.inspectorSection = tab.key"
           >
@@ -197,6 +190,25 @@
         </template>
 
         <template v-else-if="state.inspectorSection === 'history'">
+          <div id="inspector-panel-history" class="detail-section simulation-compare" role="tabpanel" aria-labelledby="inspector-tab-history">
+            <div class="simulation-compare-head">
+              <div>
+                <div class="detail-title"><Icon name="radar" />推荐模拟</div>
+                <div class="meta">在当前候选上下文中比较推荐阶段和主要瓶颈。</div>
+              </div>
+              <button type="button" :disabled="!state.selectedVideoId || state.busyKey === 'inspector-simulation'" @click="refreshSimulation">
+                <span v-if="state.busyKey === 'inspector-simulation'" class="spinner"></span>
+                <Icon v-else name="refresh-cw" />比较模拟
+              </button>
+            </div>
+            <div v-if="currentSimulation" class="simulation-compare-grid">
+              <span>当前评分<strong>{{ Number(row.final_score || 0).toFixed(1) }}</strong></span>
+              <span>模拟评分<strong>{{ Number(currentSimulation.simulated_score || 0).toFixed(1) }}</strong></span>
+              <span>推荐阶段<strong>{{ currentSimulation.predicted_stage || state.simulationSummary.top_stage || "待判断" }}</strong></span>
+              <span>主要瓶颈<strong>{{ currentSimulation.bottleneck?.label || state.simulationSummary.top_bottleneck || "暂无" }}</strong></span>
+            </div>
+            <div v-else class="simulation-inline-empty">{{ state.moduleStatus.simulation.error || "点击“比较模拟”读取当前候选的推荐链路结果。" }}</div>
+          </div>
           <div v-if="state.moduleStatus.history.error" class="module-error">
             <Icon name="circle-alert" /><span>{{ state.moduleStatus.history.error }}</span>
           </div>
@@ -333,6 +345,7 @@ const {
   verifyAsr,
   createVariant,
   bindPlatform,
+  loadSimulation,
   copyText,
   qualityFlagsFor,
   withBusy,
@@ -343,9 +356,9 @@ const row = selectedSegment;
 const showReviewHistory = ref(false);
 const inspectorTabs = [
   { key: "decision", label: "决策", icon: "clipboard-check" },
-  { key: "asr", label: "字幕/ASR", icon: "captions" },
-  { key: "history", label: "历史先验", icon: "history" },
-  { key: "packaging", label: "包装/平台", icon: "text" }
+  { key: "asr", label: "字幕", icon: "captions" },
+  { key: "history", label: "判断依据", icon: "history" },
+  { key: "packaging", label: "发布", icon: "text" }
 ] as const;
 const titles = computed(() => Array.isArray(row.value?.title_suggestions) ? row.value?.title_suggestions || [] : []);
 const riskNotes = computed(() => {
@@ -455,6 +468,7 @@ const qualityFlags = computed(() => row.value ? qualityFlagsFor(row.value.id) : 
 const gate = computed(() => state.quality?.gate || {});
 const action = computed(() => gateAction(gate.value));
 const linkedDecision = computed(() => simulationDecisionForSegment(state.quality, state.preview?.segmentId));
+const currentSimulation = computed(() => state.simulations.find(item => item.segment_id === row.value?.id) || null);
 const advisorySeverity = computed(() => linkedDecision.value?.severity || gate.value.severity || "warn");
 const advisoryTitle = computed(() => linkedDecision.value?.label || action.value.label || "导出决策");
 const advisoryDetail = computed(() => linkedDecision.value?.action || action.value.description || gate.value.summary || "Gate 为只读提示，不会自动阻断导出。");
@@ -508,6 +522,11 @@ const decisionCta = computed(() => {
 watch(() => row.value?.id, () => {
   showReviewHistory.value = false;
 });
+
+async function refreshSimulation(): Promise<void> {
+  if (!state.selectedVideoId) return;
+  await withBusy("inspector-simulation", () => loadSimulation(state.selectedVideoId));
+}
 
 async function runPrimaryDecision(): Promise<void> {
   if (!row.value) return;

@@ -244,17 +244,129 @@
         <div v-if="resolverStrategyRows.length" class="material-resolver-grid">
           <article v-for="strategy in resolverStrategyRows" :key="strategy.key">
             <strong>{{ strategy.label }}</strong>
-            <span>覆盖 {{ percent(strategy.coverage) }}</span>
-            <span v-if="strategy.goldCount">规范准确 {{ percent(strategy.accuracy) }}</span>
+            <span>Gold 作答 {{ percent(strategy.decisionCoverage) }}</span>
+            <span v-if="strategy.goldCount">总体准确 {{ percent(strategy.accuracy) }}</span>
+            <span v-if="strategy.goldCount">作答准确 {{ percent(strategy.selectiveAccuracy) }}</span>
+            <span v-if="strategy.goldCount">unknown 弃权 {{ percent(strategy.abstentionRate) }}</span>
             <span v-else>等待第二批 Gold</span>
           </article>
         </div>
 
         <div class="quality-row material-evidence-gate">
           <span class="status" :class="resolverReport?.status === 'eligible_for_ranker_ablation' ? 'ok' : 'neutral'">{{ resolverReport?.status || 'not_started' }}</span>
-          <span>分歧 {{ Number(resolverSummary.disagreement_count || latestResolverSummary.disagreement_count || 0) }} / Gold 证据 {{ Number(resolverSummary.cached_gold_evaluable_count || latestResolverSummary.cached_gold_evaluable_count || 0) }}/{{ Number(resolverSummary.gold_evaluable_count || latestResolverSummary.gold_evaluable_count || 0) }}</span>
+          <span>
+            Gold 入队 {{ Number(displayedResolverSummary.gold_admitted_count || 0) }}/{{ Number(displayedResolverSummary.gold_evaluable_count || 0) }}（{{ percent(Number(displayedResolverSummary.gold_queue_coverage || 0)) }}）
+            / 证据 {{ Number(displayedResolverSummary.cached_gold_evaluable_count || 0) }}/{{ Number(displayedResolverSummary.gold_evaluable_count || 0) }}（{{ percent(Number(displayedResolverSummary.gold_evidence_coverage || 0)) }}）
+            / unknown 弃权 {{ Number(displayedResolverSummary.unknown_abstention_count || 0) }}（{{ percent(Number(displayedResolverSummary.unknown_abstention_rate || 0)) }}）
+            / 分歧 {{ Number(displayedResolverSummary.disagreement_count || 0) }}
+          </span>
         </div>
       </section>
+    </section>
+
+    <section class="visual-window-panel" aria-labelledby="visual-window-title">
+      <header class="visual-window-head">
+        <div>
+          <span class="section-kicker">Beta-D-11 / Visual Window Scout</span>
+          <h5 id="visual-window-title">视觉候选窗与窗口 Gold</h5>
+        </div>
+        <div class="visual-window-actions">
+          <button class="icon-only" type="button" title="刷新视觉候选窗" aria-label="刷新视觉候选窗" :disabled="state.busyKey === 'visual-window-refresh'" @click="withBusy('visual-window-refresh', loadVisualWindowScoutStatus)">
+            <span v-if="state.busyKey === 'visual-window-refresh'" class="spinner"></span>
+            <Icon v-else name="refresh-cw" />
+          </button>
+          <button type="button" :disabled="state.busyKey === 'visual-window-scan'" @click="withBusy('visual-window-scan', runVisualWindowScout)">
+            <span v-if="state.busyKey === 'visual-window-scan'" class="spinner"></span>
+            <Icon v-else name="scan-search" />扫描 5 条
+          </button>
+          <button type="button" :disabled="state.busyKey === 'visual-window-experiment'" @click="withBusy('visual-window-experiment', runVisualWindowExperiment)">
+            <span v-if="state.busyKey === 'visual-window-experiment'" class="spinner"></span>
+            <Icon v-else name="radar" />冻结对比
+          </button>
+        </div>
+      </header>
+
+      <div class="visual-window-stats">
+        <span><strong>{{ Number(visualMedia.eligible_count || 0) }}</strong> 视觉可扫描</span>
+        <span><strong>{{ Number(visualMedia.audio_ready_count || 0) }}</strong> 音轨就绪</span>
+        <span><strong>{{ Number(visualBuild.embedding_ready_count || 0) }}</strong> 窗口向量</span>
+        <span><strong>{{ Number(visualAnnotation.confirmed_count || 0) }}</strong> 窗口 Gold</span>
+        <span><strong>{{ visualPendingCount }}</strong> 待确认</span>
+      </div>
+
+      <div class="quality-row visual-window-route">
+        <span class="status" :class="visualStatus.status === 'ready_for_window_gold_review' ? 'ok' : 'neutral'">{{ visualStatus.status || 'not_started' }}</span>
+        <span>视觉路线按视频准入，音频缺失不再阻断；Omni 只接收融合策略 Top2。</span>
+      </div>
+
+      <div v-if="visualStrategyRows.length" class="visual-window-strategies">
+        <article v-for="strategy in visualStrategyRows" :key="strategy.key">
+          <strong>{{ strategy.label }}</strong>
+          <span>Recall@2 {{ percent(strategy.recall) }}</span>
+          <span>严重漏选 {{ percent(strategy.severeMiss) }}</span>
+          <em>{{ strategy.evaluated }} 条已评估</em>
+        </article>
+      </div>
+
+      <div v-if="visualWindowSamples.length" class="visual-window-review-list">
+        <article v-for="item in visualWindowSamples.slice(0, 6)" :key="String(item.window_id || '')" class="visual-window-review-item">
+          <header>
+            <div>
+              <div class="material-sample-meta">
+                <span>{{ item.account_id || 'unknown' }}</span>
+                <span>{{ timeRange(item) }}</span>
+                <span>{{ strategyLabel(item.selected_by) }}</span>
+                <span :class="item.audio_source === 'missing_audio' ? 'material-conflict' : ''">{{ audioLabel(item.audio_source) }}</span>
+              </div>
+              <strong>{{ item.title || item.sample_id }}</strong>
+            </div>
+            <a v-if="item.platform_url" class="icon-only" :href="item.platform_url" target="_blank" rel="noreferrer" title="打开原视频" aria-label="打开原视频"><Icon name="external-link" /></a>
+          </header>
+
+          <div class="visual-window-frames">
+            <img v-for="(frame, index) in item.frame_urls || []" :key="frame" :src="frame" :alt="`候选窗画面 ${index + 1}`" loading="lazy" />
+          </div>
+
+          <div v-if="windowDraft(item)" class="visual-window-fields">
+            <label>
+              <span>视觉形态</span>
+              <select v-model="state.materialWindowDrafts[String(item.window_id || '')].scene_form">
+                <option v-for="option in visualSceneOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              <span>节目语境</span>
+              <select v-model="state.materialWindowDrafts[String(item.window_id || '')].program_context_mode">
+                <option v-for="option in visualContextOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              <span>选窗质量</span>
+              <select v-model="state.materialWindowDrafts[String(item.window_id || '')].selection_quality">
+                <option v-for="option in visualQualityOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label class="visual-window-note">
+              <span>审核备注</span>
+              <input v-model="state.materialWindowDrafts[String(item.window_id || '')].review_note" type="text" placeholder="可选：记录画面判断依据" />
+            </label>
+          </div>
+
+          <footer>
+            <span>融合 {{ Number(item.fusion_score || 0).toFixed(3) }} / 视觉 {{ Number(item.visual_score || 0).toFixed(3) }} / 文本 {{ Number(item.text_score || 0).toFixed(3) }}</span>
+            <button type="button" :disabled="state.busyKey === `visual-window-save-${String(item.window_id || '')}`" @click="withBusy(`visual-window-save-${String(item.window_id || '')}`, () => saveMaterialWindowAnnotation(String(item.sample_id || ''), String(item.window_id || '')))">
+              <span v-if="state.busyKey === `visual-window-save-${String(item.window_id || '')}`" class="spinner"></span>
+              <Icon v-else name="check" />保存窗口 Gold
+            </button>
+          </footer>
+        </article>
+      </div>
+
+      <div v-else class="material-review-empty compact">
+        <Icon name="scan-search" />
+        <strong>尚未生成视觉候选窗</strong>
+        <span>当前有 {{ Number(visualMedia.eligible_count || 0) }} 条素材可直接走视觉扫描。</span>
+      </div>
     </section>
   </section>
 </template>
@@ -262,7 +374,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDashboardContext } from "../composables/dashboardContext";
-import type { AnnotationFieldGuide, MaterialConfusionSample, MaterialEvidenceSample, MaterialGoldAnnotation, MaterialGoldSample } from "../types";
+import type { AnnotationFieldGuide, MaterialConfusionSample, MaterialEvidenceSample, MaterialGoldAnnotation, MaterialGoldSample, VisualWindowReviewSample } from "../types";
 import { clipText } from "../utils";
 import Icon from "./Icon.vue";
 
@@ -272,6 +384,10 @@ const {
   loadMaterialConfusionQueue,
   runMaterialEvidenceSmoke,
   runMaterialResolverShadow,
+  loadVisualWindowScoutStatus,
+  runVisualWindowScout,
+  runVisualWindowExperiment,
+  saveMaterialWindowAnnotation,
   saveMaterialGoldAnnotation,
   reopenMaterialGoldAnnotation,
   runMaterialCalibrationReplay,
@@ -330,6 +446,7 @@ const evidenceSamples = computed<MaterialEvidenceSample[]>(() => Array.isArray(e
 const resolverReport = computed(() => state.materialResolverReport);
 const resolverSummary = computed<Record<string, unknown>>(() => resolverReport.value?.summary && typeof resolverReport.value.summary === "object" ? resolverReport.value.summary as Record<string, unknown> : {});
 const latestResolverSummary = computed<Record<string, unknown>>(() => evidenceStatus.value.latest_resolver_summary && typeof evidenceStatus.value.latest_resolver_summary === "object" ? evidenceStatus.value.latest_resolver_summary as Record<string, unknown> : {});
+const displayedResolverSummary = computed<Record<string, unknown>>(() => Object.keys(resolverSummary.value).length ? resolverSummary.value : latestResolverSummary.value);
 const resolverStrategyRows = computed(() => {
   const comparison = resolverReport.value?.cached_eval_strategy_comparison || resolverReport.value?.strategy_comparison || {};
   const labels: Record<string, string> = {
@@ -341,9 +458,31 @@ const resolverStrategyRows = computed(() => {
   return Object.keys(labels).filter(key => comparison[key]).map(key => ({
     key,
     label: labels[key],
-    coverage: Number(comparison[key]?.coverage || 0),
+    decisionCoverage: Number(comparison[key]?.gold_prediction_coverage ?? comparison[key]?.coverage ?? 0),
     accuracy: Number(comparison[key]?.canonical_accuracy || 0),
+    selectiveAccuracy: Number(comparison[key]?.selective_canonical_accuracy ?? comparison[key]?.canonical_accuracy ?? 0),
+    abstentionRate: Number(comparison[key]?.unknown_abstention_rate || 0),
     goldCount: Number(comparison[key]?.gold_evaluable_count || 0)
+  }));
+});
+const visualStatus = computed(() => state.visualWindowScoutStatus || {});
+const visualMedia = computed<Record<string, unknown>>(() => visualStatus.value.media_readiness && typeof visualStatus.value.media_readiness === "object" ? visualStatus.value.media_readiness as Record<string, unknown> : {});
+const visualAnnotation = computed<Record<string, unknown>>(() => visualStatus.value.annotation_summary && typeof visualStatus.value.annotation_summary === "object" ? visualStatus.value.annotation_summary as Record<string, unknown> : {});
+const visualBuild = computed<Record<string, unknown>>(() => visualStatus.value.latest_build && typeof visualStatus.value.latest_build === "object" ? visualStatus.value.latest_build as Record<string, unknown> : {});
+const visualWindowSamples = computed<VisualWindowReviewSample[]>(() => Array.isArray(visualStatus.value.review_queue?.samples) ? visualStatus.value.review_queue?.samples || [] : []);
+const visualPendingCount = computed(() => Number(visualStatus.value.review_queue?.pending_count || 0));
+const visualSceneOptions = computed(() => windowOptions(visualStatus.value.scene_form_options));
+const visualContextOptions = computed(() => windowOptions(visualStatus.value.program_context_options));
+const visualQualityOptions = computed(() => windowOptions(visualStatus.value.selection_quality_options));
+const visualStrategyRows = computed(() => {
+  const comparison = state.visualWindowExperiment?.strategy_comparison || {};
+  const labels: Record<string, string> = { fixed: "固定窗", text: "文本窗", visual: "视觉窗", fusion: "动态融合" };
+  return Object.keys(labels).filter(key => comparison[key]).map(key => ({
+    key,
+    label: labels[key],
+    recall: Number(comparison[key]?.recall_at_2 || 0),
+    severeMiss: Number(comparison[key]?.severe_miss_rate || 0),
+    evaluated: Number(comparison[key]?.evaluated_sample_count || 0)
   }));
 });
 const visibleConfusionSamples = computed(() => confusionSamples.value
@@ -395,6 +534,33 @@ function confusionCueText(sample: MaterialConfusionSample): string {
 function evidenceFor(sample: MaterialConfusionSample): MaterialEvidenceSample {
   const id = String(sample.sample_id || sample.id || "");
   return evidenceSamples.value.find(item => String(item.sample_id || "") === id) || { status: "missing" };
+}
+
+function windowOptions(values?: Array<Record<string, unknown>>): Array<{ value: string; label: string }> {
+  const rows = Array.isArray(values) ? values : [];
+  return rows.map(item => {
+    const value = String(item.value || "unknown");
+    return { value, label: `${String(item.label_zh || value)} / ${value}` };
+  });
+}
+
+function windowDraft(sample: VisualWindowReviewSample) {
+  return state.materialWindowDrafts[String(sample.window_id || "")] || null;
+}
+
+function timeRange(sample: VisualWindowReviewSample): string {
+  return `${Number(sample.start_seconds || 0).toFixed(1)}s - ${Number(sample.end_seconds || 0).toFixed(1)}s`;
+}
+
+function strategyLabel(values?: string[]): string {
+  const labels: Record<string, string> = { fixed: "固定", text: "文本", visual: "视觉", fusion: "融合" };
+  return (values || []).map(value => labels[value] || value).join(" + ") || "候选";
+}
+
+function audioLabel(value?: unknown): string {
+  if (value === "embedded_audio") return "内嵌音轨";
+  if (value === "external_audio") return "外置音轨";
+  return "视觉可评估";
 }
 
 function fieldGuide(field: string): AnnotationFieldGuide | null {

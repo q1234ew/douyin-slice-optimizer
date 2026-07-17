@@ -27,6 +27,7 @@ import type {
   MaterialGoldQueue,
   MaterialGoldSample,
   MaterialResolverReport,
+  MaterialWindowDraft,
   MemoryBuildResult,
   ModuleStatus,
   ModuleStatusKey,
@@ -51,6 +52,10 @@ import type {
   TrainingSample,
   VariantRow,
   VideoRow,
+  VisualWindowExperiment,
+  VisualWindowReviewSample,
+  VisualWindowScoutReport,
+  VisualWindowScoutStatus,
   ViewName
 } from "../types";
 import {
@@ -127,11 +132,16 @@ export interface DashboardStore {
   runMultimodalValidation: () => Promise<void>;
   runMultimodalFeatureExperiment: () => Promise<void>;
   runQwenEmbeddingResearch: () => Promise<void>;
+  loadCalibrationWorkspace: (notify?: boolean) => Promise<void>;
   loadMaterialGoldQueue: (notify?: boolean) => Promise<void>;
   loadMaterialConfusionQueue: (notify?: boolean) => Promise<void>;
   loadMaterialEvidenceStatus: (notify?: boolean) => Promise<void>;
   runMaterialEvidenceSmoke: () => Promise<void>;
   runMaterialResolverShadow: () => Promise<void>;
+  loadVisualWindowScoutStatus: (notify?: boolean) => Promise<void>;
+  runVisualWindowScout: () => Promise<void>;
+  runVisualWindowExperiment: () => Promise<void>;
+  saveMaterialWindowAnnotation: (sampleId: string, windowId: string) => Promise<void>;
   saveMaterialGoldAnnotation: (sampleId: string) => Promise<void>;
   reopenMaterialGoldAnnotation: (sampleId: string) => Promise<void>;
   runMaterialCalibrationReplay: () => Promise<void>;
@@ -185,9 +195,13 @@ export interface DashboardState {
   materialConfusionQueue: MaterialConfusionQueue | null;
   materialEvidenceStatus: MaterialEvidenceStatus | null;
   materialResolverReport: MaterialResolverReport | null;
+  visualWindowScoutStatus: VisualWindowScoutStatus | null;
+  visualWindowScoutReport: VisualWindowScoutReport | null;
+  visualWindowExperiment: VisualWindowExperiment | null;
   materialCalibrationReplay: MaterialCalibrationReplay | null;
   calibrationDrafts: Record<string, CalibrationDraft>;
   materialGoldDrafts: Record<string, MaterialGoldDraft>;
+  materialWindowDrafts: Record<string, MaterialWindowDraft>;
   rankerTuning: RankerTuningResult | null;
   prototypeBank: PrototypeBankResult | null;
   historyBaselines: DouyinHistoryBaselines | null;
@@ -261,9 +275,13 @@ export function useDashboard(): DashboardStore {
     materialConfusionQueue: null,
     materialEvidenceStatus: null,
     materialResolverReport: null,
+    visualWindowScoutStatus: null,
+    visualWindowScoutReport: null,
+    visualWindowExperiment: null,
     materialCalibrationReplay: null,
     calibrationDrafts: {},
     materialGoldDrafts: {},
+    materialWindowDrafts: {},
     rankerTuning: null,
     prototypeBank: null,
     historyBaselines: null,
@@ -291,6 +309,11 @@ export function useDashboard(): DashboardStore {
 
   let toastTimer: number | undefined;
   let feedbackLoadSeq = 0;
+  let feedbackLoadKey = "";
+  let feedbackLoadPromise: Promise<void> | null = null;
+  let calibrationLoadKey = "";
+  let calibrationWorkspaceKey = "";
+  let calibrationLoadPromise: Promise<void> | null = null;
 
   const selectedVideo = computed(() => state.videos.find(video => video.id === state.selectedVideoId) || null);
   const selectedSegment = computed(() => state.suggestions.find(row => row.id === state.selectedSegmentId) || null);
@@ -438,14 +461,16 @@ export function useDashboard(): DashboardStore {
   function setView(view: ViewName): void {
     state.view = view || "workbench";
     document.body.dataset.view = state.view;
-    if (state.view === "candidates" && state.selectedVideoId && !state.suggestions.length) {
-      loadSuggestions(state.selectedVideoId, false).catch(() => undefined);
-    }
     if (state.view === "feedback") {
       loadFeedback().catch(() => undefined);
+      if (state.feedbackSection === "calibration") {
+        loadCalibrationWorkspace(false).catch(() => undefined);
+      }
+      if (!state.runtime && !state.moduleStatus.runtime.loading) {
+        loadRuntime().catch(() => undefined);
+      }
     }
     if (state.view === "simulation" && state.selectedVideoId) {
-      loadQuality(state.selectedVideoId, false).catch(() => {});
       loadSimulation(state.selectedVideoId, false).catch(() => undefined);
     }
   }
@@ -498,16 +523,17 @@ export function useDashboard(): DashboardStore {
   async function refreshVideos(): Promise<void> {
     beginModule("videos");
     try {
-      const data = await api<{ videos?: VideoRow[] }>("/videos");
+      const [data] = await Promise.all([
+        api<{ videos?: VideoRow[] }>("/videos"),
+        loadStats()
+      ]);
       state.videos = data.videos || [];
       if (!state.selectedVideoId && state.videos.length) {
         state.selectedVideoId = state.videos[0].id;
       }
-      await loadStats();
       finishModule("videos");
       if (state.selectedVideoId) {
         await loadQuality(state.selectedVideoId, false);
-        await loadSuggestions(state.selectedVideoId, false);
         if (state.view === "simulation") await loadSimulation(state.selectedVideoId, false);
       }
     } catch (error) {
@@ -526,7 +552,9 @@ export function useDashboard(): DashboardStore {
     state.selectedVideoId = videoId;
     state.selectedSegmentId = "";
     state.preview = null;
-    loadQuality(videoId, false).catch(() => {});
+    if (state.quality?.video_id !== videoId) {
+      loadQuality(videoId, false).catch(() => {});
+    }
     beginModule("suggestions");
     try {
       const data = await api<{ suggestions?: CandidateRow[] }>(`/videos/${encodeURIComponent(videoId)}/suggestions?top_k=10`);
@@ -534,7 +562,6 @@ export function useDashboard(): DashboardStore {
       if (state.suggestions.length) {
         selectCandidate(state.suggestions[0].id);
       }
-      loadManifest(videoId).catch(() => {});
       finishModule("suggestions");
     } catch (error) {
       state.suggestions = [];
@@ -550,7 +577,9 @@ export function useDashboard(): DashboardStore {
       return;
     }
     state.selectedVideoId = videoId;
-    loadQuality(videoId, false).catch(() => {});
+    if (state.quality?.video_id !== videoId) {
+      loadQuality(videoId, false).catch(() => {});
+    }
     beginModule("simulation");
     try {
       const data = await api<{ simulations?: SimulationRow[]; summary?: SimulationSummary }>(`/videos/${encodeURIComponent(videoId)}/simulation?top_k=10`);
@@ -581,81 +610,145 @@ export function useDashboard(): DashboardStore {
     await refreshVideos();
   }
 
-  async function loadFeedback(): Promise<void> {
+  function currentFeedbackLoadKey(): string {
+    return `${state.feedbackAccount.trim()}::${state.feedbackDataset || "all"}`;
+  }
+
+  function currentCalibrationScopeKey(): string {
+    return `${state.feedbackAccount.trim()}::${state.feedbackDataset || "all"}`;
+  }
+
+  function hasCalibrationWorkspaceData(): boolean {
+    return Boolean(
+      state.semanticCalibrationQueue
+      || state.materialGoldQueue
+      || state.materialConfusionQueue
+      || state.materialEvidenceStatus
+      || state.visualWindowScoutStatus
+    );
+  }
+
+  function clearCalibrationWorkspace(): void {
+    state.semanticCalibrationQueue = null;
+    state.materialGoldQueue = null;
+    state.materialConfusionQueue = null;
+    state.materialEvidenceStatus = null;
+    state.visualWindowScoutStatus = null;
+    state.calibrationDrafts = {};
+    state.materialGoldDrafts = {};
+    state.materialWindowDrafts = {};
+  }
+
+  function loadFeedback(): Promise<void> {
+    const requestedKey = currentFeedbackLoadKey();
+    if (feedbackLoadPromise && feedbackLoadKey === requestedKey) {
+      return feedbackLoadPromise;
+    }
+
     const requestSeq = ++feedbackLoadSeq;
+    feedbackLoadKey = requestedKey;
+    const request = performFeedbackLoad(requestSeq);
+    const trackedRequest = request.finally(() => {
+      if (feedbackLoadPromise === trackedRequest) {
+        feedbackLoadPromise = null;
+      }
+    });
+    feedbackLoadPromise = trackedRequest;
+    return trackedRequest;
+  }
+
+  async function performFeedbackLoad(requestSeq: number): Promise<void> {
     beginModule("feedback");
     beginModule("history");
     beginModule("douyin");
-    try {
-      await loadLearningDatasets();
-    } catch (error) {
-      if (requestSeq !== feedbackLoadSeq) return;
-      state.learningDatasets = [];
-      failModule("feedback", error, "研究数据集暂不可用");
-    }
-    if (requestSeq !== feedbackLoadSeq) return;
     const account = state.feedbackAccount.trim();
     const accountPath = account || "all";
     const accountQuery = encodeURIComponent(account);
-    const dataset = state.feedbackDataset || "default";
+    const dataset = state.feedbackDataset || "all";
+    const historyDataset = dataset === "all" ? "" : dataset;
+    const requestedCalibrationScope = `${account}::${dataset}`;
+    if (calibrationWorkspaceKey && calibrationWorkspaceKey !== requestedCalibrationScope) {
+      calibrationWorkspaceKey = "";
+      clearCalibrationWorkspace();
+    }
 
-    let historicalSummary: HistoricalSampleSummary | null = null;
+    const learningDatasetsRequest = loadLearningDatasets();
+    const samplesRequest = api<{ training_samples?: TrainingSample[] }>(`/training-samples?account_id=${accountQuery}&limit=50`);
+    const historyBaselinesRequest = api<DouyinHistoryBaselines>(`/learning/douyin-history/baselines?account_id=${accountQuery}&dataset_id=${encodeURIComponent(historyDataset)}&min_count=1&limit=80`);
+    const accountBaselinesRequest = account
+      ? api<{ baselines?: BaselineRow[] }>(`/accounts/${encodeURIComponent(account)}/baselines`)
+      : Promise.resolve<{ baselines?: BaselineRow[] }>({ baselines: [] });
+    const accountInsightsRequest = account
+      ? api<AccountInsights>(`/accounts/${encodeURIComponent(account)}/insights`)
+      : Promise.resolve<AccountInsights | null>(null);
+    const evaluationRequest = Promise.allSettled([
+      api<InterestClockResult>(`/accounts/${encodeURIComponent(accountPath)}/interest-clock?limit=5`),
+      api<BacktestList>(`/learning/backtest?account_id=${accountQuery}&limit=1&compact=true`),
+      api<PrototypeBankResult>(`/accounts/${encodeURIComponent(accountPath)}/prototypes?limit=5&source=visible_capture&dataset_id=${encodeURIComponent(dataset)}`)
+    ]);
+    const douyinRequest = account
+      ? Promise.all([
+        api<DouyinSummary>(`/platform/douyin/summary?account_id=${encodeURIComponent(account)}`),
+        api<DouyinOAuthStatus>(`/platform/douyin/oauth/status?account_id=${encodeURIComponent(account)}`)
+      ])
+      : Promise.resolve<[DouyinSummary, DouyinOAuthStatus]>([
+        { mappings: [], runs: [], metrics: { count: 0, unlinked: 0 } },
+        { account: { auth_status: "not_connected" }, token: {}, config: { ready_for_qr_login: false, missing: [] } }
+      ]);
+
+    samplesRequest.catch(() => undefined);
+    historyBaselinesRequest.catch(() => undefined);
+    accountBaselinesRequest.catch(() => undefined);
+    accountInsightsRequest.catch(() => undefined);
+    douyinRequest.catch(() => undefined);
+
+    try {
+      await learningDatasetsRequest;
+    } catch (error) {
+      if (requestSeq !== feedbackLoadSeq) return;
+      state.learningDatasets = [];
+      state.historicalSummary = null;
+      failModule("feedback", error, "研究数据集暂不可用");
+    }
+    if (requestSeq !== feedbackLoadSeq) return;
+    feedbackLoadKey = currentFeedbackLoadKey();
+
+    let historicalSummary: HistoricalSampleSummary | null = state.historicalSummary;
     let historyBaselines: DouyinHistoryBaselines | null = null;
 
     try {
-      const [samples, summary] = await Promise.all([
-        api<{ training_samples?: TrainingSample[] }>(`/training-samples?account_id=${accountQuery}&limit=50`),
-        api<HistoricalSampleSummary>(`/learning/historical-samples/summary?account_id=${accountQuery}`)
-      ]);
+      const samples = await samplesRequest;
+      if (!historicalSummary) {
+        historicalSummary = await api<HistoricalSampleSummary>(`/learning/historical-samples/summary?account_id=${accountQuery}`);
+      }
       if (requestSeq !== feedbackLoadSeq) return;
       state.trainingSamples = samples.training_samples || [];
-      state.historicalSummary = summary || null;
-      historicalSummary = summary || null;
+      state.historicalSummary = historicalSummary;
       finishModule("feedback");
     } catch (error) {
       if (requestSeq !== feedbackLoadSeq) return;
       state.trainingSamples = [];
-      state.historicalSummary = null;
       failModule("feedback", error, "研究样本摘要暂不可用");
     }
 
     try {
-      const historyDataset = dataset === "all" ? "" : dataset;
-      historyBaselines = await api<DouyinHistoryBaselines>(`/learning/douyin-history/baselines?account_id=${accountQuery}&dataset_id=${encodeURIComponent(historyDataset)}&min_count=1&limit=80`);
-      if (requestSeq !== feedbackLoadSeq) return;
-      state.historyBaselines = historyBaselines || null;
-
-      const baselines = account
-        ? await api<{ baselines?: BaselineRow[] }>(`/accounts/${encodeURIComponent(account)}/baselines`)
-        : { baselines: [] };
-      if (requestSeq !== feedbackLoadSeq) return;
-      const insights = account
-        ? await api<AccountInsights>(`/accounts/${encodeURIComponent(account)}/insights`)
-        : { sample_count: historyBaselines.sample_count || historicalSummary?.sample_count || 0 };
-      if (requestSeq !== feedbackLoadSeq) return;
-      state.baselines = baselines.baselines || [];
-      state.accountInsights = insights || null;
-
-      const [clock, backtests, prototypes, calibration, materialGold, materialConfusion, materialEvidence] = await Promise.allSettled([
-        api<InterestClockResult>(`/accounts/${encodeURIComponent(accountPath)}/interest-clock?limit=5`),
-        api<BacktestList>(`/learning/backtest?account_id=${accountQuery}&limit=3`),
-        api<PrototypeBankResult>(`/accounts/${encodeURIComponent(accountPath)}/prototypes?limit=5&source=visible_capture&dataset_id=${encodeURIComponent(dataset)}`),
-        api<SemanticCalibrationQueue>(calibrationQueuePath(8)),
-        api<MaterialGoldQueue>(materialGoldQueuePath(6)),
-        api<MaterialConfusionQueue>(materialConfusionQueuePath(80)),
-        api<MaterialEvidenceStatus>(materialEvidenceStatusPath(80))
+      const [historyResult, baselines, insights, evaluations] = await Promise.all([
+        historyBaselinesRequest,
+        accountBaselinesRequest,
+        accountInsightsRequest,
+        evaluationRequest
       ]);
       if (requestSeq !== feedbackLoadSeq) return;
+      historyBaselines = historyResult;
+      state.historyBaselines = historyBaselines || null;
+      state.baselines = baselines.baselines || [];
+      state.accountInsights = insights || { sample_count: historyBaselines.sample_count || historicalSummary?.sample_count || 0 };
+
+      const [clock, backtests, prototypes] = evaluations;
       state.interestClock = clock.status === "fulfilled" ? clock.value || null : null;
       state.backtestReports = backtests.status === "fulfilled" ? backtests.value.reports || [] : [];
       state.prototypeBank = prototypes.status === "fulfilled" ? prototypes.value || null : null;
-      state.semanticCalibrationQueue = calibration.status === "fulfilled" ? normalizeCalibrationQueue(calibration.value) : null;
-      syncCalibrationDrafts(calibrationSamples(state.semanticCalibrationQueue));
-      state.materialGoldQueue = materialGold.status === "fulfilled" ? materialGold.value || null : null;
-      syncMaterialGoldDrafts(state.materialGoldQueue?.samples || []);
-      state.materialConfusionQueue = materialConfusion.status === "fulfilled" ? materialConfusion.value || null : null;
-      state.materialEvidenceStatus = materialEvidence.status === "fulfilled" ? materialEvidence.value || null : null;
-      const rejected = [clock, backtests, prototypes, calibration, materialGold, materialConfusion, materialEvidence].find(result => result.status === "rejected");
+      const rejected = [clock, backtests, prototypes].find(result => result.status === "rejected");
       if (rejected && rejected.status === "rejected") {
         state.learningResult = `部分研究评估暂不可用：${errorText(rejected.reason, "接口失败")}`;
         failModule("history", rejected.reason, "部分研究评估暂不可用");
@@ -670,22 +763,12 @@ export function useDashboard(): DashboardStore {
       state.interestClock = null;
       state.backtestReports = [];
       state.prototypeBank = null;
-      state.semanticCalibrationQueue = null;
-      state.materialGoldQueue = null;
-      state.materialConfusionQueue = null;
-      state.materialEvidenceStatus = null;
       state.learningResult = error instanceof Error ? `学习评估暂不可用：${error.message}` : "学习评估暂不可用";
       failModule("history", error, "历史先验与回测暂不可用");
     }
 
     try {
-      const douyin = account
-        ? await api<DouyinSummary>(`/platform/douyin/summary?account_id=${encodeURIComponent(account)}`)
-        : { mappings: [], runs: [], metrics: { count: 0, unlinked: 0 } };
-      if (requestSeq !== feedbackLoadSeq) return;
-      const oauth = account
-        ? await api<DouyinOAuthStatus>(`/platform/douyin/oauth/status?account_id=${encodeURIComponent(account)}`)
-        : { account: { auth_status: "not_connected" }, token: {}, config: { ready_for_qr_login: false, missing: [] } };
+      const [douyin, oauth] = await douyinRequest;
       if (requestSeq !== feedbackLoadSeq) return;
       state.douyinSummary = douyin || null;
       state.douyinOAuth = oauth || null;
@@ -742,6 +825,17 @@ export function useDashboard(): DashboardStore {
     params.set("limit", String(limit));
     params.set("include_reviewed", "true");
     return `/learning/material-evidence/status?${params.toString()}`;
+  }
+
+  function visualWindowStatusPath(limit = 60, summaryOnly = false): string {
+    const params = new URLSearchParams();
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    if (account) params.set("account_id", account);
+    if (dataset) params.set("dataset_id", dataset);
+    params.set("limit", String(limit));
+    if (summaryOnly) params.set("summary_only", "true");
+    return `/learning/visual-window-scout/status?${params.toString()}`;
   }
 
   function normalizeCalibrationQueue(queue: SemanticCalibrationQueue | null | undefined): SemanticCalibrationQueue | null {
@@ -808,6 +902,26 @@ export function useDashboard(): DashboardStore {
     state.materialGoldDrafts = next;
   }
 
+  function materialWindowDraftFromSample(sample: VisualWindowReviewSample): MaterialWindowDraft {
+    const annotation = sample.annotation || {};
+    return {
+      scene_form: textValue(annotation.scene_form || sample.predicted_scene_form) || "unknown",
+      program_context_mode: textValue(annotation.program_context_mode) || "unknown",
+      selection_quality: textValue(annotation.selection_quality) || "uncertain",
+      review_note: textValue(annotation.review_note) || "人工确认视觉候选窗"
+    };
+  }
+
+  function syncMaterialWindowDrafts(samples: VisualWindowReviewSample[]): void {
+    const next: Record<string, MaterialWindowDraft> = {};
+    for (const sample of samples) {
+      const key = String(sample.window_id || "");
+      if (!key) continue;
+      next[key] = state.materialWindowDrafts[key] || materialWindowDraftFromSample(sample);
+    }
+    state.materialWindowDrafts = next;
+  }
+
   function calibrationQueueCounts(queue: SemanticCalibrationQueue | null | undefined): { visible: number; total: number; pending: number; saved: number } {
     const samples = calibrationSamples(queue);
     const summary = queue?.batch_summary && typeof queue.batch_summary === "object"
@@ -834,8 +948,12 @@ export function useDashboard(): DashboardStore {
   }
 
   async function loadLearningDatasets(): Promise<void> {
-    const result = await api<LearningDatasetList>("/learning/datasets?account_id=");
+    const params = new URLSearchParams();
+    params.set("account_id", state.feedbackAccount.trim());
+    params.set("compact", "true");
+    const result = await api<LearningDatasetList>(`/learning/datasets?${params.toString()}`);
     state.learningDatasets = result.datasets || [];
+    state.historicalSummary = result.historical_summary || null;
     if (!state.feedbackDataset && state.learningDatasets.length) {
       state.feedbackDataset = state.learningDatasets[0].id || "all";
     }
@@ -884,7 +1002,7 @@ export function useDashboard(): DashboardStore {
         return;
       }
       setView("candidates");
-      scrollToPanel("candidates");
+      scrollToPanel("workbench");
       if (!state.suggestions.length) await loadSuggestions(state.selectedVideoId, false);
       return;
     }
@@ -909,7 +1027,7 @@ export function useDashboard(): DashboardStore {
         return;
       }
       setView("candidates");
-      scrollToPanel("candidates");
+      scrollToPanel("workbench");
       if (!state.suggestions.length) await loadSuggestions(state.selectedVideoId, false);
       return;
     }
@@ -1033,8 +1151,13 @@ export function useDashboard(): DashboardStore {
     const path = `/feedback/rebuild${account ? `?account_id=${encodeURIComponent(account)}` : ""}`;
     const result = await api<{ baselines?: number; training_samples?: number }>(path, { method: "POST" });
     state.metricsResult = `基线 ${result.baselines || 0} 条，训练样本 ${result.training_samples || 0} 条`;
+    calibrationWorkspaceKey = "";
+    clearCalibrationWorkspace();
     await loadStats();
     await loadFeedback();
+    if (state.feedbackSection === "calibration") {
+      await loadCalibrationWorkspace(false);
+    }
     toast("反馈状态已重算");
   }
 
@@ -1217,6 +1340,58 @@ export function useDashboard(): DashboardStore {
     toast("Qwen embedding 索引与研究回测已生成");
   }
 
+  function loadCalibrationWorkspace(notify = false): Promise<void> {
+    const requestedKey = currentCalibrationScopeKey();
+    if (calibrationWorkspaceKey === requestedKey && hasCalibrationWorkspaceData()) {
+      return Promise.resolve();
+    }
+    if (calibrationLoadPromise && calibrationLoadKey === requestedKey) {
+      return calibrationLoadPromise;
+    }
+
+    calibrationLoadKey = requestedKey;
+    const request = performCalibrationWorkspaceLoad(requestedKey, notify);
+    const trackedRequest = request.finally(() => {
+      if (calibrationLoadPromise === trackedRequest) {
+        calibrationLoadPromise = null;
+      }
+    });
+    calibrationLoadPromise = trackedRequest;
+    return trackedRequest;
+  }
+
+  async function performCalibrationWorkspaceLoad(requestedKey: string, notify: boolean): Promise<void> {
+    beginModule("history");
+    const [calibration, materialGold, materialConfusion, materialEvidence, visualWindows] = await Promise.allSettled([
+      api<SemanticCalibrationQueue>(calibrationQueuePath(8)),
+      api<MaterialGoldQueue>(materialGoldQueuePath(6)),
+      api<MaterialConfusionQueue>(materialConfusionQueuePath(80)),
+      api<MaterialEvidenceStatus>(materialEvidenceStatusPath(80)),
+      api<VisualWindowScoutStatus>(visualWindowStatusPath(60, true))
+    ]);
+    if (requestedKey !== currentCalibrationScopeKey()) return;
+
+    state.semanticCalibrationQueue = calibration.status === "fulfilled" ? normalizeCalibrationQueue(calibration.value) : null;
+    syncCalibrationDrafts(calibrationSamples(state.semanticCalibrationQueue));
+    state.materialGoldQueue = materialGold.status === "fulfilled" ? materialGold.value || null : null;
+    syncMaterialGoldDrafts(state.materialGoldQueue?.samples || []);
+    state.materialConfusionQueue = materialConfusion.status === "fulfilled" ? materialConfusion.value || null : null;
+    state.materialEvidenceStatus = materialEvidence.status === "fulfilled" ? materialEvidence.value || null : null;
+    state.visualWindowScoutStatus = visualWindows.status === "fulfilled" ? visualWindows.value || null : null;
+    syncMaterialWindowDrafts(state.visualWindowScoutStatus?.review_queue?.samples || []);
+    calibrationWorkspaceKey = requestedKey;
+
+    const rejected = [calibration, materialGold, materialConfusion, materialEvidence, visualWindows]
+      .find(result => result.status === "rejected");
+    if (rejected && rejected.status === "rejected") {
+      state.learningResult = `部分校准数据暂不可用：${errorText(rejected.reason, "接口失败")}`;
+      failModule("history", rejected.reason, "部分校准数据暂不可用");
+      return;
+    }
+    finishModule("history");
+    if (notify) toast("评测与校准数据已加载");
+  }
+
   async function loadMaterialGoldQueue(notify = true): Promise<void> {
     beginModule("history");
     try {
@@ -1295,9 +1470,79 @@ export function useDashboard(): DashboardStore {
     }));
     state.materialResolverReport = report;
     const summary = report.summary || {};
-    state.learningResult = `Resolver Shadow / 证据 ${Number(summary.evidence_ready_count || 0)} / 分歧 ${Number(summary.disagreement_count || 0)} / Gold 证据 ${Number(summary.cached_gold_evaluable_count || 0)}/${Number(summary.gold_evaluable_count || 0)} / ${report.status || "research_only"}`;
+    state.learningResult = `Resolver Shadow / Gold 入队 ${percentText(Number(summary.gold_queue_coverage || 0))} / 证据 ${percentText(Number(summary.gold_evidence_coverage || 0))} / unknown 弃权 ${percentText(Number(summary.unknown_abstention_rate || 0))} / ${report.status || "research_only"}`;
     await loadMaterialEvidenceStatus(false);
     toast("D10-B Resolver Shadow 已生成");
+  }
+
+  async function loadVisualWindowScoutStatus(notify = true): Promise<void> {
+    beginModule("history");
+    try {
+      const status = await api<VisualWindowScoutStatus>(visualWindowStatusPath(60));
+      state.visualWindowScoutStatus = status || null;
+      syncMaterialWindowDrafts(status.review_queue?.samples || []);
+      const readiness = status.media_readiness || {};
+      const annotations = status.annotation_summary || {};
+      state.learningResult = `D11 视觉候选窗：可扫描 ${Number(readiness.eligible_count || 0)} / 窗口 Gold ${Number(annotations.confirmed_count || 0)} / ${status.status || "not_started"}`;
+      finishModule("history");
+      if (notify) toast("D11 视觉候选窗状态已刷新");
+    } catch (error) {
+      failModule("history", error, "D11 视觉候选窗状态刷新失败");
+      throw error;
+    }
+  }
+
+  async function runVisualWindowScout(): Promise<void> {
+    const account = state.feedbackAccount.trim();
+    const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const report = await api<VisualWindowScoutReport>("/learning/visual-window-scout/build", jsonBody({
+      account_id: account || null,
+      dataset_id: dataset || null,
+      limit: 5,
+      window_seconds: 15,
+      stride_seconds: 5,
+      max_windows_per_sample: 3,
+      scan_scenes: true,
+      load_model: false,
+      force: false
+    }));
+    state.visualWindowScoutReport = report;
+    await loadVisualWindowScoutStatus(false);
+    state.learningResult = `D11 扫描 ${Number(report.sample_count || 0)} 条 / ${Number(report.candidate_count || 0)} 个候选窗 / embedding ${Number(report.embedding_ready_count || 0)} / ${report.status || "research_only"}`;
+    toast("D11 五条视觉窗口扫描已完成");
+  }
+
+  async function saveMaterialWindowAnnotation(sampleId: string, windowId: string): Promise<void> {
+    const sample = (state.visualWindowScoutStatus?.review_queue?.samples || []).find(item => String(item.window_id || "") === windowId);
+    const draft = state.materialWindowDrafts[windowId];
+    if (!sample || !draft) {
+      toast("未找到可保存的视觉候选窗");
+      return;
+    }
+    await api(`/learning/material-window-gold/${encodeURIComponent(sampleId)}`, {
+      ...jsonBody({
+        start_seconds: Number(sample.start_seconds || 0),
+        end_seconds: Number(sample.end_seconds || 0),
+        scene_form: draft.scene_form,
+        program_context_mode: draft.program_context_mode,
+        selection_quality: draft.selection_quality,
+        review_note: draft.review_note,
+        operator: "workbench"
+      }),
+      method: "PATCH"
+    });
+    await loadVisualWindowScoutStatus(false);
+    state.learningResult = `D11 窗口 Gold 已保存 / ${draft.scene_form} / ${draft.selection_quality}`;
+    toast("视觉候选窗标注已保存");
+  }
+
+  async function runVisualWindowExperiment(): Promise<void> {
+    const report = await api<VisualWindowExperiment>("/learning/visual-window-scout/experiment", jsonBody({}));
+    state.visualWindowExperiment = report;
+    const gate = report.promotion_gate && typeof report.promotion_gate === "object" ? report.promotion_gate as Record<string, unknown> : {};
+    const observed = gate.observed && typeof gate.observed === "object" ? gate.observed as Record<string, unknown> : {};
+    state.learningResult = `D11 冻结对比 / Fusion Recall@2 ${percentText(Number(observed.fusion_recall_at_2 || 0))} / 样本 ${Number(observed.evaluated_samples || 0)} / ${report.status || "research_only"}`;
+    toast("D11 fixed/text/visual/fusion 对比已生成");
   }
 
   async function saveMaterialGoldAnnotation(sampleId: string): Promise<void> {
@@ -1628,11 +1873,16 @@ export function useDashboard(): DashboardStore {
     runMultimodalValidation,
     runMultimodalFeatureExperiment,
     runQwenEmbeddingResearch,
+    loadCalibrationWorkspace,
     loadMaterialGoldQueue,
     loadMaterialConfusionQueue,
     loadMaterialEvidenceStatus,
     runMaterialEvidenceSmoke,
     runMaterialResolverShadow,
+    loadVisualWindowScoutStatus,
+    runVisualWindowScout,
+    runVisualWindowExperiment,
+    saveMaterialWindowAnnotation,
     saveMaterialGoldAnnotation,
     reopenMaterialGoldAnnotation,
     runMaterialCalibrationReplay,

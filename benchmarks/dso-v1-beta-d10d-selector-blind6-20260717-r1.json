@@ -1,0 +1,94 @@
+{
+  "contract_version": "material_window_scout.blind_manifest.v1",
+  "benchmark_id": "dso-v1-beta-d10d-selector-blind6-20260717-r1",
+  "locked_at": "2026-07-17T02:10:00+08:00",
+  "cue_set_version": "material_window_scout.cues.v1",
+  "cue_set_sha256": "5733cac2a691d3a5b51213d575a9b9be2fa0469844e24a8420c6735255ab4831",
+  "query": {
+    "window_seconds": 15.0,
+    "stride_seconds": 5.0,
+    "ocr_interval_seconds": 15.0,
+    "max_ocr_frames": 40,
+    "max_windows": 2,
+    "asr_model": "small"
+  },
+  "policy": {
+    "selector_only": true,
+    "no_cue_edits_during_run": true,
+    "no_remote_model": true,
+    "no_gold_rewrite": true,
+    "no_main_semantic_label_write": true,
+    "pilot_is_excluded_from_blind_gate": true,
+    "interpretation": "This run measures window-selection usefulness, not material classification accuracy."
+  },
+  "acceptance": {
+    "minimum_useful_blind_samples": 4,
+    "blind_sample_count": 5,
+    "useful_proxy": "status=ready; adaptive mean information >= fixed mean + 0.03; at least one selected window has pair relevance >= 0.50",
+    "next_scale": "Expand to a 30-sample frozen blind set only after the selector proxy gate passes and manual review confirms the windows are genuinely useful."
+  },
+  "samples": [
+    {
+      "sample_id": "hcap_71dfd854b0674b3f",
+      "evaluation_role": "pilot",
+      "account_id": "singer_yuhang",
+      "platform_item_id": "7523437378612448521",
+      "confusion_pair": "reaction_vocal_teaching",
+      "gold_material_type": "reaction",
+      "title": "声乐专业老师带你看周震南张碧晨《马》",
+      "video_path": "data/douyin_media_assets/singer_yuhang/beta_d1_20260702T130513/videos/7523437378612448521.mp4",
+      "report_path": "outputs/material_window_scout/smoke_reaction_vocal_teaching_1.json",
+      "allow_legacy_report": true
+    },
+    {
+      "sample_id": "hcap_f85b941dc697491c",
+      "evaluation_role": "blind_eval",
+      "account_id": "geshou2026",
+      "platform_item_id": "7653095567656658854",
+      "confusion_pair": "performance_program_context",
+      "gold_material_type": "performance_highlight",
+      "title": "侯明昊《歌手2026》第五期舞台",
+      "video_path": "data/douyin_media_assets/geshou2026/20260629_test_v1/videos/7653095567656658854.mp4"
+    },
+    {
+      "sample_id": "hcap_f01521d2e9be4a7f",
+      "evaluation_role": "blind_eval",
+      "account_id": "hukan_music",
+      "platform_item_id": "7539711136145411368",
+      "confusion_pair": "compilation_entertainment_news",
+      "gold_material_type": "entertainment_news",
+      "title": "近期音乐圈热门事件盘点：《年轮》原唱争夺战",
+      "video_path": "data/douyin_media_assets/hukan_music/beta_d6_omni_eval_fill2/videos/7539711136145411368.mp4"
+    },
+    {
+      "sample_id": "hcap_4b52766eca74449d",
+      "evaluation_role": "blind_eval",
+      "account_id": "yuhuan",
+      "platform_item_id": "7653511653090310758",
+      "confusion_pair": "behind_the_scenes_performance",
+      "gold_material_type": "behind_the_scenes",
+      "title": "张靓颖《锁》彩排直拍",
+      "video_path": "data/douyin_media_assets/yuhuan/beta_d4_to50_yuhuan_20260706_233446/videos/7653511653090310758.mp4"
+    },
+    {
+      "sample_id": "hcap_2f48322b7bc64f50",
+      "evaluation_role": "blind_eval",
+      "account_id": "hukan_music",
+      "platform_item_id": "7633047391599381806",
+      "confusion_pair": "reaction_compilation",
+      "gold_material_type": "compilation",
+      "title": "乘风2026二公舞台盘点（下篇）",
+      "video_path": "data/douyin_media_assets/hukan_music/beta_d1_20260703T121207/videos/7633047391599381806.mp4"
+    },
+    {
+      "sample_id": "hcap_ae71860e8b5a4028",
+      "evaluation_role": "blind_eval",
+      "account_id": "hukan_music",
+      "platform_item_id": "7474394671553219894",
+      "confusion_pair": "cross_domain_material",
+      "gold_material_type": "commentary",
+      "title": "华语音乐得了一种叫做抄袭的病",
+      "video_path": "data/douyin_media_assets/hukan_music/beta_d6_omni_eval_fill2/videos/7474394671553219894.mp4"
+    }
+  ]
+}

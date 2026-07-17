@@ -66,7 +66,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(asset_response.status_code, 200)
         self.assertIn("javascript", asset_response.headers["content-type"])
         self.assertIn("研究学习", asset_response.text)
-        self.assertIn("研究样本、历史先验、校准回测与平台账号", asset_response.text)
+        self.assertIn("样本与标注、评测校准、平台连接和模型环境", asset_response.text)
         self.assertIn("semantic-calibration-queue", asset_response.text)
         self.assertIn("memory-build-btn", asset_response.text)
         self.assertIn("backtest-btn", asset_response.text)
@@ -157,6 +157,54 @@ class WebApiTest(unittest.TestCase):
         self.assertFalse(status["production_weight"])
         self.assertFalse(batch["writes_main_semantic_labels"])
         self.assertFalse(resolver["rewrites_existing_gold"])
+
+    def test_visual_window_scout_endpoints_remain_research_only(self) -> None:
+        status_payload = {
+            "contract_version": "material_visual_window_scout.v1",
+            "status": "ready_for_scan",
+            "media_readiness": {"eligible_count": 26, "requires_audio": False},
+            "production_weight": False,
+        }
+        build_payload = {
+            "contract_version": "material_visual_window_scout.v1",
+            "status": "ready_for_window_gold_review",
+            "sample_count": 5,
+            "candidate_count": 60,
+            "calls_omni": False,
+            "production_weight": False,
+        }
+        experiment_payload = {
+            "contract_version": "material_visual_window_scout.v1",
+            "status": "research_only",
+            "strategy_comparison": {"fusion": {"recall_at_2": 0.6}},
+            "production_weight": False,
+        }
+        annotation_payload = {
+            "contract_version": "material_visual_window_scout.v1",
+            "status": "confirmed",
+            "writes_main_semantic_labels": False,
+            "production_weight": False,
+        }
+        with patch("dso.api.main.visual_window_scout_status", return_value=status_payload) as status_mock, patch(
+            "dso.api.main.build_visual_window_scout", return_value=build_payload
+        ), patch("dso.api.main.run_visual_window_experiment", return_value=experiment_payload), patch(
+            "dso.api.main.update_material_window_annotation", return_value=annotation_payload
+        ):
+            status = self.client.get("/learning/visual-window-scout/status?limit=60&summary_only=true").json()
+            build = self.client.post("/learning/visual-window-scout/build", json={"limit": 5}).json()
+            experiment = self.client.post("/learning/visual-window-scout/experiment").json()
+            annotation = self.client.patch(
+                "/learning/material-window-gold/sample_1",
+                json={"start_seconds": 0, "end_seconds": 15, "scene_form": "rehearsal"},
+            ).json()
+
+        self.assertFalse(status["media_readiness"]["requires_audio"])
+        self.assertEqual(status["media_readiness"]["eligible_count"], 26)
+        status_mock.assert_called_once_with(account_id=None, dataset_id=None, limit=60, summary_only=True)
+        self.assertFalse(build["calls_omni"])
+        self.assertEqual(experiment["status"], "research_only")
+        self.assertFalse(annotation["writes_main_semantic_labels"])
+        self.assertFalse(annotation["production_weight"])
 
     def test_quality_endpoint_returns_read_only_gate(self) -> None:
         segment = _insert_segment()
@@ -512,7 +560,7 @@ class WebApiTest(unittest.TestCase):
             "/learning/douyin-history/baselines?account_id=sixuweilive&dataset_id=sixuweilive_20260628&min_count=1"
         ).json()
         summary = self.client.get("/learning/historical-samples/summary?account_id=sixuweilive").json()
-        datasets = self.client.get("/learning/datasets?account_id=sixuweilive").json()
+        datasets = self.client.get("/learning/datasets?account_id=sixuweilive&compact=true").json()
         coverage = self.client.get(
             "/learning/research/coverage?account_id=sixuweilive&dataset_id=sixuweilive_20260628"
         ).json()
@@ -637,6 +685,9 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(summary["metric_coverage"]["shares"]["rate"], 1.0)
         self.assertEqual(summary["play_missing_rate"], 1.0)
         self.assertEqual(datasets["stored_sample_count"], 2)
+        self.assertIn("historical_summary", datasets)
+        self.assertNotIn("historical_summary", dataset)
+        self.assertNotIn("duplicate_item_groups", datasets["historical_summary"])
         self.assertEqual(dataset["stored_sample_count"], 2)
         self.assertEqual(dataset["trainable_sample_count"], 2)
         self.assertEqual(dataset["play_missing_count"], 2)
@@ -647,6 +698,8 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(coverage["coverage"]["content_category"]["rate"], 1.0)
         self.assertEqual(baselines["sample_count"], 2)
         self.assertTrue(any(item["dimension"] == "program_name" for item in baselines["top_signals"]))
+        self.assertNotIn("groups", baselines)
+        self.assertGreaterEqual(baselines["group_count"], len(baselines["top_signals"]))
         self.assertEqual(queue["filters"]["label"], "high")
         self.assertEqual(queue["filters"]["strategy"], "research_ranker_v2_4")
         self.assertIn("suggested_fields", queue["samples"][0])
@@ -663,7 +716,7 @@ class WebApiTest(unittest.TestCase):
         self.assertTrue(any(item["sample_id"] == sample_id for item in material_queue["recently_confirmed_samples"]))
         self.assertFalse(material_taxonomy["rewrites_source_labels"])
         self.assertNotIn("program_context", material_taxonomy["material_form_types"])
-        self.assertEqual(material_confusions["queue_version"], "material_confusion_queue.v1")
+        self.assertEqual(material_confusions["queue_version"], "material_confusion_queue.v2")
         self.assertFalse(material_confusions["rewrites_existing_gold"])
         self.assertEqual(material_reopened["status"], "reopened")
         self.assertTrue(any(item["id"] == sample_id for item in reopened_queue["samples"]))

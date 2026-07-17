@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from statistics import median
 from typing import Any
 
 from dso.accounts import account_metadata, dataset_display_name
 from dso.collectors.douyin_classification import classify_published_work
+from dso.config import ensure_data_dirs
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
 from dso.learning.prototypes import (
     _capture_paths,
@@ -313,6 +316,55 @@ def douyin_history_baselines(
     dataset_id: str | None = None,
     min_count: int = 2,
     limit: int = 80,
+    include_groups: bool = True,
+) -> dict:
+    settings = ensure_data_dirs()
+    try:
+        stat = settings.db_path.stat()
+        revision = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        revision = (0, 0)
+    result = _douyin_history_baselines_cached(
+        str(settings.root),
+        account_id or "",
+        dataset_id or "",
+        max(1, int(min_count or 1)),
+        max(1, int(limit or 80)),
+        bool(include_groups),
+        revision[0],
+        revision[1],
+    )
+    return deepcopy(result)
+
+
+@lru_cache(maxsize=128)
+def _douyin_history_baselines_cached(
+    root: str,
+    account_id: str,
+    dataset_id: str,
+    min_count: int,
+    limit: int,
+    include_groups: bool,
+    db_mtime_ns: int,
+    db_size: int,
+) -> dict:
+    del root, db_mtime_ns, db_size
+    return _douyin_history_baselines_uncached(
+        account_id or None,
+        dataset_id=dataset_id or None,
+        min_count=min_count,
+        limit=limit,
+        include_groups=include_groups,
+    )
+
+
+def _douyin_history_baselines_uncached(
+    account_id: str | None = None,
+    *,
+    dataset_id: str | None = None,
+    min_count: int = 2,
+    limit: int = 80,
+    include_groups: bool = True,
 ) -> dict:
     rows = _fetch_douyin_history_rows(account_id=account_id, dataset_id=dataset_id, limit=0)
     if not rows:
@@ -354,7 +406,7 @@ def douyin_history_baselines(
     )
     rewards = [_safe_float(row.get("reward_proxy")) for row in rows]
     label_counts = Counter(row.get("performance_label") or "unlabeled" for row in rows)
-    return {
+    result = {
         "contract_version": DOUYIN_HISTORY_VERSION,
         "status": "ready",
         "account_id": account_id or "all",
@@ -365,9 +417,12 @@ def douyin_history_baselines(
         "median_reward": round(median(rewards), 4) if rewards else 0,
         "p75_reward": _percentile(rewards, 0.75),
         "top_signals": group_rows[: max(1, int(limit or 80))],
-        "groups": group_rows,
+        "group_count": len(group_rows),
         "generated_at": utc_now(),
     }
+    if include_groups:
+        result["groups"] = group_rows
+    return result
 
 
 def research_field_coverage(account_id: str | None = None, *, dataset_id: str | None = None) -> dict:
@@ -1007,6 +1062,33 @@ def list_historical_samples(account_id: str | None = "main", *, dataset_id: str 
 
 
 def historical_sample_summary(account_id: str | None = "main") -> dict:
+    settings = ensure_data_dirs()
+    try:
+        stat = settings.db_path.stat()
+        revision = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        revision = (0, 0)
+    result = _historical_sample_summary_cached(
+        str(settings.root),
+        account_id or "",
+        revision[0],
+        revision[1],
+    )
+    return deepcopy(result)
+
+
+@lru_cache(maxsize=64)
+def _historical_sample_summary_cached(
+    root: str,
+    account_id: str,
+    db_mtime_ns: int,
+    db_size: int,
+) -> dict:
+    del root, db_mtime_ns, db_size
+    return _historical_sample_summary_uncached(account_id or None)
+
+
+def _historical_sample_summary_uncached(account_id: str | None = "main") -> dict:
     where = ""
     params: list[Any] = []
     if account_id:
@@ -1289,7 +1371,7 @@ def _is_mock_history_row(row: dict) -> bool:
     source_kind = _text(row.get("source_kind")).lower()
     if "mock" in source_kind:
         return True
-    raw = _json(row.get("raw_json"), {})
+    raw = _history_raw_json(row)
     if isinstance(raw, dict):
         raw_source = _text(raw.get("sample_source") or raw.get("source") or raw.get("source_kind")).lower()
         return raw_source == "mock"
@@ -1301,7 +1383,7 @@ def _has_valid_history_metric(row: dict, metric: str) -> bool:
 
 
 def _is_play_missing(row: dict) -> bool:
-    raw = _json(row.get("raw_json"), {})
+    raw = _history_raw_json(row)
     if isinstance(raw, dict):
         availability = raw.get("metric_availability")
         if isinstance(availability, dict) and "views" in availability:
@@ -1321,6 +1403,17 @@ def _is_play_missing(row: dict) -> bool:
                 ]
             )
     return _safe_int(row.get("views")) <= 0
+
+
+def _history_raw_json(row: dict) -> dict:
+    cache_key = "_summary_raw_json"
+    cached = row.get(cache_key)
+    if isinstance(cached, dict):
+        return cached
+    parsed = _json(row.get("raw_json"), {})
+    result = parsed if isinstance(parsed, dict) else {}
+    row[cache_key] = result
+    return result
 
 
 def _duplicate_item_groups(rows: list[dict]) -> list[dict]:
@@ -1380,12 +1473,23 @@ def _source_lineage(rows: list[dict]) -> dict:
 def _source_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
+    resolved = path.resolve()
+    stat = resolved.stat()
+    return [dict(row) for row in _source_rows_cached(str(resolved), stat.st_mtime_ns, stat.st_size)]
+
+
+@lru_cache(maxsize=256)
+def _source_rows_cached(path_text: str, mtime_ns: int, size: int) -> tuple[dict, ...]:
+    del mtime_ns, size
+    path = Path(path_text)
     if path.suffix.lower() == ".json":
-        return _load_json_sequence(path)
-    try:
-        return _read_rows(path)
-    except Exception:
-        return []
+        rows = _load_json_sequence(path)
+    else:
+        try:
+            rows = _read_rows(path)
+        except Exception:
+            rows = []
+    return tuple(dict(row) for row in rows)
 
 
 def _source_row_identity(row: dict) -> str:

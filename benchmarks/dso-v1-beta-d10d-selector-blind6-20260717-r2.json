@@ -1,0 +1,131 @@
+{
+  "contract_version": "material_window_scout.blind_manifest.v1",
+  "benchmark_id": "dso-v1-beta-d10d-selector-blind6-20260717-r2",
+  "supersedes_for_future_runs": "dso-v1-beta-d10d-selector-blind6-20260717-r1",
+  "locked_at": "2026-07-17T04:20:00+08:00",
+  "cue_set_version": "material_window_scout.cues.v1",
+  "cue_set_sha256": "5733cac2a691d3a5b51213d575a9b9be2fa0469844e24a8420c6735255ab4831",
+  "query": {
+    "window_seconds": 15.0,
+    "stride_seconds": 5.0,
+    "ocr_interval_seconds": 15.0,
+    "max_ocr_frames": 40,
+    "max_windows": 2,
+    "asr_model": "small"
+  },
+  "policy": {
+    "selector_only": true,
+    "no_cue_edits_during_run": true,
+    "no_remote_model": true,
+    "no_gold_rewrite": true,
+    "no_main_semantic_label_write": true,
+    "pilot_is_excluded_from_blind_gate": true,
+    "media_gate": "confirmed Gold; local video; embedded/external audio; actual duration within 15% of historical duration; manual identity review passed",
+    "pair_coverage_tradeoff": "No media-ready confirmed Gold existed for compilation_entertainment_news, reaction_compilation, or cross_domain_material. Replacements use media-ready Gold from supported pairs and must not be interpreted as cross-pair accuracy evidence.",
+    "interpretation": "This run measures window-selection usefulness on media-ready samples, not material classification accuracy."
+  },
+  "acceptance": {
+    "minimum_useful_blind_samples": 4,
+    "blind_sample_count": 5,
+    "useful_proxy": "status=ready; adaptive mean information >= fixed mean + 0.03; at least one selected window has pair relevance >= 0.50",
+    "next_scale": "Expand only after the selector proxy gate passes and manual review confirms the windows are genuinely useful."
+  },
+  "replacement_summary": {
+    "replaced_count": 3,
+    "unchanged_blind_count": 2,
+    "media_audit_report": "outputs/material_window_scout/gold_media_audit_20260717.json",
+    "confirmed_gold_count": 60,
+    "media_ready_count": 26,
+    "same_pair_replacement_available": false,
+    "replacements": [
+      {
+        "removed_sample_id": "hcap_f01521d2e9be4a7f",
+        "removed_reason": "audio_missing",
+        "replacement_sample_id": "hcap_6abef71f4d374907",
+        "coverage_change": "compilation_entertainment_news -> reaction_vocal_teaching"
+      },
+      {
+        "removed_sample_id": "hcap_2f48322b7bc64f50",
+        "removed_reason": "audio_missing",
+        "replacement_sample_id": "hcap_bf97a6c044514441",
+        "coverage_change": "reaction_compilation -> performance_program_context"
+      },
+      {
+        "removed_sample_id": "hcap_ae71860e8b5a4028",
+        "removed_reason": "duration_mismatch_and_content_identity_mismatch",
+        "replacement_sample_id": "hcap_b952143fa7bf46f9",
+        "coverage_change": "cross_domain_material -> performance_program_context"
+      }
+    ]
+  },
+  "samples": [
+    {
+      "sample_id": "hcap_71dfd854b0674b3f",
+      "evaluation_role": "pilot",
+      "account_id": "singer_yuhang",
+      "platform_item_id": "7523437378612448521",
+      "confusion_pair": "reaction_vocal_teaching",
+      "gold_material_type": "reaction",
+      "title": "声乐专业老师带你看周震南张碧晨《马》",
+      "video_path": "data/douyin_media_assets/singer_yuhang/beta_d1_20260702T130513/videos/7523437378612448521.mp4",
+      "report_path": "outputs/material_window_scout/smoke_reaction_vocal_teaching_1.json",
+      "allow_legacy_report": true,
+      "identity_review_status": "pilot_boundary_review"
+    },
+    {
+      "sample_id": "hcap_f85b941dc697491c",
+      "evaluation_role": "blind_eval",
+      "account_id": "geshou2026",
+      "platform_item_id": "7653095567656658854",
+      "confusion_pair": "performance_program_context",
+      "gold_material_type": "performance_highlight",
+      "title": "侯明昊《歌手2026》第五期舞台",
+      "video_path": "data/douyin_media_assets/geshou2026/20260629_test_v1/videos/7653095567656658854.mp4",
+      "identity_review_status": "passed"
+    },
+    {
+      "sample_id": "hcap_4b52766eca74449d",
+      "evaluation_role": "blind_eval",
+      "account_id": "yuhuan",
+      "platform_item_id": "7653511653090310758",
+      "confusion_pair": "behind_the_scenes_performance",
+      "gold_material_type": "behind_the_scenes",
+      "title": "张靓颖《锁》彩排直拍",
+      "video_path": "data/douyin_media_assets/yuhuan/beta_d4_to50_yuhuan_20260706_233446/videos/7653511653090310758.mp4",
+      "identity_review_status": "passed"
+    },
+    {
+      "sample_id": "hcap_6abef71f4d374907",
+      "evaluation_role": "blind_eval",
+      "account_id": "dk_voice_teacher",
+      "platform_item_id": "7366208710596676904",
+      "confusion_pair": "reaction_vocal_teaching",
+      "gold_material_type": "vocal_teaching",
+      "title": "一招让你拥有邓紫棋、林俊杰的唱歌共鸣",
+      "video_path": "data/douyin_media_assets/dk_voice_teacher/beta_d6_omni_eval_fill/videos/7366208710596676904.mp4",
+      "identity_review_status": "passed"
+    },
+    {
+      "sample_id": "hcap_bf97a6c044514441",
+      "evaluation_role": "blind_eval",
+      "account_id": "geshou2026",
+      "platform_item_id": "7654581854192001518",
+      "confusion_pair": "performance_program_context",
+      "gold_material_type": "behind_the_scenes",
+      "title": "侯明昊谈歌手经历与晋级感受",
+      "video_path": "data/douyin_media_assets/geshou2026/beta_d3_to300_round2_20260706T2225/videos/7654581854192001518.mp4",
+      "identity_review_status": "passed"
+    },
+    {
+      "sample_id": "hcap_b952143fa7bf46f9",
+      "evaluation_role": "blind_eval",
+      "account_id": "yuhuan",
+      "platform_item_id": "7626700416146885942",
+      "confusion_pair": "performance_program_context",
+      "gold_material_type": "performance_clip",
+      "title": "万千惠《乘风2026》舞台直拍",
+      "video_path": "data/douyin_media_assets/yuhuan/beta_d4_to50_yuhuan_20260706_233446/videos/7626700416146885942.mp4",
+      "identity_review_status": "passed"
+    }
+  ]
+}

@@ -41,6 +41,7 @@ from dso.learning.historical_samples import (
     semantic_calibration_queue,
 )
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
+from dso.learning.material_description_experiment import run_material_description_experiment
 from dso.learning.material_evidence import run_material_evidence_batch, run_material_resolver_shadow
 from dso.learning.memory import build_text_memory_bank, calibrate_segment_history
 from dso.learning.multimodal_validation import (
@@ -645,6 +646,29 @@ def cmd_material_resolver_shadow(
         confusion_pair=confusion_pair,
         limit=limit,
         include_reviewed=include_reviewed,
+        output_path=output_path,
+    )
+
+
+def cmd_material_description_experiment(
+    account: str | None,
+    dataset: str | None,
+    limit: int,
+    window_seconds: float,
+    windows_per_sample: int,
+    run_direct: bool = True,
+    force: bool = False,
+    output_path: str | None = None,
+) -> dict:
+    init_db()
+    return run_material_description_experiment(
+        account_id=account,
+        dataset_id=dataset,
+        limit=limit,
+        window_seconds=window_seconds,
+        windows_per_sample=windows_per_sample,
+        run_direct=run_direct,
+        force=force,
         output_path=output_path,
     )
 
@@ -1395,6 +1419,30 @@ def _typer_main(typer_module: Any) -> None:
     ) -> None:
         _print(cmd_material_resolver_shadow(account, dataset, confusion_pair, limit, include_reviewed, output_path))
 
+    @app.command("material-description-experiment")
+    def material_description_experiment_command(
+        account: str | None = typer_module.Option(None, "--account"),
+        dataset: str | None = typer_module.Option(None, "--dataset"),
+        limit: int = typer_module.Option(6, "--limit"),
+        window_seconds: float = typer_module.Option(15.0, "--window-seconds"),
+        windows_per_sample: int = typer_module.Option(3, "--windows-per-sample"),
+        run_direct: bool = typer_module.Option(True, "--direct/--no-direct"),
+        force: bool = typer_module.Option(False, "--force"),
+        output_path: str | None = typer_module.Option(None, "--output-path"),
+    ) -> None:
+        _print(
+            cmd_material_description_experiment(
+                account,
+                dataset,
+                limit,
+                window_seconds,
+                windows_per_sample,
+                run_direct,
+                force,
+                output_path,
+            )
+        )
+
     @app.command("backtest-reports")
     def backtest_reports_command(
         account: str | None = typer_module.Option(None, "--account"),
@@ -1810,6 +1858,15 @@ def _argparse_main() -> None:
     material_resolver.add_argument("--include-reviewed", dest="include_reviewed", action="store_true", default=True)
     material_resolver.add_argument("--exclude-reviewed", dest="include_reviewed", action="store_false")
     material_resolver.add_argument("--output-path")
+    material_description = sub.add_parser("material-description-experiment")
+    material_description.add_argument("--account")
+    material_description.add_argument("--dataset")
+    material_description.add_argument("--limit", type=int, default=6)
+    material_description.add_argument("--window-seconds", type=float, default=15.0)
+    material_description.add_argument("--windows-per-sample", type=int, default=3)
+    material_description.add_argument("--no-direct", action="store_true")
+    material_description.add_argument("--force", action="store_true")
+    material_description.add_argument("--output-path")
     backtest_reports = sub.add_parser("backtest-reports")
     backtest_reports.add_argument("--account")
     backtest_reports.add_argument("--limit", type=int, default=10)
@@ -2097,6 +2154,19 @@ def _argparse_main() -> None:
                 args.confusion_pair,
                 args.limit,
                 args.include_reviewed,
+                args.output_path,
+            )
+        )
+    elif args.command == "material-description-experiment":
+        _print(
+            cmd_material_description_experiment(
+                args.account,
+                args.dataset,
+                args.limit,
+                args.window_seconds,
+                args.windows_per_sample,
+                not args.no_direct,
+                args.force,
                 args.output_path,
             )
         )

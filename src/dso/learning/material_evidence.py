@@ -27,7 +27,7 @@ from dso.utils import read_json, run_cmd, utc_now, write_json
 
 
 MATERIAL_EVIDENCE_VERSION = "material_evidence.d10b.v1"
-MATERIAL_RESOLVER_VERSION = "material_confusion_resolver.shadow_v1"
+MATERIAL_RESOLVER_VERSION = "material_confusion_resolver.shadow_v2"
 DEFAULT_EVIDENCE_WINDOW_SECONDS = 8.0
 DEFAULT_EVIDENCE_LIMIT = 10
 D10B_VIDEO_FPS = 2
@@ -100,6 +100,30 @@ def material_evidence_status(
         record = cache.get(sample_id) or {}
         samples.append(_evidence_status_sample(sample, record))
     summary = _evidence_coverage_summary(samples)
+    queue_summary = queue.get("batch_summary") if isinstance(queue.get("batch_summary"), dict) else {}
+    queue_gold_evaluable_count = sum(1 for sample in samples if sample.get("gold_evaluable"))
+    gold_evaluable_count = int(queue_summary.get("gold_evaluable_count", queue_gold_evaluable_count) or 0)
+    cached_gold_evaluable_count = sum(
+        1
+        for sample in samples
+        if sample.get("gold_evaluable") and sample.get("status") in {"ready", "partial"}
+    )
+    summary.update(
+        {
+            "gold_confirmed_count": int(queue_summary.get("gold_confirmed_count", 0) or 0),
+            "gold_effective_confirmed_count": int(queue_summary.get("gold_effective_confirmed_count", 0) or 0),
+            "gold_label_abstention_count": int(queue_summary.get("gold_label_abstention_count", 0) or 0),
+            "gold_evaluable_count": gold_evaluable_count,
+            "gold_admitted_count": int(queue_summary.get("gold_admitted_count", queue_gold_evaluable_count) or 0),
+            "gold_queue_coverage": float(queue_summary.get("gold_queue_coverage", 0.0) or 0.0),
+            "cached_gold_evaluable_count": cached_gold_evaluable_count,
+            "gold_evidence_coverage": (
+                round(cached_gold_evaluable_count / max(1, gold_evaluable_count), 4)
+                if gold_evaluable_count
+                else 0.0
+            ),
+        }
+    )
     latest_resolver = read_json(_latest_resolver_path(), {})
     return {
         "contract_version": MATERIAL_EVIDENCE_VERSION,
@@ -249,6 +273,7 @@ def run_material_resolver_shadow(
         local_media_only=True,
         include_reviewed=include_reviewed,
     )
+    queue_summary = queue.get("batch_summary") if isinstance(queue.get("batch_summary"), dict) else {}
     cache = material_evidence_cache_index()
     gold = material_gold_annotation_index(confirmed_only=False)
     rows: list[dict] = []
@@ -264,6 +289,7 @@ def run_material_resolver_shadow(
                 "title": sample.get("title") or "",
                 "confusion_pair": sample.get("confusion_pair") or "",
                 "confusion_pair_label_zh": sample.get("confusion_pair_label_zh") or "",
+                "pair_definition": sample.get("pair_definition") if isinstance(sample.get("pair_definition"), dict) else {},
                 "evidence_status": evidence.get("status") or "missing",
                 "window_count": len(evidence.get("windows") or []),
                 "strategies": strategies,
@@ -279,7 +305,7 @@ def run_material_resolver_shadow(
     cached_gold_rows = [
         row
         for row in rows
-        if row.get("evidence_status") in {"ready", "partial"} and row.get("gold")
+        if row.get("evidence_status") in {"ready", "partial"} and _gold_material_is_evaluable(row.get("gold"))
     ]
     cached_eval_strategy_comparison = {
         strategy: _resolver_strategy_metrics(cached_gold_rows, strategy)
@@ -287,16 +313,43 @@ def run_material_resolver_shadow(
     }
     disagreements = _resolver_disagreements(rows)
     evidence_ready = sum(1 for row in rows if row.get("evidence_status") in {"ready", "partial"})
-    gold_count = sum(1 for row in rows if row.get("gold"))
+    queue_gold_confirmed_count = sum(1 for row in rows if row.get("gold"))
+    queue_gold_evaluable_count = sum(1 for row in rows if _gold_material_is_evaluable(row.get("gold")))
+    gold_confirmed_count = int(queue_summary.get("gold_confirmed_count", queue_gold_confirmed_count) or 0)
+    gold_effective_confirmed_count = int(
+        queue_summary.get("gold_effective_confirmed_count", queue_gold_confirmed_count) or 0
+    )
+    gold_evaluable_count = int(queue_summary.get("gold_evaluable_count", queue_gold_evaluable_count) or 0)
+    gold_label_abstention_count = int(
+        queue_summary.get(
+            "gold_label_abstention_count",
+            max(0, gold_effective_confirmed_count - gold_evaluable_count),
+        )
+        or 0
+    )
+    gold_admitted_count = int(queue_summary.get("gold_admitted_count", queue_gold_evaluable_count) or 0)
     cached_gold_count = len(cached_gold_rows)
+    gold_queue_coverage = (
+        round(float(queue_summary.get("gold_queue_coverage")), 4)
+        if queue_summary.get("gold_queue_coverage") is not None
+        else round(gold_admitted_count / max(1, gold_evaluable_count), 4)
+    )
+    gold_evidence_coverage = round(cached_gold_count / max(1, gold_evaluable_count), 4) if gold_evaluable_count else 0.0
     multi = cached_eval_strategy_comparison["multi_window"]
     omni = cached_eval_strategy_comparison["omni_only"]
     accuracy_gain = round(float(multi.get("canonical_accuracy") or 0.0) - float(omni.get("canonical_accuracy") or 0.0), 4)
+    gold_prediction_coverage = float(multi.get("gold_prediction_coverage") or 0.0)
+    unknown_abstention_rate = float(multi.get("unknown_abstention_rate") or 0.0)
     checks = {
-        "evidence_coverage_at_least_85pct": evidence_ready / max(1, len(rows)) >= 0.85,
+        "gold_queue_coverage_at_least_95pct": gold_evaluable_count > 0 and gold_queue_coverage >= 0.95,
+        "gold_evidence_coverage_at_least_85pct": gold_evaluable_count > 0 and gold_evidence_coverage >= 0.85,
+        "evidence_coverage_at_least_85pct": gold_evaluable_count > 0 and gold_evidence_coverage >= 0.85,
         "gold_evaluable_at_least_30": cached_gold_count >= 30,
+        "gold_prediction_coverage_at_least_85pct": cached_gold_count >= 30 and gold_prediction_coverage >= 0.85,
+        "unknown_abstention_at_most_15pct": cached_gold_count >= 30 and unknown_abstention_rate <= 0.15,
         "canonical_accuracy_at_least_85pct": cached_gold_count >= 30 and float(multi.get("canonical_accuracy") or 0.0) >= 0.85,
-        "severe_error_at_most_10pct": cached_gold_count >= 30 and float(multi.get("severe_error_rate") or 1.0) <= 0.10,
+        "severe_error_at_most_10pct": cached_gold_count >= 30
+        and float(multi.get("severe_error_rate", 1.0)) <= 0.10,
         "gain_vs_omni_at_least_3pct": cached_gold_count >= 30 and accuracy_gain >= 0.03,
     }
     gate_passed = all(checks.values())
@@ -304,10 +357,22 @@ def run_material_resolver_shadow(
         "sample_count": len(rows),
         "evidence_ready_count": evidence_ready,
         "evidence_coverage": round(evidence_ready / max(1, len(rows)), 4),
-        "gold_evaluable_count": gold_count,
+        "gold_confirmed_count": gold_confirmed_count,
+        "gold_effective_confirmed_count": gold_effective_confirmed_count,
+        "gold_label_abstention_count": gold_label_abstention_count,
+        "gold_evaluable_count": gold_evaluable_count,
+        "queue_gold_confirmed_count": queue_gold_confirmed_count,
+        "queue_gold_evaluable_count": queue_gold_evaluable_count,
+        "gold_admitted_count": gold_admitted_count,
+        "gold_outside_queue_count": max(0, gold_evaluable_count - gold_admitted_count),
+        "gold_queue_coverage": gold_queue_coverage,
         "cached_gold_evaluable_count": cached_gold_count,
-        "gold_without_evidence_count": max(0, gold_count - cached_gold_count),
-        "awaiting_gold_count": len(rows) - gold_count,
+        "gold_evidence_coverage": gold_evidence_coverage,
+        "gold_without_evidence_count": max(0, gold_evaluable_count - cached_gold_count),
+        "awaiting_gold_count": len(rows) - queue_gold_evaluable_count,
+        "unknown_abstention_count": int(multi.get("unknown_abstention_count") or 0),
+        "unknown_abstention_rate": round(unknown_abstention_rate, 4),
+        "gold_prediction_coverage": round(gold_prediction_coverage, 4),
         "disagreement_count": len(disagreements),
         "multi_window_gain_vs_omni": accuracy_gain,
     }
@@ -326,7 +391,15 @@ def run_material_resolver_shadow(
         "summary": summary,
         "strategy_comparison": strategy_comparison,
         "cached_eval_strategy_comparison": cached_eval_strategy_comparison,
-        "evaluation_scope_note": "Promotion metrics use only confirmed Gold samples with completed D10-B evidence.",
+        "metric_contract": {
+            "gold_evaluable": "confirmed Gold with a known material form, deduplicated by account and stable title",
+            "gold_queue_coverage": "evaluable Gold groups admitted to the resolver queue / all evaluable Gold groups in scope",
+            "gold_evidence_coverage": "evaluable Gold groups with completed D10-B evidence / all evaluable Gold groups in scope",
+            "canonical_accuracy": "accepted canonical matches / all cached evaluable Gold; unknown abstentions remain in the denominator",
+            "selective_canonical_accuracy": "accepted canonical matches / non-unknown predictions on cached evaluable Gold",
+            "severe_error_rate": "mismatches / non-unknown predictions; unknown abstentions are excluded and reported separately",
+        },
+        "evaluation_scope_note": "Promotion metrics use deduplicated, known confirmed Gold. Unknown predictions are abstentions, not severe errors.",
         "disagreement_samples": disagreements[:40],
         "samples": rows,
         "promotion_gate": {
@@ -339,9 +412,21 @@ def run_material_resolver_shadow(
             "run_ranker_ablation_without_production_weight"
             if gate_passed
             else (
-                "extract_targeted_evidence"
-                if evidence_ready / max(1, len(rows)) < 0.85
-                else ("complete_second_targeted_gold_set" if cached_gold_count < 30 else "inspect_resolver_disagreements")
+                "repair_gold_queue_admission"
+                if gold_queue_coverage < 0.95
+                else (
+                    "extract_targeted_gold_evidence"
+                    if gold_evidence_coverage < 0.85
+                    else (
+                        "complete_second_targeted_gold_set"
+                        if cached_gold_count < 30
+                        else (
+                            "inspect_unknown_abstentions"
+                            if unknown_abstention_rate > 0.15
+                            else "inspect_resolver_disagreements"
+                        )
+                    )
+                )
             )
         ),
         "writes_main_semantic_labels": False,
@@ -665,7 +750,7 @@ def _normalize_material_evidence_response(raw: dict) -> dict:
                 or "m" in payload
             )
         ),
-        "material_type": canonical_material_type(raw_material),
+        "material_type": canonical_material_type(raw_material) or "unknown",
         "raw_material_type": raw_material,
         "program_context": str(payload.get("program_context") or payload.get("p") or "unknown"),
         "confidence": _unit_score(payload.get("confidence") if "confidence" in payload else payload.get("c")),
@@ -695,8 +780,18 @@ def _resolve_strategies(sample: dict, windows: list[dict]) -> dict[str, dict]:
     }
 
 
+def _resolver_pair_definition(sample: dict) -> dict[str, Any]:
+    dynamic = sample.get("pair_definition") if isinstance(sample.get("pair_definition"), dict) else {}
+    left = str(dynamic.get("left") or "")
+    right = str(dynamic.get("right") or "")
+    if left and right and left != right:
+        return dynamic
+    pair = str(sample.get("confusion_pair") or "")
+    return MATERIAL_CONFUSION_PAIRS.get(pair) or {}
+
+
 def _resolve_from_existing_omni(sample: dict) -> dict:
-    predicted = canonical_material_type(sample.get("omni_raw_material_type"))
+    predicted = canonical_material_type(sample.get("omni_raw_material_type")) or "unknown"
     program_context = str(sample.get("omni_program_context") or "unknown")
     return {
         "predicted_material_type": predicted,
@@ -710,7 +805,7 @@ def _resolve_from_existing_omni(sample: dict) -> dict:
 
 def _resolve_from_text(sample: dict, text: str, *, source: str) -> dict:
     pair = str(sample.get("confusion_pair") or "")
-    definition = MATERIAL_CONFUSION_PAIRS.get(pair) or {}
+    definition = _resolver_pair_definition(sample)
     left = str(definition.get("left") or "unknown")
     right = str(definition.get("right") or "unknown")
     normalized = str(text or "").lower()
@@ -733,7 +828,7 @@ def _resolve_from_text(sample: dict, text: str, *, source: str) -> dict:
 
 def _resolve_multi_window(sample: dict, windows: list[dict], *, title: str, asr_text: str, ocr_text: str) -> dict:
     pair = str(sample.get("confusion_pair") or "")
-    definition = MATERIAL_CONFUSION_PAIRS.get(pair) or {}
+    definition = _resolver_pair_definition(sample)
     left = str(definition.get("left") or "unknown")
     right = str(definition.get("right") or "unknown")
     base = _resolve_from_text(sample, f"{asr_text} {ocr_text}", source="asr_ocr")
@@ -812,23 +907,31 @@ def _resolver_decision(
 def _resolver_strategy_metrics(rows: list[dict], strategy: str) -> dict:
     predicted = 0
     evaluated = 0
+    gold_predicted = 0
+    abstained = 0
     accepted = 0
     severe = 0
     relation_counts: Counter[str] = Counter()
     per_pair: dict[str, Counter[str]] = {}
     for row in rows:
         result = (row.get("strategies") or {}).get(strategy) or {}
-        value = str(result.get("predicted_material_type") or "unknown")
+        value = canonical_material_type(result.get("predicted_material_type")) or "unknown"
         if value != "unknown":
             predicted += 1
         gold = row.get("gold") or {}
         gold_value = str(gold.get("material_type") or "unknown")
-        if gold_value in {"", "unknown"}:
+        if not canonical_material_type(gold_value):
             continue
         evaluated += 1
+        pair = str(row.get("confusion_pair") or "unknown")
+        if value == "unknown":
+            abstained += 1
+            relation_counts["abstain"] += 1
+            per_pair.setdefault(pair, Counter())["abstain"] += 1
+            continue
+        gold_predicted += 1
         relation = material_type_taxonomy_relation(gold_value, value)
         relation_counts[relation] += 1
-        pair = str(row.get("confusion_pair") or "unknown")
         per_pair.setdefault(pair, Counter())[relation] += 1
         if relation in {"exact", "coarse_match", "specific_match"}:
             accepted += 1
@@ -839,11 +942,27 @@ def _resolver_strategy_metrics(rows: list[dict], strategy: str) -> dict:
         "predicted_count": predicted,
         "coverage": round(predicted / max(1, len(rows)), 4),
         "gold_evaluable_count": evaluated,
+        "gold_predicted_count": gold_predicted,
+        "gold_prediction_coverage": round(gold_predicted / max(1, evaluated), 4) if evaluated else 0.0,
+        "unknown_abstention_count": abstained,
+        "unknown_abstention_rate": round(abstained / max(1, evaluated), 4) if evaluated else 0.0,
+        "accepted_count": accepted,
         "canonical_accuracy": round(accepted / max(1, evaluated), 4) if evaluated else 0.0,
-        "severe_error_rate": round(severe / max(1, evaluated), 4) if evaluated else 0.0,
+        "selective_canonical_accuracy": round(accepted / max(1, gold_predicted), 4) if gold_predicted else 0.0,
+        "severe_error_count": severe,
+        "severe_error_rate": round(severe / max(1, gold_predicted), 4) if gold_predicted else 0.0,
+        "end_to_end_severe_error_rate": round(severe / max(1, evaluated), 4) if evaluated else 0.0,
         "relation_counts": dict(relation_counts),
         "per_pair": {key: dict(value) for key, value in per_pair.items()},
     }
+
+
+def _gold_material_is_evaluable(gold: Any) -> bool:
+    return bool(
+        isinstance(gold, dict)
+        and gold.get("review_status") == "confirmed"
+        and canonical_material_type(gold.get("material_type"))
+    )
 
 
 def _resolver_disagreements(rows: list[dict]) -> list[dict]:
@@ -855,7 +974,9 @@ def _resolver_disagreements(rows: list[dict]) -> list[dict]:
             for key in ["title_only", "omni_only", "asr_ocr", "multi_window"]
         }
         known = {value for value in predictions.values() if value != "unknown"}
-        if len(known) < 2:
+        has_abstention = "unknown" in predictions.values()
+        evidence_ready = row.get("evidence_status") in {"ready", "partial"}
+        if len(known) < 2 and not (known and has_abstention and evidence_ready):
             continue
         output.append(
             {
@@ -865,7 +986,11 @@ def _resolver_disagreements(rows: list[dict]) -> list[dict]:
                 "confusion_pair": row.get("confusion_pair") or "",
                 "predictions": predictions,
                 "gold_material_type": (row.get("gold") or {}).get("material_type") or "",
-                "priority": round(1.0 + len(known) * 0.5 + (0.5 if row.get("gold") else 0.0), 3),
+                "has_unknown_abstention": has_abstention,
+                "priority": round(
+                    1.0 + len(known) * 0.5 + (0.35 if has_abstention else 0.0) + (0.5 if row.get("gold") else 0.0),
+                    3,
+                ),
             }
         )
     output.sort(key=lambda item: (float(item.get("priority") or 0.0), str(item.get("sample_id") or "")), reverse=True)
@@ -1121,6 +1246,7 @@ def _gate_asr_payload(payload: dict) -> dict:
 def _evidence_status_sample(sample: dict, record: dict) -> dict:
     summary = record.get("component_summary") if isinstance(record.get("component_summary"), dict) else _sample_component_summary(record.get("windows") or [])
     strategies = record.get("resolver_strategies") if isinstance(record.get("resolver_strategies"), dict) else {}
+    annotation = sample.get("annotation") if isinstance(sample.get("annotation"), dict) else {}
     return {
         "sample_id": sample.get("sample_id") or "",
         "account_id": sample.get("account_id") or "",
@@ -1131,6 +1257,10 @@ def _evidence_status_sample(sample: dict, record: dict) -> dict:
         "component_summary": summary,
         "multi_window_prediction": (strategies.get("multi_window") or {}).get("predicted_material_type") or "unknown",
         "multi_window_confidence": float((strategies.get("multi_window") or {}).get("confidence") or 0.0),
+        "gold_evaluable": bool(
+            annotation.get("review_status") == "confirmed"
+            and canonical_material_type(annotation.get("material_type"))
+        ),
     }
 
 
@@ -1428,12 +1558,20 @@ def _macos_vision_ocr_binary(script: Path) -> Path:
     needs_build = not binary.is_file() or binary.stat().st_mtime < script.stat().st_mtime
     if needs_build:
         binary.parent.mkdir(parents=True, exist_ok=True)
+        swift_cache = ensure_data_dirs().cache_dir / "tools" / "swift-module-cache"
+        clang_cache = ensure_data_dirs().cache_dir / "tools" / "clang-module-cache"
+        swift_cache.mkdir(parents=True, exist_ok=True)
+        clang_cache.mkdir(parents=True, exist_ok=True)
+        build_env = os.environ.copy()
+        build_env.setdefault("SWIFT_MODULECACHE_PATH", str(swift_cache))
+        build_env.setdefault("CLANG_MODULE_CACHE_PATH", str(clang_cache))
         subprocess.run(
             [shutil.which("swiftc") or "swiftc", str(script), "-o", str(binary)],
             text=True,
             capture_output=True,
             check=True,
             timeout=120,
+            env=build_env,
         )
     return binary
 

@@ -7,6 +7,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -535,14 +536,25 @@ def _dataset_name(program_key: str, date_key: str) -> str:
 
 
 def _summarize_capture_paths(paths: list[Path]) -> dict:
+    signatures = []
+    for path in paths:
+        if not path.exists():
+            continue
+        resolved = path.resolve()
+        stat = resolved.stat()
+        signatures.append((str(resolved), stat.st_mtime_ns, stat.st_size))
+    return dict(_summarize_capture_paths_cached(tuple(signatures)))
+
+
+@lru_cache(maxsize=128)
+def _summarize_capture_paths_cached(signatures: tuple[tuple[str, int, int], ...]) -> dict:
     raw_rows = 0
     valid_rows = 0
     unique_keys: set[str] = set()
     max_views = 0
     latest_at = ""
-    for path in paths:
-        if not path.exists():
-            continue
+    for path_text, _mtime_ns, _size in signatures:
+        path = Path(path_text)
         try:
             rows = _read_rows(path)
         except Exception:
@@ -570,15 +582,26 @@ def _summarize_capture_paths(paths: list[Path]) -> dict:
 def _read_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
+    resolved = path.resolve()
+    stat = resolved.stat()
+    return [dict(row) for row in _read_rows_cached(str(resolved), stat.st_mtime_ns, stat.st_size)]
+
+
+@lru_cache(maxsize=256)
+def _read_rows_cached(path_text: str, mtime_ns: int, size: int) -> tuple[dict, ...]:
+    del mtime_ns, size
+    path = Path(path_text)
     if path.suffix.lower() in XLSX_SUFFIXES:
-        return read_table_rows(
+        rows = read_table_rows(
             path,
             preferred_sheets=("作品去重", "作品明细", "三账号作品", "天赐作品", "歌手2026作品", "思绪作品", "原始清洗记录"),
         )
-    if path.suffix.lower() != ".csv":
-        return []
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        return [dict(row) for row in csv.DictReader(handle)]
+    elif path.suffix.lower() == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = [dict(row) for row in csv.DictReader(handle)]
+    else:
+        rows = []
+    return tuple(dict(row) for row in rows)
 
 
 def _latest_capture_workbook(root: Path) -> Path | None:

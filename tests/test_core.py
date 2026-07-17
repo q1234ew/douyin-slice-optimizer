@@ -46,6 +46,7 @@ from dso.learning.backtest import (
     _apply_v23_diversity,
     _candidate_history_rows,
     _canonical_material_type,
+    _compact_backtest_metrics,
     _historical_holdout_split,
     _history_candidate_index,
     _history_tokens,
@@ -88,10 +89,21 @@ from dso.learning.material_calibration import (
     reopen_material_gold_annotation,
     update_material_gold_annotation,
 )
-from dso.learning.material_confusion import material_confusion_queue, material_taxonomy_contract
+from dso.learning.material_confusion import (
+    CROSS_DOMAIN_CONFUSION_PAIR,
+    material_confusion_queue,
+    material_taxonomy_contract,
+)
+from dso.learning.material_description_experiment import (
+    _description_consistency_issues,
+    _normalize_description_response,
+    _resolve_description,
+    _strategy_metrics as _description_strategy_metrics,
+)
 from dso.learning.material_evidence import (
     _gate_asr_payload,
     _normalize_material_evidence_response,
+    _resolver_strategy_metrics,
     run_material_evidence_batch,
     run_material_resolver_shadow,
 )
@@ -2166,6 +2178,25 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(reports["reports"][0]["metrics"]["sample_count"], 3)
         self.assertTrue(reports["reports"][0]["top_rows"])
 
+    def test_compact_backtest_metrics_keep_dashboard_fields_only(self) -> None:
+        diagnostics = [{"sample_id": f"sample_{index}"} for index in range(10)]
+        compact = _compact_backtest_metrics(
+            {
+                "sample_count": 120,
+                "topk_lift_vs_random": 1.7,
+                "strategy_comparison": {"current_rules": {"sample_count": 120}},
+                "diagnostic_samples": {"missed_high_interaction": diagnostics},
+                "omni_material_gold_set_queue": [{"payload": "heavy"}],
+                "next_calibration_queue": [{"payload": "heavy"}],
+            }
+        )
+
+        self.assertEqual(compact["sample_count"], 120)
+        self.assertEqual(compact["topk_lift_vs_random"], 1.7)
+        self.assertEqual(len(compact["diagnostic_samples"]["missed_high_interaction"]), 6)
+        self.assertNotIn("omni_material_gold_set_queue", compact)
+        self.assertNotIn("next_calibration_queue", compact)
+
     def test_prototype_bank_builds_from_visible_capture_csv(self) -> None:
         capture_path = self.root / "data" / "douyin_capture" / "douyin_visible_works_dedup_latest.csv"
         _write_visible_work_rows(
@@ -3182,6 +3213,234 @@ class CoreWorkflowTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             material_confusion_queue(confusion_pair="not_a_pair")
+
+    def test_material_confusion_queue_prioritizes_gold_and_admits_cross_domain_disagreement(self) -> None:
+        rows = [
+            {
+                "id": "gold_cross_domain",
+                "account_id": "account_gold",
+                "dataset_id": "cross_domain_test",
+                "platform_item_id": "910000000000000001",
+                "platform_url": "",
+                "title": "音乐抄袭事件完整解读",
+                "tags": "乐评 事件",
+                "artist_names": "",
+                "song_title": "",
+                "content_category": "performance_clip",
+                "hook_type": "analysis",
+                "slice_structure": "commentary_arc",
+                "program_name": "",
+                "performance_label": "high",
+                "normalized_reward": 80.0,
+                "reward_proxy": 80.0,
+                "classification_confidence": "medium",
+                "raw_json": "{}",
+                "published_at": "2026-07-01T00:00:00+00:00",
+            },
+            {
+                "id": "unreviewed_static",
+                "account_id": "account_other",
+                "dataset_id": "cross_domain_test",
+                "platform_item_id": "910000000000000002",
+                "platform_url": "",
+                "title": "声乐教学 如何练习气息和高音",
+                "tags": "声乐 教学",
+                "artist_names": "",
+                "song_title": "",
+                "content_category": "vocal_teaching",
+                "hook_type": "tutorial",
+                "slice_structure": "instruction",
+                "program_name": "",
+                "performance_label": "high",
+                "normalized_reward": 99.0,
+                "reward_proxy": 99.0,
+                "classification_confidence": "medium",
+                "raw_json": "{}",
+                "published_at": "2026-07-02T00:00:00+00:00",
+            },
+        ]
+        omni_index = {
+            "gold_cross_domain": {
+                "sample_id": "gold_cross_domain",
+                "status": "ready",
+                "semantic_suggestions": {
+                    "domain_category": "music_variety",
+                    "material_type": "commentary",
+                    "program_context": "unknown",
+                    "presentation_style": "analysis",
+                },
+            },
+            "unreviewed_static": {
+                "sample_id": "unreviewed_static",
+                "status": "ready",
+                "semantic_suggestions": {
+                    "domain_category": "music_variety",
+                    "material_type": "vocal_teaching",
+                    "program_context": "unknown",
+                    "presentation_style": "tutorial",
+                },
+            },
+        }
+        assets = {
+            row["platform_item_id"]: {"video": [f"/tmp/{row['platform_item_id']}.mp4"], "frame": ["/tmp/frame.jpg"]}
+            for row in rows
+        }
+        annotations = {
+            "gold_cross_domain": {
+                "sample_id": "gold_cross_domain",
+                "review_status": "confirmed",
+                "material_type": "commentary",
+            }
+        }
+        with patch("dso.learning.material_confusion._historical_confusion_rows", return_value=rows), patch(
+            "dso.learning.material_confusion.qwen_omni_shadow_cache_index", return_value=omni_index
+        ), patch("dso.learning.material_confusion._build_asset_index", return_value=assets), patch(
+            "dso.learning.material_confusion.material_gold_annotation_index", return_value=annotations
+        ):
+            queue = material_confusion_queue(limit=1, include_reviewed=True)
+            pair_queue = material_confusion_queue(
+                limit=1,
+                include_reviewed=True,
+                confusion_pair=CROSS_DOMAIN_CONFUSION_PAIR,
+            )
+
+        self.assertEqual(queue["samples"][0]["sample_id"], "gold_cross_domain")
+        self.assertEqual(queue["samples"][0]["confusion_pair"], CROSS_DOMAIN_CONFUSION_PAIR)
+        self.assertEqual(queue["samples"][0]["candidate_material_types"], ["performance_clip", "commentary"])
+        self.assertEqual(queue["batch_summary"]["gold_evaluable_count"], 1)
+        self.assertEqual(queue["batch_summary"]["gold_admitted_count"], 1)
+        self.assertEqual(queue["batch_summary"]["gold_queue_coverage"], 1.0)
+        self.assertEqual(queue["batch_summary"]["gold_cross_domain_admitted_count"], 1)
+        self.assertEqual(pair_queue["batch_summary"]["gold_coverage_scope"], "confusion_pair")
+        self.assertEqual(pair_queue["batch_summary"]["gold_evaluable_count"], 1)
+        self.assertEqual(pair_queue["batch_summary"]["gold_queue_coverage"], 1.0)
+
+    def test_material_resolver_reports_unknown_as_abstention_not_severe_error(self) -> None:
+        def row(sample_id: str, gold: str, predicted: str) -> dict:
+            return {
+                "sample_id": sample_id,
+                "confusion_pair": "reaction_vocal_teaching",
+                "gold": {"review_status": "confirmed", "material_type": gold},
+                "strategies": {"multi_window": {"predicted_material_type": predicted}},
+            }
+
+        metrics = _resolver_strategy_metrics(
+            [
+                row("exact", "reaction", "reaction"),
+                row("error", "reaction", "vocal_teaching"),
+                row("abstain", "reaction", "unknown"),
+            ],
+            "multi_window",
+        )
+
+        self.assertEqual(metrics["gold_evaluable_count"], 3)
+        self.assertEqual(metrics["gold_predicted_count"], 2)
+        self.assertEqual(metrics["unknown_abstention_count"], 1)
+        self.assertEqual(metrics["unknown_abstention_rate"], 0.3333)
+        self.assertEqual(metrics["gold_prediction_coverage"], 0.6667)
+        self.assertEqual(metrics["canonical_accuracy"], 0.3333)
+        self.assertEqual(metrics["selective_canonical_accuracy"], 0.5)
+        self.assertEqual(metrics["severe_error_count"], 1)
+        self.assertEqual(metrics["severe_error_rate"], 0.5)
+        self.assertEqual(metrics["end_to_end_severe_error_rate"], 0.3333)
+        self.assertEqual(metrics["relation_counts"], {"exact": 1, "mismatch": 1, "abstain": 1})
+
+    def test_material_description_parser_and_metrics_keep_abstentions_separate(self) -> None:
+        legacy = _normalize_description_response(
+            {
+                "status": "model",
+                "media_used": True,
+                "media_payload": {"media_used": True, "use_audio_in_video": True},
+                "semantic_suggestions": {
+                    "d": {
+                        "v": "歌手在舞台上唱歌",
+                        "a": "有音乐",
+                        "o": ["舞台演唱"],
+                        "e": [0, 0, 0, 0, 1, 0],
+                        "u": "",
+                        "c": 0.9,
+                    }
+                },
+            }
+        )
+        self.assertTrue(legacy["schema_valid"])
+        self.assertTrue(legacy["audio_used"])
+        self.assertEqual(legacy["evidence_signals"]["backstage_context"], 1.0)
+        self.assertEqual(legacy["evidence_signals"]["sustained_performance"], 0.0)
+
+        named = _normalize_description_response(
+            {
+                "status": "model",
+                "media_used": True,
+                "media_payload": {"media_used": True, "use_audio_in_video": True},
+                "semantic_suggestions": {
+                    "d": {
+                        "v": "歌手在舞台上唱歌",
+                        "a": "有音乐",
+                        "t": ["现场演唱"],
+                        "o": ["持续唱歌"],
+                        "s": {"teach": 0, "react": 0, "list": 0, "news": 0, "backstage": 0, "perform": 1},
+                        "u": "",
+                        "c": 0.9,
+                    }
+                },
+            }
+        )
+        self.assertTrue(named["schema_valid"])
+        self.assertEqual(named["visible_text"], ["现场演唱"])
+        self.assertEqual(named["evidence_signals"]["backstage_context"], 0.0)
+        self.assertEqual(named["evidence_signals"]["sustained_performance"], 1.0)
+
+        speech_conflict = {
+            **named,
+            "visual_summary": "一位男子在麦克风前讲话",
+            "audio_summary": "男子讲话",
+            "visible_text": [],
+            "observed_events": ["男子持续点评"],
+        }
+        self.assertIn("speech_performance_signal_conflict", _description_consistency_issues(speech_conflict))
+
+        def sample(sample_id: str, predicted: str) -> dict:
+            return {
+                "sample_id": sample_id,
+                "gold_material_type": "reaction",
+                "strategies": {"description_structured": {"predicted_material_type": predicted}},
+            }
+
+        metrics = _description_strategy_metrics(
+            [sample("exact", "reaction"), sample("error", "vocal_teaching"), sample("abstain", "unknown")],
+            "description_structured",
+        )
+        self.assertEqual(metrics["evaluated_count"], 3)
+        self.assertEqual(metrics["predicted_count"], 2)
+        self.assertEqual(metrics["unknown_abstention_count"], 1)
+        self.assertEqual(metrics["canonical_accuracy"], 0.3333)
+        self.assertEqual(metrics["severe_error_count"], 1)
+        self.assertEqual(metrics["severe_error_rate"], 0.5)
+
+    def test_material_description_signals_can_resolve_reaction_without_title(self) -> None:
+        sample = {
+            "confusion_pair": "reaction_vocal_teaching",
+            "title": "老师带你看舞台",
+        }
+        description = {
+            "visual_summary": "一位男子在麦克风前",
+            "audio_summary": "有人唱歌",
+            "observed_events": ["观看反应"],
+            "evidence_signals": {
+                "teaching_instruction": 0.0,
+                "viewing_reaction": 1.0,
+                "list_structure": 0.0,
+                "news_narration": 0.0,
+                "backstage_context": 0.0,
+                "sustained_performance": 0.0,
+            },
+        }
+        text_only = _resolve_description(sample, [description], include_signals=False, include_title=False)
+        structured = _resolve_description(sample, [description], include_signals=True, include_title=False)
+        self.assertEqual(text_only["predicted_material_type"], "unknown")
+        self.assertEqual(structured["predicted_material_type"], "reaction")
+        self.assertGreater(structured["scores"]["reaction"], text_only["scores"]["reaction"])
 
     def test_material_evidence_executes_three_windows_and_resolver_stays_shadow_only(self) -> None:
         video_path = self.root / "reaction_teaching.mp4"
@@ -4519,6 +4778,12 @@ class CoreWorkflowTest(unittest.TestCase):
         )
         listed = list_historical_samples("tianci", dataset_id="tianci_20260628", limit=10)
         baselines = douyin_history_baselines("tianci", dataset_id="tianci_20260628", min_count=1)
+        compact_baselines = douyin_history_baselines(
+            "tianci",
+            dataset_id="tianci_20260628",
+            min_count=1,
+            include_groups=False,
+        )
         summary = historical_sample_summary("tianci")
         prototypes = build_prototype_bank("tianci", source="visible_capture", dataset_id="tianci_20260628", limit=10, force=True)
 
@@ -4545,6 +4810,8 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(baselines["sample_count"], 3)
         self.assertEqual(baselines["label_counts"]["mid"], 1)
         self.assertTrue(any(item["dimension"] == "hook_type" for item in baselines["top_signals"]))
+        self.assertNotIn("groups", compact_baselines)
+        self.assertGreaterEqual(compact_baselines["group_count"], len(compact_baselines["top_signals"]))
         self.assertEqual(prototypes["sample_count"], 3)
         self.assertEqual(prototypes["account_distribution"]["performance_basis"], "reward_proxy")
         self.assertGreater(prototypes["account_distribution"]["p75_performance"], 0)

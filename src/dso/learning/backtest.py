@@ -409,7 +409,7 @@ def backtest_rule_ranker(
     return report
 
 
-def list_backtest_reports(account_id: str | None = None, limit: int = 10) -> dict:
+def list_backtest_reports(account_id: str | None = None, limit: int = 10, *, compact: bool = False) -> dict:
     clauses = []
     params: list[Any] = []
     if account_id:
@@ -424,8 +424,9 @@ def list_backtest_reports(account_id: str | None = None, limit: int = 10) -> dic
             payload = json.loads(row.pop("metrics_json") or "{}")
         except json.JSONDecodeError:
             payload = {}
-        row["metrics"] = payload.get("metrics") or {}
-        row["top_rows"] = payload.get("top_rows") or []
+        metrics = payload.get("metrics") or {}
+        row["metrics"] = _compact_backtest_metrics(metrics) if compact else metrics
+        row["top_rows"] = [] if compact else payload.get("top_rows") or []
         row["contract_version"] = BACKTEST_VERSION
         row["generated_at"] = row.get("created_at")
     return {
@@ -434,6 +435,45 @@ def list_backtest_reports(account_id: str | None = None, limit: int = 10) -> dic
         "count": len(rows),
         "reports": rows,
     }
+
+
+def _compact_backtest_metrics(metrics: dict) -> dict:
+    keys = [
+        "sample_count",
+        "k",
+        "strategy",
+        "ndcg_at_k",
+        "topk_hit_rate",
+        "topk_lift_vs_random",
+        "high_interaction_hit_rate",
+        "low_interaction_avoidance_rate",
+        "calibration_mae",
+        "closed_loop_rate",
+        "low_exposure_uncertain_rate",
+        "sample_source",
+        "holdout_policy",
+        "holdout_policy_key",
+        "research_label_version",
+        "research_ranker_version",
+        "scorer_version",
+        "embedding_strategy_gap",
+        "weight_config",
+        "baseline_gap",
+        "calibration_summary",
+        "semantic_gap_analysis",
+        "diversity_summary",
+        "strategy_comparison",
+        "omni_account_pool_gates",
+        "promotion_gate",
+    ]
+    result = {key: metrics.get(key) for key in keys if key in metrics}
+    diagnostics = metrics.get("diagnostic_samples")
+    if isinstance(diagnostics, dict):
+        result["diagnostic_samples"] = {
+            key: value[:6] if isinstance(value, list) else value
+            for key, value in diagnostics.items()
+        }
+    return result
 
 
 def run_ranker_tuning(

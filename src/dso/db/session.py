@@ -147,6 +147,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _ensure_prototype_bank_dataset_schema(conn)
     _ensure_embedding_records_schema(conn)
     _ensure_material_gold_annotations_schema(conn)
+    _ensure_material_window_annotations_schema(conn)
 
 
 def _add_columns(conn: sqlite3.Connection, table: str, columns: Mapping[str, str]) -> None:
@@ -274,6 +275,37 @@ def _ensure_material_gold_annotations_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_material_gold_scope ON material_gold_annotations(account_id, dataset_id, review_status, updated_at DESC)"
+    )
+
+
+def _ensure_material_window_annotations_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS material_window_annotations (
+          id TEXT PRIMARY KEY,
+          window_id TEXT NOT NULL UNIQUE,
+          sample_id TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          dataset_id TEXT NOT NULL DEFAULT '',
+          start_seconds REAL NOT NULL DEFAULT 0,
+          end_seconds REAL NOT NULL DEFAULT 0,
+          scene_form TEXT NOT NULL DEFAULT 'unknown',
+          program_context_mode TEXT NOT NULL DEFAULT 'unknown',
+          selection_quality TEXT NOT NULL DEFAULT 'uncertain',
+          review_status TEXT NOT NULL DEFAULT 'confirmed',
+          operator TEXT NOT NULL DEFAULT 'local',
+          review_note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(sample_id) REFERENCES historical_capture_samples(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_material_window_scope ON material_window_annotations(account_id, dataset_id, review_status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_material_window_sample ON material_window_annotations(sample_id, start_seconds)"
     )
 
 
@@ -920,6 +952,25 @@ CREATE TABLE IF NOT EXISTS material_gold_annotations (
   FOREIGN KEY(sample_id) REFERENCES historical_capture_samples(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS material_window_annotations (
+  id TEXT PRIMARY KEY,
+  window_id TEXT NOT NULL UNIQUE,
+  sample_id TEXT NOT NULL,
+  account_id TEXT NOT NULL DEFAULT '',
+  dataset_id TEXT NOT NULL DEFAULT '',
+  start_seconds REAL NOT NULL DEFAULT 0,
+  end_seconds REAL NOT NULL DEFAULT 0,
+  scene_form TEXT NOT NULL DEFAULT 'unknown',
+  program_context_mode TEXT NOT NULL DEFAULT 'unknown',
+  selection_quality TEXT NOT NULL DEFAULT 'uncertain',
+  review_status TEXT NOT NULL DEFAULT 'confirmed',
+  operator TEXT NOT NULL DEFAULT 'local',
+  review_note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(sample_id) REFERENCES historical_capture_samples(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS prototype_bank_items (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL DEFAULT 'main',
@@ -965,6 +1016,8 @@ CREATE INDEX IF NOT EXISTS idx_interest_clock_key ON interest_clock_suggestions(
 CREATE INDEX IF NOT EXISTS idx_backtest_reports_account ON backtest_reports(account_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_historical_capture_dataset ON historical_capture_samples(account_id, dataset_id, views DESC);
 CREATE INDEX IF NOT EXISTS idx_material_gold_scope ON material_gold_annotations(account_id, dataset_id, review_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_material_window_scope ON material_window_annotations(account_id, dataset_id, review_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_material_window_sample ON material_window_annotations(sample_id, start_seconds);
 CREATE INDEX IF NOT EXISTS idx_historical_capture_item ON historical_capture_samples(platform, platform_item_id);
 CREATE INDEX IF NOT EXISTS idx_prototype_bank_account ON prototype_bank_items(account_id, dataset_id, source, updated_at DESC);
 """
