@@ -86,9 +86,9 @@ Authorized Tencent-family / YouTube single-video URL           |
   -> Feedback Update / Model Calibration
 ```
 
-### 2.1 Hybrid Slice Pipeline V1（2026-07-17）
+### 2.1 Hybrid Slice Shadow Pipeline V1（2026-07-18）
 
-生产切片采用“确定性召回 + Omni 低权重复排”，不让大模型直接扫描整条长视频或直接改写最终边界：
+候选生成采用确定性召回，Omni 只生成显式研究复排证据；大模型不直接扫描整条长视频，也不改写最终边界或默认生产排序：
 
 ```text
 ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
@@ -97,15 +97,15 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
   -> 规则分 + 历史先验预排
   -> Top 3 候选
   -> Qwen2.5-Omni 逐条分析 hook / middle / payoff（每窗默认 6 秒）
-  -> 置信度折算后的低权重混合分（默认上限 15%）
-  -> Top 10 人工审核
+  -> 置信度折算后的研究混合分（默认上限 15%）
+  -> 显式 research scope 对照，不改变 production scope
 ```
 
 关键约束：
 
 - Omni 不写 `manual_verified`，不自动批准候选，不自动发布。
 - Omni 的边界建议只作为证据；实际边界由确定性时间轴信号吸附。
-- 模型未加载、服务不可用或单条媒体失败时，自动保持规则分与历史先验排序。
+- 模型未加载、服务不可用或单条媒体失败时，保持 `current_rules/final_score` 默认排序。
 - 转码窗口和模型结果按源文件、候选时间范围、模型与版本缓存，重复运行不重复推理。
 - 16GB 显存默认 `candidate_limit=3`、`max_clip_seconds=6`、`batch_size=1`；前端先返回规则候选，再增量刷新 Omni 结果。
 - 模型服务使用 text-only thinker 路径，明确传递 `thinker_max_new_tokens=128`；推理由单线程执行器串行化，`/health` 独立返回 `ready/busy`，150 秒超时后由 systemd watchdog 重启服务，避免孤儿推理拖死整个 API。生产端口锁定 Omni 模型，Embedding 任务必须使用独立服务或先显式解除维护锁，避免共享 `/load` 竞争显存。
@@ -117,7 +117,15 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
 - CLI：`dso hybrid-slice <video_id> --load-model`
 - 前端：节目管理中的“智能切片”按钮；候选卡与右侧详情显示 Omni 参与/回退状态。
 
-### 2.2 授权远程媒体获取（2026-07-18）
+### 2.2 生产排序与研究排序 contract
+
+- `production_ranking_policy.v1` 的默认 scope 为 `production`，唯一默认策略为 `current_rules`，分数字段为 `final_score`。
+- `ranker_score`、`hybrid_score`、Omni、embedding 和后续实验模型均属于显式 `research` scope；它们可参与回测、解释和诊断，不改变默认审核、导出或发布顺序。
+- Promotion gate 同时要求绝对指标、至少 10 个 ready 账号胜出、相对 `current_rules` 与 `semantic_baseline_v2` 中最强基线 lift 至少 `+0.03`，且 NDCG、高互动命中和低互动避让均不回退。
+- Gate 通过只产生 `eligible_for_promotion`，不会自动改写生产策略；采用新策略必须冻结新 benchmark，并显式更新 production policy。
+- `GET /ranking/policy` 返回当前 contract；`GET /videos/{video_id}/suggestions` 默认生产排序，只有显式 `ranking_scope=research` 才返回研究顺序。
+
+### 2.3 授权远程媒体获取（2026-07-18）
 
 远程下载只作为 Media Ingest 前的可选获取层，不生成第二套节目、候选或排序 contract：
 

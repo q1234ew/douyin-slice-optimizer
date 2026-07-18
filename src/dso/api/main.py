@@ -108,6 +108,7 @@ from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.quality.insights import quality_insights
 from dso.review import list_change_events, list_review_events, mark_candidate_review
 from dso.runtime import runtime_diagnostics
+from dso.scoring.ranking_policy import attach_ranking_policy, production_ranking_contract
 from dso.scoring.scorer import sanitize_title_suggestions, score_video, suggestions
 from dso.segments.generator import generate_segments
 from dso.simulation.recommender import simulate_segment, simulate_video
@@ -166,6 +167,11 @@ def runtime() -> dict:
 @app.get("/providers/status")
 def providers_status() -> dict:
     return public_model_status()
+
+
+@app.get("/ranking/policy")
+def ranking_policy() -> dict:
+    return production_ranking_contract()
 
 
 @app.post("/providers/fake-smoke")
@@ -396,9 +402,15 @@ def omni_rerank(video_id: str, payload: dict = Body(default_factory=dict)) -> di
 
 
 @app.get("/videos/{video_id}/suggestions")
-def get_suggestions(video_id: str, top_k: int = 10) -> dict:
-    rows = [_attach_segment_variants(row) for row in suggestions(video_id, top_k=top_k)]
-    return {"suggestions": rows}
+def get_suggestions(video_id: str, top_k: int = 10, ranking_scope: str = "production") -> dict:
+    try:
+        rows = [
+            _attach_segment_variants(row)
+            for row in suggestions(video_id, top_k=top_k, ranking_scope=ranking_scope)
+        ]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ranking_policy": production_ranking_contract(), "ranking_scope": ranking_scope, "suggestions": rows}
 
 
 @app.get("/videos/{video_id}/simulation")
@@ -1657,7 +1669,7 @@ def _dashboard_stats() -> dict:
 
 
 def _attach_segment_variants(row: dict) -> dict:
-    row = _parse_segment_json_fields(dict(row))
+    row = attach_ranking_policy(_parse_segment_json_fields(dict(row)), ranking_scope=row.get("ranking_scope"))
     variants = [_attach_export_urls(item) for item in list_variants(row["id"])]
     exported = [item for item in variants if item.get("export_path")]
     row["variants"] = variants

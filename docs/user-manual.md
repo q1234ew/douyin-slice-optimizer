@@ -313,7 +313,7 @@ dso extract <video_id> --asr-backend qwen3_asr --force-asr
 
 ### 6.5 审核候选
 
-进入“候选审核”，候选按综合分排序。每张候选卡片会展示：
+进入“候选审核”，候选默认按当前规则分排序。每张候选卡片会展示：
 
 | 信息 | 用途 |
 | --- | --- |
@@ -321,11 +321,13 @@ dso extract <video_id> --asr-backend qwen3_asr --force-asr
 | 标题建议 | 可复制到发布端或 Variant |
 | 字幕摘要 | 快速判断内容是否完整 |
 | 结构 / 爆点 | 判断开头钩子、上下文和情绪推进 |
-| 综合分 | 当前规则和历史证据综合排序 |
+| 默认排序分 | 已采用的 `current_rules/final_score`；历史证据和多模态分只作研究对照 |
 | 质量复核标记 | 标出可能需要人工处理的风险 |
 | 导出状态 | 待导出、已导出或暂缓 |
 
 点击候选后，右侧“预览与评分详情”会同步展示完整信息。
+
+默认页面、批量短片排名和 `dso suggest` 都使用生产 scope。排查算法时可运行 `dso suggest <video_id> --ranking-scope research`，或请求 `GET /videos/{video_id}/suggestions?ranking_scope=research` 查看研究顺序；该操作不会改变审核、导出或发布状态。
 
 ### 6.6 使用右侧详情面板
 
@@ -837,6 +839,7 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `GET /runtime` | 运行环境诊断 |
 | `GET /providers/status` | 查询 G3 Provider 安全底座状态，不返回密钥 |
 | `POST /providers/fake-smoke` | 运行零网络、零费用的 Provider Smoke |
+| `GET /ranking/policy` | 查询当前生产排序策略、研究状态和 promotion gate 门槛 |
 | `GET /videos` | 节目列表 |
 | `POST /videos` | 上传节目 |
 | `POST /precut-batches` | 批量上传已切短片并可排入后台处理 |
@@ -846,7 +849,7 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `POST /videos/{video_id}/extract` | 提取 ASR 和音频特征 |
 | `POST /videos/{video_id}/segments` | 生成候选 |
 | `POST /videos/{video_id}/score` | 评分 |
-| `GET /videos/{video_id}/suggestions` | 查询 Top 候选 |
+| `GET /videos/{video_id}/suggestions` | 查询 Top 候选；默认 production，可显式传 `ranking_scope=research` 做研究对照 |
 | `GET /videos/{video_id}/quality` | 查询质量哨兵 |
 | `POST /segments/{segment_id}/export` | 导出候选 |
 | `GET /segments/{segment_id}/history` | 查询历史相似和先验 |

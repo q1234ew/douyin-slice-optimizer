@@ -168,6 +168,8 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 
 只展示少量成功案例不能替代冻结 benchmark。新方案的状态和结论还应同步到 [model-and-algorithm-radar.md](./model-and-algorithm-radar.md)。
 
+排序策略准入还必须遵守：默认生产排序只能读取已明确采用的 production policy；`ranker_score`、`hybrid_score` 或模型分不得因为字段存在而隐式成为默认分。研究策略必须同时通过绝对门槛、相对 `current_rules` 与语义基线的强基线保护以及账号级门槛；即使通过，也只能标记为 `eligible_for_promotion`，需冻结新 benchmark 并显式修改 policy 后才可采用。
+
 ## 5. 数据开发要求
 
 ### 5.1 数据源和入库口径

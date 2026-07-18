@@ -15,7 +15,7 @@
     <div id="candidate-review-brief" class="review-brief" aria-live="polite">
       <div class="review-brief-main">
         <strong>{{ clipText(selectedTitle, 44) }}</strong>
-        <span>按混合分从上到下复核：先看时间轴信号、Omni 多窗口证据和历史先验，再决定人工通过或导出预览。</span>
+        <span>默认按已采用的规则基线排序；Omni 与历史先验作为研究证据展示，不会在门禁通过前改写 Top-K。</span>
       </div>
       <div class="review-brief-stat"><span>Top 候选</span><strong>{{ rows.length }}</strong></div>
       <div class="review-brief-stat"><span>待导出</span><strong>{{ pendingExport }}</strong></div>
@@ -61,7 +61,7 @@
         </button>
         <div class="candidate-score">
           <strong>{{ displayScore(row).toFixed(1) }}</strong>
-          <span>{{ row.omni_status === "ready" ? "混合分" : "综合分" }}</span>
+          <span>默认排序分</span>
           <div class="score-meter"><span :style="{ width: `${Math.max(0, Math.min(100, displayScore(row)))}%` }"></span></div>
         </div>
         <div class="candidate-status">
@@ -111,14 +111,14 @@ function firstTitle(row: CandidateRow): string {
 }
 
 function displayScore(row: CandidateRow): number {
-  return Number(row.hybrid_score || row.ranker_score || row.final_score || 0);
+  return Number(row.production_score ?? row.final_score ?? 0);
 }
 
 function omniLabel(row: CandidateRow): string {
   if (row.omni_status === "ready") {
     const analysis = row.omni_analysis && typeof row.omni_analysis === "object" ? row.omni_analysis : {};
     const windows = Number(analysis.window_count || 0);
-    return `Omni ${windows || 1} 窗复排 · 置信 ${Math.round(Number(row.omni_confidence || 0) * 100)}%`;
+    return `Omni ${windows || 1} 窗研究复排 · 置信 ${Math.round(Number(row.omni_confidence || 0) * 100)}%`;
   }
   if (String(row.omni_status || "").startsWith("fallback_")) return "Omni 未就绪 · 已自动规则回退";
   if (row.omni_status === "not_selected") return "规则预排 · 未进入 Omni 池";

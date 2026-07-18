@@ -387,7 +387,7 @@ const latestReviewEvent = computed<ReviewEvent | null>(() => reviewEvents.value[
 const olderReviewEvents = computed(() => reviewEvents.value.slice(1));
 const latestReviewReason = computed(() => String(latestReviewEvent.value?.reason || ""));
 const feedback = computed(() => row.value?.feedback_summary || {});
-const displayScore = computed(() => Number(row.value?.hybrid_score || row.value?.ranker_score || row.value?.final_score || 0));
+const displayScore = computed(() => Number(row.value?.production_score ?? row.value?.final_score ?? 0));
 const omniAnalysis = computed<Record<string, unknown>>(() => {
   const value = row.value?.omni_analysis;
   return value && typeof value === "object" ? value : {};
@@ -398,7 +398,7 @@ const omniWindows = computed<Array<Record<string, unknown>>>(() => {
 });
 const omniWindowCount = computed(() => Number(omniAnalysis.value.window_count || omniWindows.value.length || 0));
 const omniStatusLabel = computed(() => {
-  if (row.value?.omni_status === "ready") return "已参与复排";
+  if (row.value?.omni_status === "ready") return "研究复排证据";
   if (String(row.value?.omni_status || "").startsWith("fallback_")) return "规则回退";
   if (row.value?.omni_status === "not_selected") return "未进入复排池";
   if (row.value?.omni_status === "error") return "单条回退";

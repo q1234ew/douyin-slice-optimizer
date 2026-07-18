@@ -28,6 +28,7 @@ from dso.learning.qwen_embeddings import (
     historical_embedding_strategy_scores,
 )
 from dso.learning.qwen_omni import omni_annotation_field_guides, qwen_omni_shadow_cache_index, refresh_omni_shadow_for_row
+from dso.scoring.ranking_policy import RESEARCH_RANKER_PROMOTION_THRESHOLDS
 from dso.utils import clamp, new_id, utc_now
 from dso.versions import BACKTEST_VERSION, RESEARCH_LABEL_VERSION, RESEARCH_RANKER_VERSION, SCORER_VERSION
 
@@ -2995,6 +2996,18 @@ def _promotion_gate(
     strategy: str = RESEARCH_RANKER_V24_STRATEGY,
 ) -> dict:
     target = strategy_comparison.get(strategy) or strategy_comparison.get("research_ranker_v2") or {}
+    if strategy == "current_rules":
+        return {
+            "passed": True,
+            "status": "production_baseline",
+            "strategy": strategy,
+            "topk_lift_vs_random": round(float(target.get("topk_lift_vs_random") or 0.0), 4),
+            "high_interaction_hit_rate": round(float(target.get("high_interaction_hit_rate") or 0.0), 4),
+            "low_interaction_avoidance_rate": round(float(target.get("low_interaction_avoidance_rate") or 0.0), 4),
+            "decision": "keep_current_rules_as_production_baseline",
+            "automatic_promotion": False,
+            "note": "current_rules 是已采用基线；研究策略只有通过冻结门禁并显式变更策略后才能替代它。",
+        }
     if strategy in {RESEARCH_RANKER_V28_MATERIAL_STRATEGY, RESEARCH_RANKER_V29_TAXONOMY_STRATEGY}:
         base = strategy_comparison.get(RESEARCH_RANKER_V24_STRATEGY) or {}
         lift_delta = float(target.get("topk_lift_vs_random") or 0.0) - float(base.get("topk_lift_vs_random") or 0.0)
@@ -3137,10 +3150,10 @@ def _promotion_gate(
     high_hit = float(target.get("high_interaction_hit_rate") or 0.0)
     low_avoidance = float(target.get("low_interaction_avoidance_rate") or 0.0)
     if strategy in {RESEARCH_RANKER_V22_STRATEGY, RESEARCH_RANKER_V23_STRATEGY, RESEARCH_RANKER_V24_STRATEGY}:
-        required_lift = 1.85
-        required_high_hit = 0.90
-        required_low_avoidance = 0.95
-        required_accounts = 10
+        required_lift = float(RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_topk_lift_vs_random"])
+        required_high_hit = float(RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_high_interaction_hit_rate"])
+        required_low_avoidance = float(RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_low_interaction_avoidance_rate"])
+        required_accounts = int(RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_improved_ready_account_count"])
     elif strategy == RESEARCH_RANKER_V21_STRATEGY:
         required_lift = 1.70
         required_high_hit = 0.70
@@ -3151,15 +3164,17 @@ def _promotion_gate(
         required_high_hit = 0.0
         required_low_avoidance = 0.0
         required_accounts = 3
-    passed = (
+    baseline_guard = _production_baseline_guard(strategy_comparison, target)
+    threshold_gate_passed = (
         topk_lift >= required_lift
         and high_hit >= required_high_hit
         and low_avoidance >= required_low_avoidance
         and len(ready_improved) >= required_accounts
     )
+    passed = threshold_gate_passed and bool(baseline_guard.get("passed"))
     return {
         "passed": passed,
-        "status": "pass" if passed else "research_only",
+        "status": "eligible_for_promotion" if passed else "research_only",
         "strategy": strategy,
         "topk_lift_vs_random": round(topk_lift, 4),
         "high_interaction_hit_rate": round(high_hit, 4),
@@ -3169,7 +3184,61 @@ def _promotion_gate(
         "required_low_interaction_avoidance_rate": required_low_avoidance,
         "improved_ready_account_count": len(ready_improved),
         "required_improved_ready_account_count": required_accounts,
-        "decision": "eligible_for_stronger_weight" if passed else "keep_as_research_evidence",
+        "threshold_gate_passed": threshold_gate_passed,
+        "baseline_guard": baseline_guard,
+        "decision": "eligible_for_explicit_production_promotion" if passed else "keep_as_research_evidence",
+        "automatic_promotion": False,
+        "note": "门禁通过也不会自动改写生产排序；必须冻结新基准并显式更新 production ranking policy。",
+    }
+
+
+def _production_baseline_guard(strategy_comparison: dict, target: dict) -> dict:
+    baselines = {
+        name: strategy_comparison.get(name) or {}
+        for name in ["current_rules", "semantic_baseline_v2"]
+        if isinstance(strategy_comparison.get(name), dict)
+    }
+    strongest_lift_strategy = max(
+        baselines,
+        key=lambda name: float((baselines.get(name) or {}).get("topk_lift_vs_random") or 0.0),
+        default="missing",
+    )
+    strongest = {
+        metric: max((float(item.get(metric) or 0.0) for item in baselines.values()), default=0.0)
+        for metric in [
+            "topk_lift_vs_random",
+            "ndcg_at_k",
+            "high_interaction_hit_rate",
+            "low_interaction_avoidance_rate",
+        ]
+    }
+    deltas = {
+        metric: round(float(target.get(metric) or 0.0) - baseline, 4)
+        for metric, baseline in strongest.items()
+    }
+    required = {
+        "topk_lift_vs_random": float(
+            RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_lift_delta_vs_strongest_baseline"]
+        ),
+        "ndcg_at_k": float(
+            RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_ndcg_delta_vs_strongest_baseline"]
+        ),
+        "high_interaction_hit_rate": float(
+            RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_high_hit_delta_vs_strongest_baseline"]
+        ),
+        "low_interaction_avoidance_rate": float(
+            RESEARCH_RANKER_PROMOTION_THRESHOLDS["required_low_avoidance_delta_vs_strongest_baseline"]
+        ),
+    }
+    checks = {metric: deltas[metric] >= threshold for metric, threshold in required.items()}
+    return {
+        "passed": bool(baselines) and all(checks.values()),
+        "baseline_strategies": sorted(baselines),
+        "strongest_lift_strategy": strongest_lift_strategy,
+        "strongest_metric_values": {key: round(value, 4) for key, value in strongest.items()},
+        "target_deltas": deltas,
+        "required_deltas": required,
+        "checks": checks,
     }
 
 

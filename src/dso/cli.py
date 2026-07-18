@@ -21,7 +21,9 @@ from dso.feedback.douyin_auth import complete_douyin_qr_login, douyin_oauth_stat
 from dso.feedback.importer import account_baselines, account_insights, import_metrics, list_training_samples, rebuild_feedback_state
 from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
 from dso.learning.benchmark_manifest import (
+    BENCHMARK_KINDS,
     DEFAULT_BENCHMARK_ID,
+    HISTORICAL_MATERIAL_BENCHMARK_KIND,
     freeze_benchmark_manifest,
     run_frozen_benchmark,
     verify_benchmark_manifest,
@@ -215,9 +217,13 @@ def cmd_hybrid_slice(
     )
 
 
-def cmd_suggest(video_id: str, top_k: int) -> dict:
+def cmd_suggest(video_id: str, top_k: int, ranking_scope: str = "production") -> dict:
     init_db()
-    return {"video_id": video_id, "suggestions": suggestions(video_id, top_k=top_k)}
+    return {
+        "video_id": video_id,
+        "ranking_scope": ranking_scope,
+        "suggestions": suggestions(video_id, top_k=top_k, ranking_scope=ranking_scope),
+    }
 
 
 def cmd_manifest(video_id: str) -> dict:
@@ -423,9 +429,17 @@ def cmd_backtest(account: str | None, k: int, strategy: str = "research_ranker_v
     return backtest_rule_ranker(account_id=account, k=k, strategy=strategy, holdout_policy=holdout_policy, label_version=label_version)
 
 
-def cmd_benchmark_freeze(benchmark_id: str, reference_report_id: str | None) -> dict:
+def cmd_benchmark_freeze(
+    benchmark_id: str,
+    reference_report_id: str | None,
+    benchmark_kind: str = HISTORICAL_MATERIAL_BENCHMARK_KIND,
+) -> dict:
     init_db()
-    return freeze_benchmark_manifest(benchmark_id, reference_report_id=reference_report_id)
+    return freeze_benchmark_manifest(
+        benchmark_id,
+        reference_report_id=reference_report_id,
+        benchmark_kind=benchmark_kind,
+    )
 
 
 def cmd_benchmark_verify(benchmark_id: str) -> dict:
@@ -1131,8 +1145,12 @@ def _typer_main(typer_module: Any) -> None:
         _print(cmd_hybrid_slice(video_id, top_k, candidate_limit, max_clip_seconds, omni_weight, load_model, force))
 
     @app.command("suggest")
-    def suggest_command(video_id: str, top_k: int = typer_module.Option(10, "--top-k")) -> None:
-        _print(cmd_suggest(video_id, top_k))
+    def suggest_command(
+        video_id: str,
+        top_k: int = typer_module.Option(10, "--top-k"),
+        ranking_scope: str = typer_module.Option("production", "--ranking-scope"),
+    ) -> None:
+        _print(cmd_suggest(video_id, top_k, ranking_scope))
 
     @app.command("manifest")
     def manifest_command(video_id: str) -> None:
@@ -1328,8 +1346,13 @@ def _typer_main(typer_module: Any) -> None:
     def benchmark_freeze_command(
         benchmark_id: str = typer_module.Option(DEFAULT_BENCHMARK_ID, "--benchmark-id"),
         reference_report_id: str | None = typer_module.Option(None, "--reference-report-id"),
+        benchmark_kind: str = typer_module.Option(
+            HISTORICAL_MATERIAL_BENCHMARK_KIND,
+            "--benchmark-kind",
+            help=f"Benchmark kind: {', '.join(sorted(BENCHMARK_KINDS))}",
+        ),
     ) -> None:
-        _print(cmd_benchmark_freeze(benchmark_id, reference_report_id))
+        _print(cmd_benchmark_freeze(benchmark_id, reference_report_id, benchmark_kind))
 
     @app.command("benchmark-verify")
     def benchmark_verify_command(
@@ -1822,6 +1845,7 @@ def _argparse_main() -> None:
     suggest = sub.add_parser("suggest")
     suggest.add_argument("video_id")
     suggest.add_argument("--top-k", type=int, default=10)
+    suggest.add_argument("--ranking-scope", default="production")
     manifest = sub.add_parser("manifest")
     manifest.add_argument("video_id")
     review = sub.add_parser("review-segment")
@@ -1918,6 +1942,11 @@ def _argparse_main() -> None:
     benchmark_freeze = sub.add_parser("benchmark-freeze")
     benchmark_freeze.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
     benchmark_freeze.add_argument("--reference-report-id")
+    benchmark_freeze.add_argument(
+        "--benchmark-kind",
+        choices=sorted(BENCHMARK_KINDS),
+        default=HISTORICAL_MATERIAL_BENCHMARK_KIND,
+    )
     benchmark_verify = sub.add_parser("benchmark-verify")
     benchmark_verify.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
     benchmark_run = sub.add_parser("benchmark-run")
@@ -2197,7 +2226,7 @@ def _argparse_main() -> None:
             )
         )
     elif args.command == "suggest":
-        _print(cmd_suggest(args.video_id, args.top_k))
+        _print(cmd_suggest(args.video_id, args.top_k, args.ranking_scope))
     elif args.command == "manifest":
         _print(cmd_manifest(args.video_id))
     elif args.command == "review-segment":
@@ -2267,7 +2296,7 @@ def _argparse_main() -> None:
     elif args.command == "backtest":
         _print(cmd_backtest(args.account, args.k, args.strategy, args.holdout_policy, args.label_version))
     elif args.command == "benchmark-freeze":
-        _print(cmd_benchmark_freeze(args.benchmark_id, args.reference_report_id))
+        _print(cmd_benchmark_freeze(args.benchmark_id, args.reference_report_id, args.benchmark_kind))
     elif args.command == "benchmark-verify":
         _print(cmd_benchmark_verify(args.benchmark_id))
     elif args.command == "benchmark-run":

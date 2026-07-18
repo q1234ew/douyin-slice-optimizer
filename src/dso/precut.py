@@ -9,6 +9,7 @@ from dso.db.session import connect, fetch_all, fetch_one, init_db, insert_row
 from dso.features.asr import transcribe_video
 from dso.features.audio import extract_audio_features
 from dso.media.ingest import ingest_video
+from dso.scoring.ranking_policy import attach_ranking_policy, production_ranking_contract
 from dso.scoring.scorer import score_segment
 from dso.segments.generator import describe_candidate_content
 from dso.utils import new_id, utc_now
@@ -306,7 +307,7 @@ def get_precut_batch(batch_id: str) -> dict:
         item["title_suggestions"] = _json_value(item.get("title_suggestions"), [])
         item["risk_notes"] = _json_value(item.get("risk_notes"), [])
         item["learning_signals"] = _json_value(item.pop("learning_signals_json", "{}"), {})
-        item["effective_score"] = _effective_score(item)
+        item.update(attach_ranking_policy(item))
         item["boundary_invariant"] = bool(
             item.get("candidate_origin") == "precut"
             and int(item.get("boundary_locked") or 0) == 1
@@ -323,8 +324,8 @@ def get_precut_batch(batch_id: str) -> dict:
     rankings.sort(
         key=lambda item: (
             float(item.get("effective_score") or 0),
-            float(item.get("ranker_score") or 0),
             float(item.get("final_score") or 0),
+            float(item.get("research_score") or 0),
             -int(item.get("position") or 0),
         ),
         reverse=True,
@@ -335,6 +336,7 @@ def get_precut_batch(batch_id: str) -> dict:
     return {
         "contract_version": PRECUT_BATCH_VERSION,
         "candidate_contract_version": STANDARD_CANDIDATE_VERSION,
+        "ranking_policy": production_ranking_contract(),
         "batch_id": batch_id,
         "status": batch["status"],
         "batch": batch,
@@ -561,16 +563,6 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _effective_score(item: dict) -> float | None:
-    if item.get("hybrid_score") not in (None, 0, 0.0):
-        return round(float(item["hybrid_score"]), 4)
-    if item.get("ranker_score") not in (None, 0, 0.0):
-        return round(float(item["ranker_score"]), 4)
-    if item.get("final_score") is not None:
-        return round(float(item["final_score"]), 4)
-    return None
 
 
 def _scored_item_count(conn, batch_id: str) -> int:

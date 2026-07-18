@@ -12,6 +12,7 @@ ARTIFACT_MANIFEST_VERSION = "artifact_manifest.v1"
 VIDEO_DOWNLOAD_CONTRACT_VERSION = "video_download.v1"
 STANDARD_CANDIDATE_VERSION = "standard_candidate.v1"
 PRECUT_BATCH_VERSION = "precut_batch.v1"
+PRODUCTION_RANKING_POLICY_VERSION = "production_ranking_policy.v1"
 ASR_PROFILE_PLAN_VERSION = "asr_profile_plan.v1"
 ASR_MODEL_ROUTING_VERSION = "asr_model_routing.v1"
 ASR_VERIFY_VERSION = "asr_verify.v1"
@@ -54,6 +55,7 @@ def component_versions() -> dict[str, str]:
         "video_download": VIDEO_DOWNLOAD_CONTRACT_VERSION,
         "standard_candidate": STANDARD_CANDIDATE_VERSION,
         "precut_batch": PRECUT_BATCH_VERSION,
+        "production_ranking_policy": PRODUCTION_RANKING_POLICY_VERSION,
         "asr_profile_plan": ASR_PROFILE_PLAN_VERSION,
         "asr_model_routing": ASR_MODEL_ROUTING_VERSION,
         "asr_verify": ASR_VERIFY_VERSION,

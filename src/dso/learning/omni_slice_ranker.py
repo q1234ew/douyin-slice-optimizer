@@ -55,9 +55,9 @@ def run_hybrid_slice_pipeline(
         "video_id": video_id,
         "pipeline": {
             "recall": "timeline_signal_segmenter",
-            "pre_rank": "rules_and_history",
-            "rerank": "qwen_omni_multi_window",
-            "fallback": "rules_and_history",
+            "pre_rank": "current_rules",
+            "rerank": "qwen_omni_multi_window_research",
+            "fallback": "current_rules",
         },
         "counts": {
             "recalled": len(segments),
@@ -68,6 +68,8 @@ def run_hybrid_slice_pipeline(
         "ranking": ranking,
         "suggestions": suggestions(video_id, top_k=max(1, int(top_k or 10))),
         "generated_at": utc_now(),
+        "production_weight": False,
+        "research_only": True,
     }
 
 
@@ -114,7 +116,9 @@ def rerank_video_candidates_with_omni(
             "candidate_limit": candidate_limit,
             "max_clip_seconds": clip_limit,
             "omni_weight_cap": max_weight,
-            "recommendation": "模型未就绪，已保持规则与历史排序；候选和导出流程不受影响。",
+            "recommendation": "模型未就绪，已保持 current_rules 默认排序；候选和导出流程不受影响。",
+            "production_weight": False,
+            "research_only": True,
             "generated_at": utc_now(),
         }
 
@@ -182,6 +186,8 @@ def rerank_video_candidates_with_omni(
         "omni_weight_cap": max_weight,
         "ranked": ranked_rows[:candidate_limit],
         "recommendation": "Omni 只影响候选复排，不自动改写人工标签或导出边界。",
+        "production_weight": False,
+        "research_only": True,
         "generated_at": utc_now(),
     }
 
@@ -511,14 +517,14 @@ def _scored_candidate_rows(video_id: str) -> list[dict]:
             JOIN source_videos v ON v.id = c.source_video_id
             JOIN slice_scores s ON s.candidate_segment_id = c.id
             WHERE c.source_video_id = ?
-            ORDER BY COALESCE(NULLIF(s.ranker_score, 0), s.final_score) DESC, s.final_score DESC
+            ORDER BY s.final_score DESC, c.id ASC
             """,
             [video_id],
         )
 
 
 def _persist_fallback(rows: list[dict], *, status: str, reason: str) -> None:
-    payload = json.dumps({"status": status, "reason": reason, "fallback": "rules_and_history"}, ensure_ascii=False)
+    payload = json.dumps({"status": status, "reason": reason, "fallback": "current_rules"}, ensure_ascii=False)
     ranked = sorted(rows, key=_base_score, reverse=True)
     with connect() as conn:
         for rank, row in enumerate(ranked, start=1):
@@ -576,7 +582,7 @@ def _candidate_failure(row: dict, error: str) -> dict:
 
 
 def _base_score(row: dict) -> float:
-    return round(float(row.get("ranker_score") or row.get("final_score") or 0.0), 2)
+    return round(float(row.get("final_score") or 0.0), 2)
 
 
 def _result_cache_path(row: dict, *, model_id: str, max_clip_seconds: float) -> Path:
@@ -626,5 +632,7 @@ def _empty_report(video_id: str, reason: str) -> dict:
         "fallback_reason": reason,
         "preselected_count": 0,
         "omni_applied_count": 0,
+        "production_weight": False,
+        "research_only": True,
         "generated_at": utc_now(),
     }

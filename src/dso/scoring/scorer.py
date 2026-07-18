@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
 from dso.learning.research_ranker import research_learning_signals
+from dso.scoring.ranking_policy import attach_ranking_policy, normalize_ranking_scope, ranking_sort_key
 from dso.scoring.rights import rights_risk_for_segment
 from dso.utils import clamp, new_id, utc_now
 from dso.versions import PROTOTYPE_BANK_VERSION, RESEARCH_RANKER_VERSION, SCORER_VERSION
@@ -74,10 +75,12 @@ def score_segment(segment_id: str) -> dict:
     row["scorer_version"] = SCORER_VERSION
     row["ranker_version"] = RESEARCH_RANKER_VERSION
     row["learning_signals"] = learning_signals
-    return row
+    return attach_ranking_policy(row)
 
 
-def suggestions(video_id: str, top_k: int = 10) -> list[dict]:
+def suggestions(video_id: str, top_k: int = 10, *, ranking_scope: str = "production") -> list[dict]:
+    scope = normalize_ranking_scope(ranking_scope)
+    limit = max(1, int(top_k or 10))
     with connect() as conn:
         rows = fetch_all(
             conn,
@@ -91,21 +94,21 @@ def suggestions(video_id: str, top_k: int = 10) -> list[dict]:
             FROM candidate_segments c
             JOIN slice_scores s ON s.candidate_segment_id = c.id
             WHERE c.source_video_id = ?
-            ORDER BY COALESCE(NULLIF(s.hybrid_score, 0), NULLIF(s.ranker_score, 0), s.final_score) DESC,
-                     COALESCE(NULLIF(s.ranker_score, 0), s.final_score) DESC,
-                     s.final_score DESC
-            LIMIT ?
             """,
-            [video_id, top_k],
+            [video_id],
         )
-    for row in rows:
+    prepared = []
+    for raw_row in rows:
+        row = attach_ranking_policy(raw_row, ranking_scope=scope)
         row["title_suggestions"] = sanitize_title_suggestions(json.loads(row["title_suggestions"]))
         row["risk_notes"] = json.loads(row["risk_notes"])
         row["learning_signals"] = _json_field(row.pop("learning_signals_json", "{}"), {})
         row["omni_analysis"] = _json_field(row.pop("omni_analysis_json", "{}"), {})
         row["generation_signals"] = _json_field(row.pop("generation_signals_json", "{}"), {})
         row["scorer_version"] = SCORER_VERSION
-    return rows
+        prepared.append(row)
+    prepared.sort(key=lambda item: ranking_sort_key(item, ranking_scope=scope), reverse=True)
+    return prepared[:limit]
 
 
 def _score_parts(segment: dict) -> dict[str, float]:
