@@ -38,6 +38,15 @@ from dso.feedback.platform import (
     upsert_platform_account,
 )
 from dso.media.ingest import ingest_video, list_videos
+from dso.precut import (
+    MAX_BATCH_ITEMS,
+    create_precut_batch,
+    get_precut_batch,
+    list_precut_batches,
+    process_precut_batch,
+    queue_precut_batch,
+)
+from dso.providers.service import public_model_status, run_fake_provider_smoke
 from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
 from dso.learning.benchmark_manifest import load_benchmark_manifest, run_frozen_benchmark, verify_benchmark_manifest
 from dso.learning.historical_samples import (
@@ -69,7 +78,10 @@ from dso.learning.material_evidence import (
     run_material_resolver_shadow,
 )
 from dso.learning.visual_window_scout import (
+    DEFAULT_D11B_BATCH_SIZE,
     build_visual_window_scout,
+    load_visual_window_build,
+    load_visual_window_build_manifest,
     run_visual_window_experiment,
     update_material_window_annotation,
     visual_window_frame_path,
@@ -91,6 +103,7 @@ from dso.learning.qwen_embeddings import (
     run_qwen_embedding_evidence,
 )
 from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
+from dso.learning.omni_slice_ranker import rerank_video_candidates_with_omni, run_hybrid_slice_pipeline
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.quality.insights import quality_insights
 from dso.review import list_change_events, list_review_events, mark_candidate_review
@@ -108,10 +121,16 @@ from dso.variants.exporter import (
     list_variants,
     update_variant,
 )
-from dso.versions import FEEDBACK_STATE_VERSION, QUALITY_GATE_VERSION, SCORER_VERSION, SEGMENTER_VERSION
+from dso.versions import (
+    FEEDBACK_STATE_VERSION,
+    HYBRID_SLICE_PIPELINE_VERSION,
+    QUALITY_GATE_VERSION,
+    SCORER_VERSION,
+    SEGMENTER_VERSION,
+)
 
 try:
-    from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.responses import FileResponse, HTMLResponse
     from fastapi.staticfiles import StaticFiles
 except Exception as exc:  # pragma: no cover
@@ -144,6 +163,23 @@ def runtime() -> dict:
     return runtime_diagnostics()
 
 
+@app.get("/providers/status")
+def providers_status() -> dict:
+    return public_model_status()
+
+
+@app.post("/providers/fake-smoke")
+def providers_fake_smoke(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_fake_provider_smoke(
+            text=str(payload.get("text") or "G3 provider contract smoke"),
+            repeat=int(payload.get("repeat") or 2),
+            batch_id=payload.get("batch_id"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/videos")
 def videos() -> dict:
     return {"videos": list_videos()}
@@ -163,6 +199,94 @@ async def create_video(
         return ingest_video(tmp_path, account_id=account_id, title=title)
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+@app.get("/precut-batches")
+def precut_batches(limit: int = 20) -> dict:
+    return list_precut_batches(limit=limit)
+
+
+@app.get("/precut-batches/{batch_id}")
+def precut_batch(batch_id: str) -> dict:
+    try:
+        return get_precut_batch(batch_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/precut-batches")
+async def create_precut_batch_endpoint(
+    background_tasks: BackgroundTasks,
+    account_id: str = Form("main"),
+    batch_title: str = Form(""),
+    process: bool = Form(True),
+    asr_profile: str = Form("fast"),
+    files: list[UploadFile] = File(...),
+) -> dict:
+    if not files:
+        raise HTTPException(status_code=400, detail="at least one precut video is required")
+    if len(files) > MAX_BATCH_ITEMS:
+        raise HTTPException(status_code=400, detail=f"a precut batch supports at most {MAX_BATCH_ITEMS} files")
+
+    source_names: list[str] = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="dso-precut-") as temp_dir:
+            temp_paths: list[Path] = []
+            for index, upload in enumerate(files):
+                source_name = Path(upload.filename or f"clip-{index + 1}.mp4").name
+                suffix = Path(source_name).suffix or ".mp4"
+                stored_name = source_name if Path(source_name).suffix else f"{source_name}{suffix}"
+                temp_path = Path(temp_dir) / f"{index:03d}-{stored_name}"
+                with temp_path.open("wb") as handle:
+                    while chunk := await upload.read(1024 * 1024):
+                        handle.write(chunk)
+                await upload.close()
+                temp_paths.append(temp_path)
+                source_names.append(source_name)
+            result = create_precut_batch(
+                temp_paths,
+                account_id=account_id,
+                title=batch_title,
+                source_names=source_names,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    processable = int(result.get("summary", {}).get("item_count") or 0) - int(
+        result.get("summary", {}).get("failed_count") or 0
+    )
+    if process and processable > 0 and result.get("status") != "completed":
+        result = queue_precut_batch(result["batch_id"])
+        background_tasks.add_task(
+            process_precut_batch,
+            result["batch_id"],
+            force=False,
+            asr_profile=asr_profile or "fast",
+        )
+    return result
+
+
+@app.post("/precut-batches/{batch_id}/process")
+def process_precut_batch_endpoint(
+    batch_id: str,
+    background_tasks: BackgroundTasks,
+    payload: dict = Body(default_factory=dict),
+) -> dict:
+    try:
+        force = bool(payload.get("force", False))
+        asr_profile = str(payload.get("asr_profile") or "fast")
+        if bool(payload.get("wait", False)):
+            return process_precut_batch(batch_id, force=force, asr_profile=asr_profile)
+        result = queue_precut_batch(batch_id)
+        background_tasks.add_task(
+            process_precut_batch,
+            batch_id,
+            force=force,
+            asr_profile=asr_profile,
+        )
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/videos/{video_id}/extract")
@@ -191,7 +315,12 @@ def extract(video_id: str) -> dict:
 
 @app.post("/videos/{video_id}/segments")
 def segments(video_id: str, top_k: int = 30) -> dict:
-    rows = generate_segments(video_id, top_k=top_k)
+    try:
+        rows = generate_segments(video_id, top_k=top_k)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     record_artifact(
         video_id,
         step="candidates",
@@ -213,6 +342,57 @@ def score(video_id: str) -> dict:
         summary={"count": len(rows)},
     )
     return {"count": len(rows), "scores": rows}
+
+
+@app.post("/videos/{video_id}/hybrid-slice")
+def hybrid_slice(video_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        result = run_hybrid_slice_pipeline(
+            video_id,
+            top_k=int(payload.get("top_k") or 10),
+            candidate_limit=int(payload.get("candidate_limit") or 3),
+            max_clip_seconds=float(payload.get("max_clip_seconds") or 6.0),
+            omni_weight=float(payload.get("omni_weight") or 0.15),
+            load_model=bool(payload.get("load_model", False)),
+            force=bool(payload.get("force", False)),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    record_artifact(
+        video_id,
+        step="hybrid_ranking",
+        artifact_type="omni_multi_window_rerank",
+        version=HYBRID_SLICE_PIPELINE_VERSION,
+        summary={
+            "status": result.get("status") or "fallback",
+            **(result.get("counts") or {}),
+        },
+    )
+    return result
+
+
+@app.post("/videos/{video_id}/omni-rerank")
+def omni_rerank(video_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    result = rerank_video_candidates_with_omni(
+        video_id,
+        candidate_limit=int(payload.get("candidate_limit") or 3),
+        max_clip_seconds=float(payload.get("max_clip_seconds") or 6.0),
+        omni_weight=float(payload.get("omni_weight") or 0.15),
+        load_model=bool(payload.get("load_model", False)),
+        force=bool(payload.get("force", False)),
+    )
+    record_artifact(
+        video_id,
+        step="omni_rerank",
+        artifact_type="omni_multi_window_rerank",
+        version=str(result.get("contract_version") or HYBRID_SLICE_PIPELINE_VERSION),
+        summary={
+            "status": result.get("status") or "fallback",
+            "preselected": result.get("preselected_count") or 0,
+            "omni_applied": result.get("omni_applied_count") or 0,
+        },
+    )
+    return result
 
 
 @app.get("/videos/{video_id}/suggestions")
@@ -951,13 +1131,20 @@ def get_visual_window_scout_status(
     dataset_id: str | None = None,
     limit: int = 60,
     summary_only: bool = False,
+    build_id: str | None = None,
 ) -> dict:
-    return visual_window_scout_status(
-        account_id=account_id,
-        dataset_id=dataset_id,
-        limit=limit,
-        summary_only=summary_only,
-    )
+    try:
+        return visual_window_scout_status(
+            account_id=account_id,
+            dataset_id=dataset_id,
+            limit=limit,
+            summary_only=summary_only,
+            build_id=build_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/learning/visual-window-scout/build")
@@ -967,7 +1154,7 @@ def post_visual_window_scout_build(payload: dict = Body(default_factory=dict)) -
             account_id=payload.get("account_id"),
             dataset_id=payload.get("dataset_id"),
             sample_ids=payload.get("sample_ids") if isinstance(payload.get("sample_ids"), list) else None,
-            limit=int(payload.get("limit") or 5),
+            limit=int(payload.get("limit") or DEFAULT_D11B_BATCH_SIZE),
             window_seconds=float(payload.get("window_seconds") or 15.0),
             stride_seconds=float(payload.get("stride_seconds") or 5.0),
             max_windows_per_sample=int(payload.get("max_windows_per_sample") or 3),
@@ -975,6 +1162,9 @@ def post_visual_window_scout_build(payload: dict = Body(default_factory=dict)) -
             load_model=bool(payload.get("load_model", False)),
             scan_scenes=bool(payload.get("scan_scenes", True)),
             frame_cache_limit_bytes=int(payload.get("frame_cache_limit_bytes") or 512 * 1024 * 1024),
+            batch_mode=str(payload.get("batch_mode") or "next"),
+            exclude_reviewed=bool(payload.get("exclude_reviewed", True)),
+            resume_pending=bool(payload.get("resume_pending", True)),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -990,9 +1180,38 @@ def patch_material_window_gold(sample_id: str, payload: dict = Body(default_fact
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/learning/visual-window-scout/builds/{build_id}")
+def get_visual_window_scout_build(build_id: str) -> dict:
+    try:
+        return load_visual_window_build(build_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/visual-window-scout/builds/{build_id}/manifest")
+def get_visual_window_scout_build_manifest(build_id: str) -> dict:
+    try:
+        return load_visual_window_build_manifest(build_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/learning/visual-window-scout/experiment")
-def post_visual_window_scout_experiment() -> dict:
-    return run_visual_window_experiment()
+def post_visual_window_scout_experiment(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_visual_window_experiment(
+            build_id=payload.get("build_id"),
+            build_ids=payload.get("build_ids") if isinstance(payload.get("build_ids"), list) else None,
+            scope=str(payload.get("scope") or "cumulative"),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/learning/visual-window-scout/frames/{sample_id}/{window_key}/{frame_name}")
@@ -1471,6 +1690,18 @@ def _parse_segment_json_fields(row: dict) -> dict:
             row["learning_signals"] = {}
     elif signals is not None:
         row["learning_signals"] = signals
+    for source, target in [
+        ("omni_analysis_json", "omni_analysis"),
+        ("generation_signals_json", "generation_signals"),
+    ]:
+        value = row.pop(source, None)
+        if isinstance(value, str):
+            try:
+                row[target] = json.loads(value)
+            except Exception:
+                row[target] = {}
+        elif value is not None:
+            row[target] = value
     return row
 
 

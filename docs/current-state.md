@@ -1,13 +1,17 @@
 # 当前工程状态
 
-更新时间：2026-07-05
+更新时间：2026-07-18
 
 ## 1. 产品状态
 
 Douyin Slice Optimizer 是本地优先的音乐综艺短视频切片优化工作台。当前能力覆盖：
 
 - 长视频导入、ASR 转写、候选切片生成、评分和 9:16 导出。
+- 可选的授权腾讯系 / YouTube 单视频 URL 获取：经 `videofetch==0.9.1` 的白名单客户端解析/下载，默认落在当前工程的 `data/tmp/video_downloads`，可 dry-run，可选择进入既有节目导入链路；YouTube 固定单视频、最高 720p/H.264 并合并默认 AAC 音轨，不启用 `ytdown`/`downr`；不支持 DRM、Cookie、账号、代理或通用站点解析。
+- Qwen3-ASR-1.7B + ForcedAligner-0.6B 已部署为 Shadow ASR 后端；冻结节目评测显示关键字幕锚点优于 Whisper，但 180 秒切块/context 曾出现静默漏口播和热词回显。客户端已改为 60 秒、低能量边界、空 context，并对空结果、异常慢低文本和 context 回显执行受限缩块重试，逐块记录 `ready/recovered/suspect/unresolved`。7506.73 秒完整节目复测已完成：音频块覆盖 100%、RTF `0.050345`、可见字幕锚点 `7/10`、历史遗漏的“蜿蜒的旋律”和投票规则均命中、未解决块和 context 回显均为 0；但锚点较固定 60 秒基线没有提升，2 个自动恢复块中有 1 个只得到单字“啊”的低信息假恢复，多节目逐字稿 Gold 仍缺失，因此保持 Shadow，不替代默认 Whisper。与 Omni 在 16GB GPU 上串行加载。完整结论见 [qwen3-asr-recovery-full-program-retest-20260718.md](./qwen3-asr-recovery-full-program-retest-20260718.md)。
 - Web 工作台：节目管理、候选审核、推荐模拟、研究样本与模型学习。
+- G1 已切短片批量入口：多文件上传、账号内 SHA-256 去重、每文件一个原片段锁边候选、后台特征提取、统一 scorer/ranker 跨文件排名，并可直接进入既有审核、导出和回流链路。
+- Hybrid Slice Pipeline V1：ASR/静音/起音/切镜召回与边界吸附，Top 候选进入 Qwen2.5-Omni hook/middle/payoff 多窗口复排，模型不可用时自动回退规则排序。
 - 抖音回流：Mock / 文件导入、平台映射、账号摘要、OAuth 配置检测。
 - V1 Beta-C 校准优先排序器：历史采集样本入库、账号质量、工作台语义校准队列、v2 互动热度标签、历史证据排序器 v2.4、Slice Structure Evaluator、发布时间趋势、权重调参和时间切分回测。
 
@@ -15,7 +19,19 @@ Douyin Slice Optimizer 是本地优先的音乐综艺短视频切片优化工作
 
 ```bash
 http://127.0.0.1:8000/
+http://121.199.170.85/  # 阿里云 ECS 测试入口，受 Nginx Basic Auth 保护
 ```
+
+### 1.1 北极星目标完成度
+
+规范性目标见 [product-goals.md](./product-goals.md)。当前完成度不能与目标状态混写：
+
+| 目标 | 当前判断 | 已有基础 | 主要缺口 |
+| --- | --- | --- | --- |
+| G1 已切短片筛选排名 | 可运行 MVP | `precut_batch.v1` 已支持批量导入、内容去重、数据库级不可变边界、后台特征提取、共享排序、解释、审核、导出和表现回流 | 仍需冻结跨入口排序 benchmark，并用授权发布指标验证真实 NDCG/Top-K lift；批量吞吐和失败恢复还需真实大批次压测 |
+| G2 完整节目智能切片与排名 | 已有可运行基线 | 长视频 ASR、时间轴召回、边界吸附、片段分类、Hybrid Slice、排序和人工审核已贯通 | 召回/分类 Gold 仍需扩充，部分多模态策略仍为 research/shadow，尚不能宣称稳定获得高流量 |
+| G3 本地与公网模型协同 | 安全底座可运行，真实厂商 Adapter 未接入 | 本地模型继续优先；`public_model_provider.v1`、默认关闭策略、显式数据许可、请求/批次/日预算、内容缓存、独立审计台账、本地回退、Fake Provider 和 Shadow 评测已贯通 | 尚未接入 Qwen/Kimi 等真实公网 Adapter；启用前仍需用户提供数据许可、密钥、预算，并以厂商官方定价和冻结 benchmark 完成质量/费用/延迟门禁 |
+| 新模型与算法主动汇报 | 规则已建立 | 新增 [model-and-algorithm-radar.md](./model-and-algorithm-radar.md) 作为持续登记入口 | 后续每次发现、benchmark 和状态变化都需要持续维护并主动向用户汇报 |
 
 ## 2. 技术栈
 
@@ -25,7 +41,7 @@ http://127.0.0.1:8000/
 | CLI | Typer 优先，缺失 Typer 时有 argparse fallback |
 | 前端 | Vue 3, Vite, TypeScript, lucide-vue |
 | 静态资源 | `frontend/` 构建到 `src/dso/api/static/dashboard/` |
-| ASR | 本地优先，`whisper.cpp` 优先，faster-whisper 兜底 |
+| ASR | 本地优先，`whisper.cpp` 默认、faster-whisper 兜底；Qwen3-ASR 作为局域网 Shadow/短窗复核后端 |
 | 数据库 | `data/db/dso.sqlite3` |
 
 ## 3. 当前数据口径
@@ -148,6 +164,7 @@ http://127.0.0.1:8000/
 | 路径 | 作用 |
 | --- | --- |
 | `src/dso/api/main.py` | FastAPI 接口和 Dashboard 静态页面入口 |
+| `src/dso/media/video_download.py` | `video_download.v1` 授权腾讯系 / YouTube 单视频 URL 获取、策略门禁、720p 音视频选择、manifest 和既有 ingest 衔接 |
 | `src/dso/collectors/douyin_classification.py` | 已发布作品语义字段分类和版本化 |
 | `src/dso/learning/historical_samples.py` | 历史采集样本入库、去重、账号质量 |
 | `src/dso/learning/memory.py` | 记忆库和历史相似召回 |
@@ -157,9 +174,11 @@ http://127.0.0.1:8000/
 | `src/dso/learning/interest_clock.py` | 发布时间趋势 |
 | `src/dso/learning/backtest.py` | 轻量离线回测 |
 | `src/dso/learning/visual_window_scout.py` | D11 视觉候选窗、窗口原型、动态融合和冻结实验 |
+| `src/dso/providers/` | G3 厂商无关 Provider 合约、默认关闭策略、预算、缓存、台账、Runner、Fake Provider 和 Shadow 评测 |
 | `frontend/src/components/FeedbackView.vue` | 数据反馈与学习面板 |
 | `frontend/src/components/InspectorPanel.vue` | 候选详情和历史相似展示 |
 | `data/db/dso.sqlite3` | 本地 SQLite 数据库 |
+| `data/db/public_model_ledger.sqlite3` | G3 独立调用台账；只记录安全元数据、用量和费用，不存密钥、提示词正文或原始媒体 |
 
 ## 8. 常用命令
 
@@ -167,6 +186,14 @@ http://127.0.0.1:8000/
 
 ```bash
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli web --host 127.0.0.1 --port 8000
+```
+
+授权腾讯视频或 YouTube 单视频 dry-run：
+
+```bash
+python3 -m pip install -e ".[videodl]"
+PYTHONPATH=src python3 -m dso.cli download-video "https://v.qq.com/x/cover/.../...html" --dry-run --acknowledge-noncommercial
+PYTHONPATH=src python3 -m dso.cli download-video "https://www.youtube.com/watch?v=<video_id>" --dry-run --acknowledge-noncommercial
 ```
 
 全量历史样本汇总：
@@ -206,10 +233,19 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli ma
 PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli backtest --account main --k 30 --strategy research_ranker_v2_6_pool --holdout-policy time
 ```
 
+G3 安全底座状态和零网络 Smoke：
+
+```bash
+dso provider-status
+dso provider-smoke --repeat 2 --batch-id local-g3-smoke
+```
+
 ## 9. 关键 API
 
 | API | 用途 |
 | --- | --- |
+| `GET /providers/status` | 查询 G3 Provider 注册、默认关闭、网络调用和预算/缓存/台账路径，不返回密钥 |
+| `POST /providers/fake-smoke` | 用 Fake Provider 验证策略、缓存、台账和本地回退；不访问公网、不产生 API 费用 |
 | `GET /learning/datasets?account_id=` | 数据目录、血缘和正式样本口径 |
 | `GET /learning/historical-samples/summary?account_id=` | 历史样本汇总和账号质量 |
 | `GET /learning/research/coverage?account_id=&dataset_id=` | 研究语义字段覆盖率和标签口径 |
@@ -246,6 +282,12 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli ba
 
 最近一次目标验证：
 
+- 2026-07-18 完成 G3 真实 Provider 官方资料调研：比较阿里云百炼、Moonshot Kimi、火山方舟和腾讯混元/TokenHub 的 API、模型、价格、地域、限流与数据条款。首选百炼 `qwen3.5-flash-2026-02-23` 文本 + `qwen3-vl-flash-2026-01-22` 代表帧，状态仅提升到 `validate`；Kimi 保留为第二 Provider，方舟需先确认数据授权，腾讯待 TokenHub 迁移稳定。调研未配置密钥、未调用付费 API，完整报告见 [public-model-provider-research-20260718.md](./public-model-provider-research-20260718.md)。
+- 2026-07-18 已将当前工作区同步到阿里云 ECS `/srv/dso/app`，保留服务器 `data/`、`.venv/`、密钥和运行缓存；重新安装 editable 包并重启 `dso-web`。公网首页、`GET /providers/status` 和 `POST /providers/fake-smoke` 均返回 HTTP 200，未认证状态请求返回 401，`dso-web` 与 Nginx 均为 `active`。公网 Fake Smoke 两次请求命中一次缓存，网络请求 `0`、费用 `0`，真实公网 Provider 仍为 `0`。
+- 2026-07-18 完成 G3 公网模型安全底座：三条并行支线分别实现厂商无关 Provider 合约、权限/预算/缓存/独立 SQLite 台账和 Shadow 质量/成本评测，并由统一 Runner、CLI、API 汇合。本地 Fake Provider 连续两次请求得到一次执行和一次缓存命中，网络请求数 `0`、估算费用 `0`，本地基线始终保留；真实 Qwen/Kimi Adapter 未实现且默认关闭。全量回归 `215 passed, 4 warnings`，compileall 和 `git diff --check` 通过；未改变排序权重、人工 Gold、导出或发布行为。
+- 2026-07-18 已实际下载 YouTube 目标 `pkl-Lr6gkCo` 的完整 720p 媒体到工程临时目录 `data/tmp/video_downloads/download_86c2ac7a0ae74609/`，未进入 ingest。下载使用 videodl 的受限直连解析、H.264 itag 136 和 AAC itag 140；由于 GoogleVideo 直连 TLS 超时，传输显式使用本机 `127.0.0.1:7892` 代理，并用独立音频任务与断点续传完成。最终 FFmpeg 无重编码合并文件为 `740,777,070` bytes、时长 `5862.57415s`，包含 1280x720/25fps H.264 与 44.1kHz 双声道 AAC；首/中/尾解码抽检无错误，SHA-256 为 `3f70a04089e41c9d17dae9f326e151f52d6f8ea0e25a7c4e7e51a661b12d91bf`。任务 manifest 已记录代理使用、格式、包计数、验证和未入库状态。
+- 2026-07-18 扩展 `video_download.v1` 的 YouTube 单视频支持：只使用 `videodl` 内置直连工具，不调用上游 `ytdown`/`downr`；watch/短链/shorts/live/embed 统一规范化并移除播放列表参数，playlist/channel URL 硬拒绝。目标 `pkl-Lr6gkCo` 的真实 dry-run 解析到完整 `5862.52s` 流，耗时约 `2s`，选中 720p H.264 itag 136（`644,195,519` bytes）和 AAC itag 140（`94,880,508` bytes），两条 CDN URL 的单字节 Range 探针均返回 HTTP 206；本机 FFmpeg 7.1 可用于合并。目标测试 `12 passed`、全量回归 `178 passed, 4 warnings`、CLI help 和 compileall 通过；该次 dry-run 没有写业务数据库，也没有改变排序权重、人工 Gold 或发布行为。
+- 2026-07-18 新增 `video_download.v1`：可选 `videofetch==0.9.1` 适配器只加载 `TencentVideoClient`，白名单限定腾讯系 HTTPS 域名，禁用 Cookie/代理/通用解析并在下载前拒绝 DRM；下载后复用既有 `ingest_video`，未新增排序权重、人工 Gold、发布或同步 API。目标 URL `v41023mwbqr` 在隔离 Python 3.11 环境 dry-run 解析耗时 `13.373s`，返回 MP4、`has_drm=false`，文件数和入库数均为 0；目标测试、CLI help 和编译检查通过。
 - V1 Beta-C-6 已落地：Slice Structure Evaluator、信号可信度门控、v2.4 策略对比、promotion gate、多样性摘要和下一批校准队列。
 - 前端学习面板展示校准队列批次摘要、v2.4 策略对比、promotion gate、权重配置、语义基线差距、多样性摘要和诊断样本；候选详情展示排序器原因、组件分、排序器建议和基线差异说明。
 - 本地数据库已基于 post API 补采后样本重建 `research_labels.visible_engagement_v2`：10,853 条可训练样本更新，high/mid/low = 2,181 / 6,491 / 2,181。
@@ -281,14 +323,26 @@ PYTHONPATH=src /usr/local/Cellar/python@3.11/3.11.5/bin/python3.11 -m dso.cli ba
 - 2026-07-17 D10-D selector-only 冻结盲测：新增顺序执行、断点复用和无音轨 OCR-only 降级。5 条盲样本仅《年轮》事件样本通过预注册代理门槛；`reaction / vocal_teaching` pilot 不计入盲测胜负。视觉复核确认 `performance / program_context` 本身非互斥，`behind_the_scenes` 依赖视觉场景而非关键词，另有一条跨领域样本为错误/截断媒体。结论为 `selector_gate_not_met`，不扩大到 30 条，不调用远端 Omni。
 - 2026-07-17 D10-D 媒体准入与 r2：新增 `material_gold_media_audit.v1`，从 60 条 confirmed Gold 中识别出 26 条 selector-ready。由于原三类混淆没有任何同类音轨完整样本，r2 明确记录覆盖降级，改用声乐教学、后台访谈和舞台直拍替换，不伪装成同类准确率对照。媒体完整后仍只有声乐教学样本通过 selector gate，因此停止扩大词表，后续应验证视觉 embedding/场景变化候选生成。
 - 2026-07-17 D11 模型服务恢复：服务器以严格离线模式加载 `Qwen/Qwen3-VL-Embedding-2B`，`transformers` 升级至 `4.57.1`；文本和真实三帧探针均返回 `status=model`、2048 维。首批 5 条样本生成 15 个视觉窗口，15/15 embedding 成功并形成 11 条待审核队列。历史库中 11,296 条 64 维 fallback 已标记失败，不再计入 Qwen3 覆盖率、原型或回测；工作台默认预算收紧为每条 3 个代表窗口。
+- 2026-07-17 Omni 运行时修复：远端服务升级为 `dso-multimodal-model-service.v0.2-omni-runtime`，修复 `async /analyze/clip-file` 同步阻塞事件循环、`max_new_tokens` 未映射到 `thinker_max_new_tokens`、客户端超时后孤儿推理继续占用服务、prompt 回显误解析和 `semantic_suggestions` 数据契约不一致。服务现在由 systemd 用户服务托管并启用 linger，单并发推理期间 `/health` 以约 13ms 返回 `busy`，150 秒 watchdog 可触发监督重启；Qwen2.5-Omni GPTQ-Int4 text-only 模型加载约 8–24 秒，6 秒真音视频窗口约 5–8 秒。服务启用 `DSO_MODEL_LOCKED=1`，共享端口上的 Qwen3 Embedding 切模请求返回 HTTP 423，避免双模型残留导致 CUDA OOM。真实候选三窗口复排已返回 `omni_score=61.51`、`confidence=0.90` 并写入混合排序。
+- 2026-07-17 Beta-D-11B：完成每批 10 条的跨账号/素材形态平衡抽样、已审核样本排除、未完成批次恢复、不可变 build/manifest、leave-one-sample-out 原型、累计冻结批次去重评测、paired strategy comparison、N/A 缺失策略和 `unknown/uncertain` 弃权口径。promotion gate 固定要求至少 30 条可判定样本、5 个账号、3 种正向视觉形态、Fusion Recall@2 `>=70%`、较 fixed `+10pp`、严重漏选 `<=10%`、决策覆盖 `>=75%`、真实 2048 维 embedding 覆盖 `>=90%` 且零原型泄漏。
+- D11B 当前真实批次为 10 条、30 个候选窗、7 个账号和 7 类历史素材形态；局域网单服务与 Omni 任务切换时只有 4/30 个窗口向量可复用。状态被正确降为 `needs_embedding_retry`，26 个缺失窗口不会用 64 维 fallback 或零分代替，也不会提前开放累计评测。
 - 冻结前已修复 token set、同分排名和相同发布时间样本的非确定性顺序；`PYTHONHASHSEED=101/202` 两个独立全量进程指标完全一致。冻结参考报告 `bt_3eb5b599720f480e` 的可比口径为：`current_rules=1.4905`、`semantic_baseline_v2=1.4856`、`research_ranker_v2_2=1.5941`、`v2.4=1.4305`、`v2.8/v2.9=1.4356`。7 月 1–2 日的旧 lift 只保留为历史记录，不再与该 manifest 下的结果直接比较。
-- 后端全量测试通过：`145 tests OK`。前端类型检查与生产构建通过：`npm run build`；D11 已完成桌面和 390px 窄屏浏览器检查，无横向溢出或控制台错误。
+- 后端全量测试通过：`215 passed, 4 warnings`（2026-07-18，含 G1 批量入口、锁边触发器、跨入口 contract、G3 Provider/治理/评测/Runner 和真实 FastAPI API 回归）。前端类型检查与生产构建通过：`npm run build`；G1 另以 3 秒真实 FFmpeg 视频完成探测、特征降级、共享排序和边界不变量探针。候选审核此前已完成真实 Omni 3 窗复排浏览器检查；本轮浏览器自动验收受当前浏览器的 `127.0.0.1:8000` 安全限制阻止，未绕过该限制。
 
 ## 11. 下一步优先级
 
-1. 在已完成的 5 条、15 个窗口基础上，再补 5–15 条跨 `stage_performance / rehearsal / backstage_interview / vocal_teaching / compilation / news_document` 样本，优先平衡视觉形态而非追求总量。
-2. 在工作台先确认当前 11 条队列，再将窗口 Gold 补到至少 20 条；优先确认融合、视觉与固定策略发生分歧的窗口，`unknown/mixed` 保留为合法弃权。
-3. 有至少 10 条完整评估样本后运行 fixed/text/visual/fusion 冻结对比；门槛固定为 Fusion Recall@2 `>=70%`、相对 fixed `+10pp`、相对 text `+15pp`、严重漏选 `<=10%`。
-4. 未过门槛前不调用 Omni 扩大样本、不写生产排序权重；过门槛后只将 Top2 manifest 送入 Omni Shadow，验证窗口质量而非重做全视频扫描。
-5. ASR/OCR 继续只负责解释和文本事件检索，不再独立承担舞台、彩排和后台选窗；`performance / program_context` 继续按非互斥字段评估。
-6. 接入官方或授权账号窗口指标，补齐 6h / 24h / 72h / 7d / 30d；在此之前不把结果表述为播放量或发布效果承诺。
+### 11.1 产品主线
+
+1. 冻结跨入口统一候选 benchmark：G1 标准化候选看 NDCG@K/Top-K lift，G2 同时看 Recall@K 与排序；报告账号/时间切分、严重错判、缺失信号和入口一致性。
+2. 用 20-100 条真实已切短片做 G1 批量吞吐、重复文件、无音轨、ASR 失败、重试、审核和导出验收，并记录 P50/P95、失败率和人工复核时间。
+3. 优先接入官方或授权账号的曝光、观看、分享和关注窗口指标，让目标从“可见互动代理”逐步升级为真实多目标反馈闭环。
+4. G3 首个真实 Provider 已选为阿里云百炼，详见 [2026-07-18 调研](./public-model-provider-research-20260718.md)；下一步先实现不带密钥的 `AliyunBailianProvider` 和 mock contract，再由用户创建独立子业务空间、模型/IP 白名单、限流、API Key 与硬预算，只允许脱敏摘要和代表帧进入冻结 Shadow。
+
+### 11.2 当前视觉研究支线
+
+1. 先让局域网模型服务稳定保持 `Qwen/Qwen3-VL-Embedding-2B`，在没有 Omni 长任务/切模时点击“重试窗口向量”，将当前冻结样本补到至少 27/30 个真实向量。
+2. 向量门槛通过后完成当前 20 个候选窗 Gold；优先确认 fixed/visual/fusion 分歧窗口，`unknown/mixed/uncertain` 保留为合法弃权。
+3. 每完成一批再扫描下一批 10 条，累计至少 30 条可判定样本；重试产生的重复样本由累计评测自动取最新版本，不重复计数。
+4. 运行累计 paired evaluation；达到 D11B promotion gate 后，才把融合 Top2 manifest 送入 Omni Shadow，未过门槛时不写生产排序权重。
+5. 将 embedding 与 Omni 拆成独立服务进程或端口，避免共享 `/load` 和 GPU 任务导致批处理中途切模；在拆分前使用串行任务锁。
+6. 当前支线结论继续写入冻结 manifest 和模型雷达；未通过 D11B promotion gate 前不挤占 G1/G2 主线，也不写生产排序权重。

@@ -1,0 +1,265 @@
+{
+  "skillProvenance": {
+    "name": "solo-design",
+    "version": "2026.07.06.8",
+    "version_source": "skill-version.json",
+    "runtime_skill_dir": "/Users/fuqiang/.trae/builtin/design/default/skills/solo-design",
+    "recorded_at": "2026-07-18T12:01:11Z"
+  },
+  "project": {
+    "name": "素材与节目页设计确认稿",
+    "path": "/Users/fuqiang/Dev/douyin-slice-optimizer/design-materials-program-concept",
+    "operation": "create",
+    "deviceType": "desktop",
+    "language": "zh-CN",
+    "dashboardMode": true,
+    "intentProfile": {
+      "caseFamily": "library_bound",
+      "graphicStrategy": null,
+      "sourceType": null,
+      "routingReason": "用户要求先输出页面设计稿确认，基于现有产品前端结构做新的工作台页面稿，并使用苹果风格约束。"
+    },
+    "replicationMode": null,
+    "sourceUrl": null,
+    "contextReadBudget": {
+      "workflowFileReadLimit": 1,
+      "largeWorkflowFilesCachedInSummary": [
+        "workflows/create-project-library-bound.md"
+      ],
+      "restoreInputsCached": [],
+      "subAgentReadsFullSummary": false
+    },
+    "readBudgetLedger": [
+      {
+        "file": "workflows/create-project-library-bound.md",
+        "readCount": 1,
+        "limit": 1,
+        "reason": "initial route-locked workflow read",
+        "exceeded": false
+      }
+    ],
+    "dispatchPreflightManifest": [
+      {
+        "recorded_at": "2026-07-18T12:01:11Z",
+        "packetType": "LibraryBoundPagePacket",
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "workflows/page-generation-template.md",
+        "nodeId": "page-materials-program",
+        "htmlSrc": "pages/materials-program.html",
+        "cssFilePath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/colors_and_type.css",
+        "htmlFilePath": "/Users/fuqiang/Dev/douyin-slice-optimizer/design-materials-program-concept/pages/materials-program.html",
+        "brandPrefix": "apple",
+        "aestheticsMode": "library-bound",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node /Users/fuqiang/.trae/builtin/design/default/skills/solo-design/script/fill-html-head.mjs /Users/fuqiang/.trae/design_libraries/dl_builtin_apple/colors_and_type.css /Users/fuqiang/Dev/douyin-slice-optimizer/design-materials-program-concept/pages/materials-program.html --title=\"素材与节目页\" --lang=\"zh-CN\" --prefix=apple",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "full",
+        "restoreFieldsPresent": true,
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "activeKey": null,
+          "contractPresent": false,
+          "structurePresent": false,
+          "canonicalHtmlIncluded": false,
+          "canonicalHtmlSource": null,
+          "structureHash": null,
+          "missingFields": []
+        },
+        "persistedToSummary": true
+      }
+    ],
+    "cssPreflightEvidence": {
+      "applies": false,
+      "status": "not-needed",
+      "command": null,
+      "brandPrefix": "apple",
+      "checks": {
+        "themeVars": "not-needed",
+        "semanticTokenFallback": "not-needed",
+        "themeInline": "not-needed",
+        "tailwindCdn": "not-needed",
+        "htmlClass": "not-needed"
+      },
+      "retryCount": 0,
+      "blockingReason": null
+    },
+    "repairEntryEvidence": [
+      {
+        "repairPolicyRead": true,
+        "renderBlockingErrorPresent": true,
+        "softWarningOnly": false,
+        "ownerClassified": true,
+        "postValidationMutationDetected": false,
+        "validationErrorClasses": [
+          "directory-structure",
+          "restore-evidence"
+        ],
+        "repairBudget": {
+          "validationRunsSoFar": 1,
+          "maxValidationRuns": 3
+        },
+        "recorded_at": "2026-07-18T12:09:15Z"
+      }
+    ],
+    "finishReadinessEvidence": {
+      "validationReportSuccess": true,
+      "postValidationMutationDetected": false,
+      "pageSummaryTablePrepared": true,
+      "manualArtifactLinksIncluded": false,
+      "restoreEvidenceReviewPassed": true,
+      "deviceTypeConsistency": {
+        "summaryDeviceType": "desktop",
+        "designDeviceType": "desktop",
+        "status": "matched"
+      },
+      "mobileBackgroundCoverage": {
+        "status": "passed",
+        "unresolvedBodyVars": []
+      }
+    },
+    "referenceCaptureEvidence": null,
+    "visualSpecExcerpt": null,
+    "restoreVisualCheckpoints": null,
+    "restorationContractLite": null,
+    "restoreEvidenceReview": null,
+    "styleDefinitionBrief": null,
+    "designRead": "桌面工作台确认稿，苹果式克制表面与清晰任务节奏，重点提升节目处理首屏效率。",
+    "designDials": {
+      "layoutVariance": 2,
+      "motionIntensity": 1,
+      "visualDensity": 4
+    },
+    "styleContinuityAnchors": null,
+    "sharedProjectShellContract": {
+      "navigationShell": "顶部双层导航，第一层区分工作模式，第二层区分生产阶段；左侧保留轻量阶段感但不过度抢占首屏。",
+      "primaryColorSystem": "中性色为主，苹果蓝仅用于单一主 CTA、选中态与关键焦点。",
+      "typographySystem": "大标题克制、正文高可读，中文场景下减少夸张层级差。",
+      "radiusScale": "卡片与控件采用较大圆角，延续苹果式柔和轮廓。",
+      "surfaceDepthModel": "依赖边框、浅阴影和半透明表面区分层级，不使用复杂渐变。",
+      "ctaStyle": "同一屏只保留一个强主按钮，其余动作保持安静。",
+      "alignmentRules": "以内容网格和任务块为主，左到右信息流清晰，首屏优先当前对象、风险结论和下一步动作。"
+    },
+    "generationTree": null
+  },
+  "designSource": {
+    "operatingMode": "library-bound",
+    "libraryIdentity": {
+      "name": "苹果",
+      "id": "dl_builtin_apple",
+      "version": "1",
+      "scope": "built-in-global",
+      "path": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple",
+      "versionSource": "selected-context"
+    },
+    "libraryPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple",
+    "cssFilePath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/colors_and_type.css",
+    "brandPrefix": "apple",
+    "themeMode": "light",
+    "designDecisionSummary": "用苹果式低噪声表面与紧凑任务编排重做素材与节目页，强化节目对象、质量结论和主动作的首屏优先级。",
+    "componentContractKind": "legacy-json",
+    "forbiddenInventedComponents": [
+      "layout",
+      "space"
+    ],
+    "allowedComponents": [
+      "button",
+      "card",
+      "comparison-table",
+      "input",
+      "navigation",
+      "product-grid"
+    ],
+    "styleConstraints": {
+      "radiusMax": 20,
+      "spacingBase": 4,
+      "fontSizeBody": 14,
+      "fontSizeMin": 11,
+      "controlHeightDefault": 40,
+      "controlHeightLarge": 48
+    },
+    "productContext": {
+      "kitType": "apple-inspired-ui-library",
+      "productType": "短视频剪辑与候选审核工作台"
+    },
+    "actualTokenNameReference": [
+      {
+        "semanticPurpose": "页面背景",
+        "tokenName": "apple-background"
+      },
+      {
+        "semanticPurpose": "主文本",
+        "tokenName": "apple-foreground"
+      },
+      {
+        "semanticPurpose": "主按钮与焦点色",
+        "tokenName": "apple-primary"
+      },
+      {
+        "semanticPurpose": "卡片表面",
+        "tokenName": "apple-card"
+      },
+      {
+        "semanticPurpose": "边框",
+        "tokenName": "apple-border"
+      },
+      {
+        "semanticPurpose": "次级文本",
+        "tokenName": "apple-muted-foreground"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "nodeId": "page-materials-program",
+      "slug": "materials-program",
+      "title": "素材与节目页",
+      "htmlSrc": "pages/materials-program.html",
+      "pageIndex": 1,
+      "stateGroupId": null,
+      "stateRole": null,
+      "baseStatePageId": null,
+      "sharedShellContract": [],
+      "mutableRegions": [],
+      "derivedFromHtmlSrc": null,
+      "derivationType": "original",
+      "sourcePageId": null,
+      "sourceHtmlSrc": null,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "短视频剪辑工作台中的素材与节目处理首页，用于承接完整节目理解、质量判断、当前对象与下一步动作。",
+      "visualNorthStar": "像专业生产工具而不是算法报告页，首屏先让人看懂当前节目、当前风险和下一步操作。",
+      "compositionPattern": "task-driven workbench with compressed hero and elevated task card",
+      "continuityAnchors": [
+        "双层顶部导航",
+        "安静的浅色大卡片",
+        "单一蓝色主 CTA",
+        "低噪音状态标签"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "首屏信息过多",
+        "节目列表被下压",
+        "系统解释层抢占操作层"
+      ]
+    }
+  ],
+  "assets": [],
+  "wiringPlan": [],
+  "hiddenInteractionPlan": []
+}

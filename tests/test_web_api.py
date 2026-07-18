@@ -187,7 +187,7 @@ class WebApiTest(unittest.TestCase):
         }
         with patch("dso.api.main.visual_window_scout_status", return_value=status_payload) as status_mock, patch(
             "dso.api.main.build_visual_window_scout", return_value=build_payload
-        ), patch("dso.api.main.run_visual_window_experiment", return_value=experiment_payload), patch(
+        ) as build_mock, patch("dso.api.main.run_visual_window_experiment", return_value=experiment_payload) as experiment_mock, patch(
             "dso.api.main.update_material_window_annotation", return_value=annotation_payload
         ):
             status = self.client.get("/learning/visual-window-scout/status?limit=60&summary_only=true").json()
@@ -200,11 +200,28 @@ class WebApiTest(unittest.TestCase):
 
         self.assertFalse(status["media_readiness"]["requires_audio"])
         self.assertEqual(status["media_readiness"]["eligible_count"], 26)
-        status_mock.assert_called_once_with(account_id=None, dataset_id=None, limit=60, summary_only=True)
+        status_mock.assert_called_once_with(account_id=None, dataset_id=None, limit=60, summary_only=True, build_id=None)
+        self.assertEqual(build_mock.call_args.kwargs["batch_mode"], "next")
+        self.assertTrue(build_mock.call_args.kwargs["exclude_reviewed"])
+        self.assertTrue(build_mock.call_args.kwargs["resume_pending"])
+        experiment_mock.assert_called_once_with(build_id=None, build_ids=None, scope="cumulative")
         self.assertFalse(build["calls_omni"])
         self.assertEqual(experiment["status"], "research_only")
         self.assertFalse(annotation["writes_main_semantic_labels"])
         self.assertFalse(annotation["production_weight"])
+
+    def test_visual_window_frozen_build_endpoints(self) -> None:
+        report = {"build_id": "d11b_sample", "lifecycle": "frozen"}
+        manifest = {"build_id": "d11b_sample", "verification": {"passed": True}}
+        with patch("dso.api.main.load_visual_window_build", return_value=report), patch(
+            "dso.api.main.load_visual_window_build_manifest", return_value=manifest
+        ):
+            build_response = self.client.get("/learning/visual-window-scout/builds/d11b_sample")
+            manifest_response = self.client.get("/learning/visual-window-scout/builds/d11b_sample/manifest")
+
+        self.assertEqual(build_response.status_code, 200)
+        self.assertEqual(build_response.json()["lifecycle"], "frozen")
+        self.assertTrue(manifest_response.json()["verification"]["passed"])
 
     def test_quality_endpoint_returns_read_only_gate(self) -> None:
         segment = _insert_segment()

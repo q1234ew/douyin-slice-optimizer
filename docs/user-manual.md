@@ -1,16 +1,17 @@
 # Douyin Slice Optimizer 平台用户手册
 
-更新日期：2026-06-29
-适用版本：`douyin-slice-optimizer 0.1.0`，V1 Beta-C 工作台
+更新日期：2026-07-18
+适用版本：`douyin-slice-optimizer 0.1.0`，G1 `precut_batch.v1` / V1 Beta 工作台
 
 ## 1. 平台定位
 
-Douyin Slice Optimizer 是本地优先的音乐综艺短视频切片优化工作台。平台用于把一段长节目视频处理成可人工审核的短视频候选，并辅助完成评分解释、标题建议、封面建议、字幕预览、9:16 MP4 导出、发布后指标回流和历史样本学习。
+Douyin Slice Optimizer 是本地优先的音乐综艺短视频筛选与切片优化工作台。平台既能批量导入已经剪好的短片并保持原边界完成统一排名，也能把完整节目处理成可人工审核的候选；两种入口共同使用评分解释、标题建议、封面建议、字幕预览、9:16 MP4 导出、发布后指标回流和历史样本学习。
 
 平台当前覆盖以下工作：
 
 | 工作 | 说明 |
 | --- | --- |
+| 已切短片批量排名 | 多文件导入、内容去重、原边界锁定、共享排序和审核 |
 | 节目导入 | 上传本地节目视频，建立素材档案 |
 | ASR 和音频提取 | 生成带时间戳字幕、音频峰值和候选生成所需特征 |
 | 候选生成 | 从节目中生成 Top 候选切片 |
@@ -52,6 +53,7 @@ Douyin Slice Optimizer 是本地优先的音乐综艺短视频切片优化工作
 | Node.js / npm | 重新构建 Vue 前端 |
 | whisper.cpp | 推荐的本地 ASR 后端，Apple Silicon 可使用 Metal/Core ML 加速 |
 | faster-whisper | ASR 兜底后端 |
+| `videofetch==0.9.1` | 可选的腾讯系 / YouTube 单视频授权测试下载入口；上游为 PolyForm Noncommercial 许可 |
 
 ### 3.2 安装后端依赖
 
@@ -147,8 +149,8 @@ dso rights set source_video <video_id> --program cleared --song cleared --perfor
 
 | 区域 | 主要内容 |
 | --- | --- |
-| 左侧“工作流程” | 流程导览、导入节目、存储与状态 |
-| 中间工作区 | 节目管理、研究学习、候选审核、推荐链路模拟器 |
+| 左侧“工作流程” | 素材、审核和发布准备的页面导航；完整节目模式提供单文件导入 |
+| 中间工作区 | 已切短片批量排名、完整节目切片、研究学习、候选审核和推荐链路模拟器 |
 | 右侧“预览与评分详情” | 在线预览、候选决策、字幕/ASR、历史先验、包装/平台 |
 
 左侧流程共有 5 步：
@@ -163,7 +165,35 @@ dso rights set source_video <video_id> --program cleared --song cleared --perfor
 
 ## 6. 标准使用流程
 
-### 6.1 导入节目
+### 6.1 已切短片批量排名（G1）
+
+进入“素材与节目”，默认选择“已切短片”。填写目标账号和可选批次名称，一次选择多条已经剪好的视频，然后点击“导入并排名”。
+
+系统按以下固定口径处理：
+
+1. 按同一账号内的文件 SHA-256 去重，重复文件复用已有素材、候选和评分。
+2. 每个文件只创建一个候选，固定为 `0 秒 -> 原视频片尾`；页面显示“边界锁定”。
+3. 后台执行快速 ASR、音频特征和共享 scorer/ranker；单条失败不会阻塞其他文件。
+4. 排名完成后点击“审核”，进入与完整节目候选相同的解释、质量 Gate、审核、导出和指标回流页面。
+
+锁边候选不允许修改开始、结束或时长。需要重新剪边时，应先在剪辑工具中生成新的源文件，再作为新短片导入；文本、分类、备注和审核状态仍可人工修正。
+
+CLI 等价命令：
+
+```bash
+dso precut-import ./clips/clip-01.mp4 ./clips/clip-02.mp4 \
+  --account main --batch-title "7 月候选"
+```
+
+只导入、不立即提取和排名：
+
+```bash
+dso precut-import ./clips/*.mp4 --account main --no-process
+```
+
+单批最多 100 个文件。ASR 或音频不可用时，批次条目会保留降级原因并使用现有确定性证据评分，不会伪造多模态结果或改变原始边界。
+
+### 6.2 导入完整节目（G2）
 
 在左侧“导入节目”区域填写：
 
@@ -182,7 +212,38 @@ dso ingest ./program.mp4 --account main --title "第 1 期"
 dso videos
 ```
 
-### 6.2 处理节目
+如果自有或已获授权的视频只有腾讯视频或 YouTube 单视频链接，可安装可选下载适配器：
+
+```bash
+python3 -m pip install -e ".[videodl]"
+```
+
+先只解析、不下载也不写业务数据库：
+
+```bash
+dso download-video "https://v.qq.com/x/cover/.../...html" \
+  --dry-run --acknowledge-noncommercial
+```
+
+YouTube 链接可以包含 `list/index` 参数，但适配器只处理 `v=` 指定的当前视频，不会展开播放列表：
+
+```bash
+dso download-video "https://www.youtube.com/watch?v=<video_id>&list=<playlist_id>" \
+  --dry-run --acknowledge-noncommercial
+```
+
+确认结果为无 DRM 的清晰媒体后再下载；默认下载完成后进入既有节目导入链路：
+
+```bash
+dso download-video "https://v.qq.com/x/cover/.../...html" \
+  --account main --title "授权测试节目" --acknowledge-noncommercial
+```
+
+下载任务默认写入当前工程的 `data/tmp/video_downloads/<job_id>/`，并保存 `dso-download-manifest.json`；成功入库时媒体会由既有 ingest 复制到 `data/media/<video_id>/`。`data/tmp` 属于可清理运行目录，如需把原始下载文件保存在其他持久位置，应显式传入 `--output-dir <目录>`。只保留文件、不入库可加 `--no-ingest`。
+
+当前白名单为 `v.qq.com`、`wetv.vip`、`iflix.com`、`youtube.com`、`youtu.be`。适配器不传 Cookie、账号或代理，不启用通用解析器，并拒绝上游标记为 DRM 的资源。YouTube 路径不会调用 `ytdown`、`downr` 等第三方解析服务；它只解析一个视频，最高选择 720p，优先 H.264 MP4，并下载默认 AAC/MP4 音轨后用 FFmpeg 合并。dry-run 的 `candidates[].selected_format` 会显示完整流时长、清晰度、编码、itag 和预计字节数。若目标没有兼容的独立音轨，会回退到带音轨的渐进式 MP4，实际清晰度以 manifest 为准。`videodl` 上游使用 PolyForm Noncommercial 1.0.0；商业使用必须另行取得上游许可。
+
+### 6.3 处理节目
 
 在“节目管理”中选择节目，点击“处理选中”。系统会依次执行：
 
@@ -207,7 +268,36 @@ dso suggest <video_id> --top-k 10
 dso extract <video_id> --asr-profile quality --asr-backend whisper_cpp --force-asr
 ```
 
-### 6.3 查看质量 Gate
+音乐、演唱和复杂背景声节目可切换到 GPU 服务器上的 Qwen3-ASR：
+
+```bash
+# 先在 GPU 服务器执行，ASR 与 Omni 串行占用显存
+~/bin/dso-asr-on
+
+# 再在应用主机执行
+DSO_ASR_BACKEND=qwen3_asr \
+DSO_QWEN3_ASR_SERVICE_URL=http://192.168.31.143:8002 \
+dso extract <video_id> --force-asr
+
+# ASR 批次结束后，在 GPU 服务器恢复 Omni
+~/bin/dso-omni-on
+```
+
+Qwen3-ASR 默认把长音频切成不超过 60 秒的窗口，保留 1 秒重叠，并在目标切点前 5 秒内优先选择低能量边界；默认 context 为空。若某块出现有声音却空文本、异常慢且文本稀疏或 context 回显，客户端会清空 context 或缩成 30 秒窗口重试。每块的文本量、音频 RMS、尝试次数、恢复策略和最终质量状态会写入 `qwen3_asr_last_run.json`；仍未恢复的块会让本次运行标记为 `degraded`，不能只按 HTTP 成功判断转写完整。
+
+可按节目覆盖配置，但 180 秒和固定热词串只建议用于复现实验：
+
+```bash
+DSO_QWEN3_ASR_CHUNK_SECONDS=60 \
+DSO_QWEN3_ASR_BOUNDARY_SEARCH_SECONDS=5 \
+DSO_QWEN3_ASR_RETRY_CHUNK_SECONDS=30 \
+DSO_QWEN3_ASR_CONTEXT='' \
+dso extract <video_id> --asr-backend qwen3_asr --force-asr
+```
+
+重跑成功后仍需重新生成候选与评分，旧候选不会自动改写。
+
+### 6.4 查看质量 Gate
 
 处理后，在“节目管理”和“推荐链路模拟器”里会出现质量哨兵。重点检查：
 
@@ -221,7 +311,7 @@ dso extract <video_id> --asr-profile quality --asr-backend whisper_cpp --force-a
 
 质量 Gate 是导出前的提醒，不等于绝对禁止。若出现复核项，应进入右侧详情确认字幕、风险和历史证据。
 
-### 6.4 审核候选
+### 6.5 审核候选
 
 进入“候选审核”，候选按综合分排序。每张候选卡片会展示：
 
@@ -237,7 +327,7 @@ dso extract <video_id> --asr-profile quality --asr-backend whisper_cpp --force-a
 
 点击候选后，右侧“预览与评分详情”会同步展示完整信息。
 
-### 6.5 使用右侧详情面板
+### 6.6 使用右侧详情面板
 
 右侧面板包含 4 个分区：
 
@@ -266,7 +356,7 @@ dso verify-asr <segment_id> --profile verify
 dso history <segment_id> --limit 8
 ```
 
-### 6.6 导出 9:16 成片
+### 6.7 导出 9:16 成片
 
 在“候选审核”中点击候选卡片的“导出”，或在右侧“决策”分区点击主操作按钮。导出成功后会生成：
 
@@ -292,7 +382,7 @@ data/exports/<video_id>/
 
 如果导出被阻断，常见原因包括候选被人工标记暂缓、严格授权模式下未录入授权、低原创风险过高或尚未完成评分。应先修复风险来源，再重新导出。
 
-### 6.7 推荐链路模拟
+### 6.8 推荐链路模拟
 
 进入“推荐链路模拟器”，选择节目后点击“刷新模拟”。页面会展示：
 
@@ -450,9 +540,9 @@ dso douyin-history-import \
 | 运行 v2.9 回放 | 将 Gold 拆为校准/独立审计，比较严格标签与 canonical 形态，并对照 v2.4/v2.8 的 Top20/30/50 |
 | 3 条 Smoke | 对 confirmed Gold 优先队列执行 hook / middle / payoff 三窗口 ASR、OCR 和 Omni 证据抽取 |
 | Resolver 回放 | 在已有 D10-B 缓存上比较 title-only、Omni-only、ASR/OCR 和多窗口 Resolver；不会改标签或权重 |
-| 扫描 5 条 | 对视觉可评估素材执行约 5 秒步进、15 秒候选窗和三帧抽取；缺音轨不会阻断 |
+| 扫描下一批 10 条 | 按素材形态和账号平衡选择未审核样本，执行约 5 秒步进、15 秒候选窗和三帧抽取；缺音轨不会阻断 |
 | 保存窗口 Gold | 确认视觉形态、节目语境和选窗质量，只写独立窗口标注 |
-| 冻结对比 | 比较固定窗、文本窗、视觉窗和动态融合的 Recall@2 与严重漏选率 |
+| 累计对比 | 累计已冻结批次并按样本去重，成对比较固定窗、文本窗、视觉窗和动态融合；缺失策略显示 N/A |
 
 保存人工标签后，样本会被标记为 `manual_verified`，因此会从“语义校准队列”的待处理列表中消失。这是已完成状态，不是刷新失败。页面会在“最近已保存”里保留最近样本；如果误保存或需要二次校准，点击“重新打开校准”，样本会恢复为低置信校准样本并重新出现在队列里。
 
@@ -462,7 +552,9 @@ dso douyin-history-import \
 
 “三窗口证据与 Resolver Shadow”用于 D10-B。证据抽取默认包含并优先选择已确认 Gold，每条真实执行三个 8 秒窗口；ASR 提示词回声或纯音乐低信息结果会保留原文审计，但不参与语义投票。页面分别显示 Gold 入队覆盖与 Gold 证据覆盖，分母是 confirmed、素材形态已知且按账号与稳定标题去重后的 Gold。`unknown` 预测计为弃权：端到端准确率仍把弃权留在分母，作答准确率只看非 `unknown` 结果，严重错判率也只在实际作答中统计。大批量抽取应使用 CLI 断点执行，工作台的 Smoke 只用于小批验证。
 
-“视觉候选窗与窗口 Gold”用于 D11。视觉路径只要求本地视频、可读取时长且与历史时长基本一致，音轨是可选证据。每个候选窗展示起止时间和三张帧图；人工需确认 `视觉形态 / 节目语境 / 选窗质量`，无法稳定判断时选“未知”或“暂不确定”。窗口 Gold 写入 `material_window_annotations`，不会改写历史样本主标签。Qwen 服务不可用时仍可生成帧级审核队列，但视觉向量和原型分保持为空，不应把零分理解为负面判断。
+“视觉候选窗与窗口 Gold”用于 D11B。视觉路径只要求本地视频、可读取时长且与历史时长基本一致，音轨是可选证据。每个候选窗展示起止时间和三张帧图；人工需确认 `视觉形态 / 节目语境 / 选窗质量`，无法稳定判断时选“未知”或“暂不确定”。窗口 Gold 写入 `material_window_annotations`，不会改写历史样本主标签。
+
+每次扫描都会创建不可覆盖的 `build_id`、报告和 SHA-256 manifest；新批次排除已审核样本，当前批次未完成时不能继续取下一批。累计对比只合并已冻结 build，同一样本因向量重试出现多次时只保留最新版本。原型对每个验证样本执行 leave-one-sample-out，`unknown/uncertain` 作为合法弃权而不是严重漏选。Qwen 服务不可用时仍可生成帧，但真实 2048 维窗口向量覆盖低于 90% 时页面只允许“重试窗口向量”，不会进入评测。
 
 常用 CLI：
 
@@ -508,6 +600,33 @@ dso backtest --account main --k 30 --strategy research_ranker_v2_6_pool --holdou
 | `POST /learning/qwen-omni/shadow-run` | 对历史样本批量做 shadow-run |
 | `POST /learning/qwen-omni/media-batch` | 对本地真视频历史样本做切窗、上传和断点缓存 |
 
+### 7.7 G3 公网模型安全底座
+
+当前版本已经具备厂商无关的 Provider 合约、默认关闭策略、显式数据许可、请求/批次/日预算、内容缓存、独立调用台账、本地回退和 Shadow 评测，但尚未接入 Qwen、Kimi 等真实公网 Adapter。即使设置了某个 API key，系统也不会自动启用网络请求。
+
+先查看只读状态：
+
+```bash
+dso provider-status
+```
+
+再用 Fake Provider 验证完整链路。`--repeat 2` 应看到第二次命中缓存，且网络调用数和估算费用都为 0：
+
+```bash
+dso provider-smoke --text "G3 local-only smoke" --repeat 2 --batch-id local-g3-smoke
+```
+
+运行数据分别写入 `data/cache/public_models/` 和 `data/db/public_model_ledger.sqlite3`。台账只保存 Provider/模型/提示词版本、输入规模、token、请求/重试/限流、延迟、缓存、费用和许可等审计元数据，不保存 API key、提示词正文或原始媒体。
+
+常用 API：
+
+| API | 用途 |
+| --- | --- |
+| `GET /providers/status` | 查询注册 Provider、启用状态和安全边界，不返回密钥 |
+| `POST /providers/fake-smoke` | 执行零网络、零费用的端到端 Smoke；只用于研究验收 |
+
+真实 Adapter 上线前仍必须由管理员显式提供数据许可、环境变量密钥和硬预算，并先在冻结 benchmark 以 Shadow 模式比较质量、费用、P50/P95、失败率和缓存命中率。未通过门禁时，候选仍使用本地基线。
+
 ## 8. CLI 快速手册
 
 完整主流程：
@@ -515,7 +634,9 @@ dso backtest --account main --k 30 --strategy research_ranker_v2_6_pool --holdou
 ```bash
 dso init
 dso doctor
+dso precut-import ./clips/*.mp4 --account main --batch-title "本周候选"
 dso ingest ./program.mp4 --account main --title "第 1 期"
+dso download-video "https://v.qq.com/x/cover/.../...html" --dry-run --acknowledge-noncommercial
 dso extract <video_id>
 dso generate-segments <video_id> --top-k 30
 dso score <video_id>
@@ -524,6 +645,8 @@ dso export <segment_id>
 dso import-metrics ./douyin_metrics.csv
 dso training-samples --account main
 dso baselines --account main
+dso provider-status
+dso provider-smoke --repeat 2
 dso web --reload
 ```
 
@@ -650,6 +773,15 @@ echo $DSO_DOUYIN_REDIRECT_URI
 
 配置后重启 Web 服务，并在“研究学习 > 平台账号”重新查看状态。
 
+### 9.9 远程视频下载不可用或被拒绝
+
+- 提示 `optional videodl runtime is unavailable`：执行 `python3 -m pip install -e ".[videodl]"`。
+- 提示 `DRM-protected`：该资源不进入下载链路；系统不会解密或绕过保护。
+- 提示域名不支持：先把授权媒体下载为本地文件，再使用 `dso ingest`。
+- 提示 YouTube URL 必须是单视频：改用 watch、`youtu.be`、shorts、live 或 embed 链接；playlist/channel URL 不会批量展开。
+- YouTube 下载前先检查 dry-run 的 `selected_format` 和预计字节数；720p 使用独立音视频时必须确保本机 FFmpeg 可用。
+- 提示非商业确认：仅在符合上游许可且已确认用途后添加 `--acknowledge-noncommercial`。
+
 ## 10. 日常运营 SOP
 
 每期节目推荐按以下顺序操作：
@@ -703,8 +835,14 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | API | 用途 |
 | --- | --- |
 | `GET /runtime` | 运行环境诊断 |
+| `GET /providers/status` | 查询 G3 Provider 安全底座状态，不返回密钥 |
+| `POST /providers/fake-smoke` | 运行零网络、零费用的 Provider Smoke |
 | `GET /videos` | 节目列表 |
 | `POST /videos` | 上传节目 |
+| `POST /precut-batches` | 批量上传已切短片并可排入后台处理 |
+| `GET /precut-batches` | 查询最近批次 |
+| `GET /precut-batches/{batch_id}` | 查询批次进度、条目和跨文件排名 |
+| `POST /precut-batches/{batch_id}/process` | 继续或重跑批次特征提取和共享排序 |
 | `POST /videos/{video_id}/extract` | 提取 ASR 和音频特征 |
 | `POST /videos/{video_id}/segments` | 生成候选 |
 | `POST /videos/{video_id}/score` | 评分 |
@@ -727,9 +865,11 @@ echo $DSO_DOUYIN_REDIRECT_URI
 | `POST /learning/material-evidence/extract` | 抽取 ASR、OCR、Omni 三窗口证据；只写 Shadow 缓存 |
 | `POST /learning/material-resolver/shadow` | 运行 cached-eval-only Resolver 策略对比与研究门控 |
 | `GET /learning/visual-window-scout/status` | 查询 D11 视觉准入、窗口 Gold、原型和最近扫描状态 |
-| `POST /learning/visual-window-scout/build` | 生成 15 秒视觉候选窗、三帧预览和 Top2 Shadow 清单 |
+| `POST /learning/visual-window-scout/build` | 生成下一批 15 秒视觉候选窗、三帧预览、冻结 build/manifest 和 Top2 Shadow 清单 |
+| `GET /learning/visual-window-scout/builds/{build_id}` | 读取指定不可变 D11B build |
+| `GET /learning/visual-window-scout/builds/{build_id}/manifest` | 读取并验证指定 build 的 SHA-256 manifest |
 | `PATCH /learning/material-window-gold/{sample_id}` | 保存窗口级视觉形态、节目语境和选窗质量 |
-| `POST /learning/visual-window-scout/experiment` | 比较 fixed/text/visual/fusion 四种选窗策略 |
+| `POST /learning/visual-window-scout/experiment` | 单批或累计成对比较 fixed/text/visual/fusion 四种选窗策略 |
 | `POST /learning/backtest` | 运行离线回测 |
 | `GET /learning/qwen-omni/status` | 检查 Omni 低显存服务状态 |
 | `POST /learning/qwen-omni/shadow-run` | 执行 Omni shadow-run |
@@ -742,4 +882,5 @@ echo $DSO_DOUYIN_REDIRECT_URI
 - 官方或授权账号的 6h / 24h / 72h / 7d / 30d 完整窗口指标仍需持续接入。
 - 样本少于 300 的账号只输出低置信趋势。
 - Qwen2.5-Omni 低显存模式只用于短片段离线研究；当前目标机不适合完整 BF16 版或 30 秒以上视频常驻分析。
+- G3 目前只有零网络 Fake Provider；Qwen/Kimi 等真实公网 Adapter 尚未接入，未经显式数据许可、密钥、预算和冻结 Shadow 门禁不会启用。
 - 系统不会自动发布或代替人工做最终内容合规判断。

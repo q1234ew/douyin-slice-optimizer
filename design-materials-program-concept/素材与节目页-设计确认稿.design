@@ -1,0 +1,33 @@
+{
+  "data": [
+    {
+      "id": "page-materials-program",
+      "title": "素材与节目页",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1784376071078,
+      "devMetadata": {
+        "htmlSrc": "pages/materials-program.html",
+        "interactions": []
+      },
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "素材与节目页设计确认稿",
+    "designLibrary": {
+      "name": "苹果",
+      "id": "dl_builtin_apple",
+      "version": "1",
+      "scope": "built-in-global",
+      "path": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple",
+      "versionSource": "selected-context"
+    }
+  }
+}

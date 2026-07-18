@@ -2508,6 +2508,8 @@ def _is_omni_model(model_id: str) -> bool:
 
 
 def _deployment_status(health: dict, gate: dict, loaded_omni: bool) -> str:
+    if str(health.get("status") or "").lower() == "busy":
+        return "busy"
     if not _service_ready(health):
         return "service_unavailable"
     if not gate.get("supports_gptq_int4_15s"):
@@ -2517,7 +2519,9 @@ def _deployment_status(health: dict, gate: dict, loaded_omni: bool) -> str:
 
 def _status_recommendations(health: dict, gate: dict, loaded_omni: bool) -> list[str]:
     recs = []
-    if not _service_ready(health):
+    if str(health.get("status") or "").lower() == "busy":
+        recs.append("Omni 单并发推理正在执行；当前请求应保持规则排序并稍后重试。")
+    elif not _service_ready(health):
         recs.append("先启动远程多模态模型服务，并确认 /health 可访问。")
     if not gate.get("supports_gptq_int4_15s"):
         recs.append("当前显存不足以稳定运行 15 秒 GPTQ-Int4 Omni 低显存实验。")

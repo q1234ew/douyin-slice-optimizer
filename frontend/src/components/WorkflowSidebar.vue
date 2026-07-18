@@ -59,8 +59,8 @@ const uploadAccount = ref("main");
 const uploadTitle = ref("");
 const uploadFile = ref<HTMLInputElement | null>(null);
 const showUploadForm = computed(() => state.expandedWorkflow || !state.stats.videos);
-const showUploadTools = computed(() => state.view === "workbench" && (state.expandedWorkflow || !state.stats.videos));
-const showContextAction = computed(() => state.view !== "candidates" && !showUploadTools.value);
+const showUploadTools = computed(() => state.entryMode === "program" && state.view === "workbench" && (state.expandedWorkflow || !state.stats.videos));
+const showContextAction = computed(() => state.entryMode === "program" && state.view !== "candidates" && !showUploadTools.value);
 const activePage = computed(() => {
   if (state.view === "candidates" && state.inspectorSection === "packaging") return "publish";
   if (state.view === "candidates" || state.view === "simulation") return "review";

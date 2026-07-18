@@ -85,11 +85,15 @@ def suggestions(video_id: str, top_k: int = 10) -> list[dict]:
             SELECT c.*, s.final_score, s.score_explanation, s.title_suggestions,
                    s.cover_suggestion, s.risk_notes, s.rights_risk_score,
                    s.low_originality_score, s.ranker_score, s.ranker_version,
-                   s.learning_signals_json
+                   s.learning_signals_json, s.omni_score, s.omni_confidence,
+                   s.omni_status, s.omni_analysis_json, s.hybrid_score,
+                   s.hybrid_rank, s.hybrid_ranker_version
             FROM candidate_segments c
             JOIN slice_scores s ON s.candidate_segment_id = c.id
             WHERE c.source_video_id = ?
-            ORDER BY COALESCE(NULLIF(s.ranker_score, 0), s.final_score) DESC, s.final_score DESC
+            ORDER BY COALESCE(NULLIF(s.hybrid_score, 0), NULLIF(s.ranker_score, 0), s.final_score) DESC,
+                     COALESCE(NULLIF(s.ranker_score, 0), s.final_score) DESC,
+                     s.final_score DESC
             LIMIT ?
             """,
             [video_id, top_k],
@@ -98,6 +102,8 @@ def suggestions(video_id: str, top_k: int = 10) -> list[dict]:
         row["title_suggestions"] = sanitize_title_suggestions(json.loads(row["title_suggestions"]))
         row["risk_notes"] = json.loads(row["risk_notes"])
         row["learning_signals"] = _json_field(row.pop("learning_signals_json", "{}"), {})
+        row["omni_analysis"] = _json_field(row.pop("omni_analysis_json", "{}"), {})
+        row["generation_signals"] = _json_field(row.pop("generation_signals_json", "{}"), {})
         row["scorer_version"] = SCORER_VERSION
     return rows
 
@@ -847,6 +853,7 @@ def _title_suggestions(segment: dict) -> list[str]:
     fragment = _display_fragment(transcript)
     focus = _focus_label(segment, transcript)
     duration = max(1, round(float(segment.get("duration_seconds") or 0)))
+    hook_second = max(1, min(duration, round(duration * 0.4)))
     titles: list[str] = []
 
     if fragment:
@@ -917,9 +924,9 @@ def _title_suggestions(segment: dict) -> list[str]:
             "这段最戳人的其实是这一句",
         ])
     titles.extend([
-        "这段舞台真正抓人的地方在第 12 秒",
+        f"这段舞台真正抓人的地方在第 {hook_second} 秒",
         "听到这里才懂这个改编的用意",
-        "这不是纯高音，是短短几十秒的情绪推进",
+        f"这不是单纯高音，是这 {duration} 秒的情绪推进",
     ])
     return sanitize_title_suggestions(titles)[:3]
 

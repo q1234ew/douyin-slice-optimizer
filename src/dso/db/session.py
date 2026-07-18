@@ -136,11 +136,41 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
     _add_columns(
         conn,
+        "source_videos",
+        {
+            "input_mode": "TEXT NOT NULL DEFAULT 'program'",
+            "content_hash": "TEXT NOT NULL DEFAULT ''",
+            "import_batch_id": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    _add_columns(
+        conn,
+        "candidate_segments",
+        {
+            "generation_signals_json": "TEXT NOT NULL DEFAULT '{}'",
+            "boundary_strategy": "TEXT NOT NULL DEFAULT ''",
+            "boundary_confidence": "REAL NOT NULL DEFAULT 0",
+            "candidate_origin": "TEXT NOT NULL DEFAULT 'generated'",
+            "boundary_locked": "INTEGER NOT NULL DEFAULT 0",
+            "source_content_hash": "TEXT NOT NULL DEFAULT ''",
+            "import_batch_id": "TEXT NOT NULL DEFAULT ''",
+            "candidate_contract_version": "TEXT NOT NULL DEFAULT 'standard_candidate.v1'",
+        },
+    )
+    _add_columns(
+        conn,
         "slice_scores",
         {
             "ranker_score": "REAL NOT NULL DEFAULT 0",
             "ranker_version": "TEXT NOT NULL DEFAULT ''",
             "learning_signals_json": "TEXT NOT NULL DEFAULT '{}'",
+            "omni_score": "REAL NOT NULL DEFAULT 0",
+            "omni_confidence": "REAL NOT NULL DEFAULT 0",
+            "omni_status": "TEXT NOT NULL DEFAULT 'not_run'",
+            "omni_analysis_json": "TEXT NOT NULL DEFAULT '{}'",
+            "hybrid_score": "REAL NOT NULL DEFAULT 0",
+            "hybrid_rank": "INTEGER NOT NULL DEFAULT 0",
+            "hybrid_ranker_version": "TEXT NOT NULL DEFAULT ''",
         },
     )
     _ensure_historical_capture_item_unique(conn)
@@ -148,6 +178,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _ensure_embedding_records_schema(conn)
     _ensure_material_gold_annotations_schema(conn)
     _ensure_material_window_annotations_schema(conn)
+    _ensure_precut_batch_schema(conn)
 
 
 def _add_columns(conn: sqlite3.Connection, table: str, columns: Mapping[str, str]) -> None:
@@ -248,6 +279,84 @@ def _ensure_embedding_records_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_embedding_records_scope ON embedding_records(entity_type, account_id, dataset_id, modality, status)"
+    )
+
+
+def _ensure_precut_batch_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS precut_import_batches (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL DEFAULT 'main',
+          title TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'ready',
+          item_count INTEGER NOT NULL DEFAULT 0,
+          created_count INTEGER NOT NULL DEFAULT 0,
+          reused_count INTEGER NOT NULL DEFAULT 0,
+          failed_count INTEGER NOT NULL DEFAULT 0,
+          processed_count INTEGER NOT NULL DEFAULT 0,
+          contract_version TEXT NOT NULL DEFAULT 'precut_batch.v1',
+          error_summary TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS precut_import_items (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL,
+          position INTEGER NOT NULL DEFAULT 0,
+          source_name TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          content_hash TEXT NOT NULL DEFAULT '',
+          size_bytes INTEGER NOT NULL DEFAULT 0,
+          source_video_id TEXT,
+          candidate_segment_id TEXT,
+          ingest_disposition TEXT NOT NULL DEFAULT 'created',
+          status TEXT NOT NULL DEFAULT 'ready',
+          error TEXT NOT NULL DEFAULT '',
+          processing_notes_json TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(batch_id, position),
+          FOREIGN KEY(batch_id) REFERENCES precut_import_batches(id) ON DELETE CASCADE,
+          FOREIGN KEY(source_video_id) REFERENCES source_videos(id) ON DELETE SET NULL,
+          FOREIGN KEY(candidate_segment_id) REFERENCES candidate_segments(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_precut_batches_created
+          ON precut_import_batches(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_precut_items_batch
+          ON precut_import_items(batch_id, position);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_source_videos_precut_account_hash
+          ON source_videos(account_id, content_hash)
+          WHERE input_mode = 'precut' AND content_hash != '';
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_candidate_precut_source
+          ON candidate_segments(source_video_id)
+          WHERE candidate_origin = 'precut';
+
+        CREATE TRIGGER IF NOT EXISTS prevent_locked_candidate_boundary_update
+        BEFORE UPDATE OF start_time, end_time, duration_seconds ON candidate_segments
+        WHEN OLD.boundary_locked = 1 AND (
+          ABS(NEW.start_time - OLD.start_time) > 0.000001 OR
+          ABS(NEW.end_time - OLD.end_time) > 0.000001 OR
+          ABS(NEW.duration_seconds - OLD.duration_seconds) > 0.000001
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'locked candidate boundary is immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS prevent_locked_candidate_unlock
+        BEFORE UPDATE OF boundary_locked ON candidate_segments
+        WHEN OLD.boundary_locked = 1 AND NEW.boundary_locked != 1
+        BEGIN
+          SELECT RAISE(ABORT, 'locked candidate boundary cannot be unlocked');
+        END;
+        """
+    )
+    _add_columns(
+        conn,
+        "precut_import_items",
+        {"ingest_disposition": "TEXT NOT NULL DEFAULT 'created'"},
     )
 
 
@@ -410,6 +519,9 @@ CREATE TABLE IF NOT EXISTS source_videos (
   audio_streams INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'ingested',
   transcript_path TEXT,
+  input_mode TEXT NOT NULL DEFAULT 'program',
+  content_hash TEXT NOT NULL DEFAULT '',
+  import_batch_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -479,9 +591,55 @@ CREATE TABLE IF NOT EXISTS candidate_segments (
   comment_trigger TEXT,
   cover_time REAL,
   status TEXT NOT NULL DEFAULT 'candidate',
+  generation_signals_json TEXT NOT NULL DEFAULT '{}',
+  boundary_strategy TEXT NOT NULL DEFAULT '',
+  boundary_confidence REAL NOT NULL DEFAULT 0,
+  candidate_origin TEXT NOT NULL DEFAULT 'generated',
+  boundary_locked INTEGER NOT NULL DEFAULT 0,
+  source_content_hash TEXT NOT NULL DEFAULT '',
+  import_batch_id TEXT NOT NULL DEFAULT '',
+  candidate_contract_version TEXT NOT NULL DEFAULT 'standard_candidate.v1',
   created_at TEXT NOT NULL,
   FOREIGN KEY(source_video_id) REFERENCES source_videos(id) ON DELETE CASCADE,
   FOREIGN KEY(performance_id) REFERENCES performances(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS precut_import_batches (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL DEFAULT 'main',
+  title TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  item_count INTEGER NOT NULL DEFAULT 0,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  reused_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  contract_version TEXT NOT NULL DEFAULT 'precut_batch.v1',
+  error_summary TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS precut_import_items (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  source_name TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  source_video_id TEXT,
+  candidate_segment_id TEXT,
+  ingest_disposition TEXT NOT NULL DEFAULT 'created',
+  status TEXT NOT NULL DEFAULT 'ready',
+  error TEXT NOT NULL DEFAULT '',
+  processing_notes_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(batch_id, position),
+  FOREIGN KEY(batch_id) REFERENCES precut_import_batches(id) ON DELETE CASCADE,
+  FOREIGN KEY(source_video_id) REFERENCES source_videos(id) ON DELETE SET NULL,
+  FOREIGN KEY(candidate_segment_id) REFERENCES candidate_segments(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS clip_embeddings (
@@ -553,6 +711,13 @@ CREATE TABLE IF NOT EXISTS slice_scores (
   ranker_score REAL NOT NULL DEFAULT 0,
   ranker_version TEXT NOT NULL DEFAULT '',
   learning_signals_json TEXT NOT NULL DEFAULT '{}',
+  omni_score REAL NOT NULL DEFAULT 0,
+  omni_confidence REAL NOT NULL DEFAULT 0,
+  omni_status TEXT NOT NULL DEFAULT 'not_run',
+  omni_analysis_json TEXT NOT NULL DEFAULT '{}',
+  hybrid_score REAL NOT NULL DEFAULT 0,
+  hybrid_rank INTEGER NOT NULL DEFAULT 0,
+  hybrid_ranker_version TEXT NOT NULL DEFAULT '',
   score_explanation TEXT NOT NULL,
   title_suggestions TEXT NOT NULL,
   cover_suggestion TEXT NOT NULL,

@@ -1,0 +1,46 @@
+{
+  "contract_version": "dso.asr_recovery_benchmark.v1",
+  "benchmark_id": "dso-qwen3-asr-recovery-20260718-r2",
+  "locked_at": "2026-07-18T18:09:20.354962+08:00",
+  "objective": "Verify the optimized Qwen3-ASR long-program chunking and recovery path on the same frozen program used by the replacement benchmark.",
+  "source": {
+    "video_id": "video_f62d5de2297c4304",
+    "audio_path": "data/cache/video_f62d5de2297c4304/audio/audio.wav",
+    "audio_sha256": "77fc1cb01f48b0cdfcdcba5dc9c8ce2b3847ec179e0697156e37c3dd35866f22",
+    "audio_seconds": 7506.732698
+  },
+  "candidate": {
+    "backend": "qwen3_asr",
+    "model": "Qwen/Qwen3-ASR-1.7B",
+    "aligner": "Qwen/Qwen3-ForcedAligner-0.6B",
+    "context": "",
+    "chunk_seconds": 60.0,
+    "overlap_seconds": 1.0,
+    "boundary_search_seconds": 5.0,
+    "retry_enabled": true,
+    "retry_chunk_seconds": 30.0,
+    "retry_min_rms": 0.002,
+    "retry_min_text_density": 0.5,
+    "retry_slow_seconds": 12.0,
+    "client_sha256": "333d85091852635f55fd0abd5b5f2a62997cc0b7da11a8ccad422f92a10bfc78",
+    "service_sha256": "63320c7243f2ef2d3be01f78301b9a0fc466ddd9c092ec638871e8cf9df7173e"
+  },
+  "baselines": {
+    "qwen_fixed_60_no_context": "outputs/qwen3_asr_whisper_replacement_20260718_r1/full_program_no_context_60s/qwen3.full.transcript.json",
+    "anchor_recall": "outputs/qwen3_asr_whisper_replacement_20260718_r1/anchor_recall.json"
+  },
+  "acceptance": {
+    "full_program_success": true,
+    "unresolved_chunk_count_max": 0,
+    "critical_anchors_required": [
+      "这首歌有着非常蜿蜒的旋律",
+      "歌手们今晚的命运"
+    ],
+    "visible_anchor_recall_min": 0.7,
+    "context_echo_count_max": 0,
+    "rtf_max": 0.07,
+    "retry_chunk_ratio_max": 0.1,
+    "restore_omni_after_run": true
+  },
+  "output_root": "outputs/qwen3_asr_recovery_full_20260718_r2"
+}

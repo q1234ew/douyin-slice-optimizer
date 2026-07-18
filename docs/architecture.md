@@ -6,6 +6,7 @@
 
 相关文档：
 
+- [product-goals.md](./product-goals.md)：产品北极星目标、成功指标与持续迭代原则。
 - [research.md](./research.md)：论文与公开资料调研。
 - [algorithm-study.md](./algorithm-study.md)：Douyin/字节论文算法拆解。
 - [paper-architecture-review.md](./paper-architecture-review.md)：主线论文复核后的架构更新建议。
@@ -14,8 +15,9 @@
 
 ## 1. 系统定位
 
-本系统第一阶段以音乐综艺短视频切片为核心对象。歌曲、舞台和歌手是核心素材，但成品不是纯歌曲片段，而是有开头钩子、节目上下文、情绪推进和互动点的短视频内容。
+本系统第一阶段以音乐综艺短视频切片为核心对象。歌曲、舞台和歌手是核心素材，但成品不是纯歌曲片段，而是有开头钩子、节目上下文、情绪推进和互动点的短视频内容。系统有两个输入入口：已经切好的短视频直接进入候选排名，完整节目先自动生成和分类候选；两类候选标准化后共用同一排序、审核和反馈链路。
 
+- 对已经切好的单条或批量短视频做内容理解、筛选、推荐排名和解释，保留原始片段边界。
 - 从音乐综艺长视频中自动发现高潜短视频片段。
 - 为候选切片生成多维评分和解释。
 - 输出标题、封面帧、字幕和风险建议。
@@ -23,6 +25,16 @@
 - 用账号历史数据持续校准评分。
 
 第一版不做自动发布、不做刷量、不做模拟互动、不做绕过平台规则的能力。
+
+统一候选主链路：
+
+```text
+已切短片 ----------------------------> 标准化候选
+完整节目 -> 多模态理解 -> 切片/分类 -> 标准化候选
+                                         -> 统一排序
+                                         -> 人工审核与导出
+                                         -> 平台表现回流与校准
+```
 
 ## 1.1 主线论文复核后的结论
 
@@ -40,8 +52,10 @@
 ## 2. 总体架构
 
 ```text
-Source Video
-  -> Media Ingest
+Authorized Local File -----------------------------------------+
+Authorized Tencent-family / YouTube single-video URL           |
+  -> Optional restricted videodl Acquisition Adapter -> Local File +
+                                                        -> Media Ingest
   -> ASR / Frame / OCR / Audio Feature Extraction
   -> Multimodal Memory Bank
   -> Performance / Song Segment Detection
@@ -71,6 +85,59 @@ Source Video
   -> Training Sample Builder
   -> Feedback Update / Model Calibration
 ```
+
+### 2.1 Hybrid Slice Pipeline V1（2026-07-17）
+
+生产切片采用“确定性召回 + Omni 低权重复排”，不让大模型直接扫描整条长视频或直接改写最终边界：
+
+```text
+ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
+  -> 30+ 候选召回
+  -> 句首/句尾/静音/切镜边界吸附
+  -> 规则分 + 历史先验预排
+  -> Top 3 候选
+  -> Qwen2.5-Omni 逐条分析 hook / middle / payoff（每窗默认 6 秒）
+  -> 置信度折算后的低权重混合分（默认上限 15%）
+  -> Top 10 人工审核
+```
+
+关键约束：
+
+- Omni 不写 `manual_verified`，不自动批准候选，不自动发布。
+- Omni 的边界建议只作为证据；实际边界由确定性时间轴信号吸附。
+- 模型未加载、服务不可用或单条媒体失败时，自动保持规则分与历史先验排序。
+- 转码窗口和模型结果按源文件、候选时间范围、模型与版本缓存，重复运行不重复推理。
+- 16GB 显存默认 `candidate_limit=3`、`max_clip_seconds=6`、`batch_size=1`；前端先返回规则候选，再增量刷新 Omni 结果。
+- 模型服务使用 text-only thinker 路径，明确传递 `thinker_max_new_tokens=128`；推理由单线程执行器串行化，`/health` 独立返回 `ready/busy`，150 秒超时后由 systemd watchdog 重启服务，避免孤儿推理拖死整个 API。生产端口锁定 Omni 模型，Embedding 任务必须使用独立服务或先显式解除维护锁，避免共享 `/load` 竞争显存。
+
+主要入口：
+
+- API：`POST /videos/{video_id}/hybrid-slice`
+- 增量复排：`POST /videos/{video_id}/omni-rerank`
+- CLI：`dso hybrid-slice <video_id> --load-model`
+- 前端：节目管理中的“智能切片”按钮；候选卡与右侧详情显示 Omni 参与/回退状态。
+
+### 2.2 授权远程媒体获取（2026-07-18）
+
+远程下载只作为 Media Ingest 前的可选获取层，不生成第二套节目、候选或排序 contract：
+
+```text
+授权腾讯 URL  -> videodl TencentVideoClient -------------------+
+授权 YouTube 单视频 URL -> 受限 YouTubeVideoClient -> 720p 视频 + 音频 |
+                                                             -> 本地任务目录 + manifest
+                                                             -> ingest_video
+                                                             -> G2 标准节目链路
+```
+
+约束如下：
+
+- Provider 固定为 `videofetch==0.9.1`；按白名单只加载 `TencentVideoClient` 或受限 `YouTubeVideoClient`，下载 contract 为 `video_download.v1`。
+- 只接受 HTTPS 的 `v.qq.com`、`wetv.vip`、`iflix.com`、`youtube.com`、`youtu.be`。YouTube 的 watch/短链/shorts/live/embed URL 统一规范成单个 watch URL，删除播放列表参数并拒绝 playlist/channel URL。
+- YouTube 不调用上游 `ytdown`、`downr` 或通用解析器；只使用 `videodl` 内置 YouTube 直连工具，最高选取 720p、优先 H.264 MP4，并将默认 AAC/MP4 音轨交给 FFmpeg 合并。目标缺少兼容独立音轨时才回退渐进式 MP4。
+- 不传 Cookie、账号凭据或代理；上游选中格式标记 `has_drm=true` 时硬拒绝，不提供解密或绕过路径。
+- 默认单链接最多 1 个媒体，显式上限 20；线程上限 8；结果只能落在当前工程的 `data/tmp/video_downloads/<job_id>/` 内，或用户显式指定的 `--output-dir` 任务子目录内。
+- 每次调用必须确认 PolyForm Noncommercial 1.0.0 非商业许可；商业使用需另行获得上游授权。
+- 下载是长任务，当前只提供 CLI/service 入口，不新增阻塞 FastAPI 请求；`--dry-run` 只解析并写 manifest，`--no-ingest` 不修改业务数据库。
 
 对应论文思想：
 
@@ -122,6 +189,7 @@ douyin-slice-optimizer/
         migrations/
       media/
         ingest.py
+        video_download.py
         ffmpeg.py
         storage.py
       features/
@@ -174,9 +242,47 @@ douyin-slice-optimizer/
 - **先做可解释排序，后做大模型排序**：100-1000 条发布样本前，使用规则和 LightGBM/LambdaRank；1000+ 样本后，再考虑 Mini-STCA、多任务模型或小型 reranker。
 - **训练数据默认保守合规**：公开视频页面可见数据不等同于可批量抓取和商用训练；批量训练应依赖自有账号、授权账号、开放平台或合同许可数据。
 
+## 4.2 G3 公网模型 Provider V1
+
+公网模型以独立的 `src/dso/providers/` 边界接入，不允许厂商 SDK 或返回结构直接进入候选、排序和审核业务模块。V1 当前只注册零网络、零费用的 `FakeProvider`，用于验证 contract、缓存、台账和回退；Qwen、Kimi 等真实网络 Adapter 尚未实现，也不会因设置单个环境变量而自动启用。
+
+```text
+本地基线
+  -> ProviderRequest（内容 hash、模型/API/提示词版本、输入规模）
+  -> 默认关闭 / 数据许可 / 上传级别 / 密钥引用门禁
+  -> 确定性缓存
+  -> 单请求 / 单批次 / 单日预算预留
+  -> Provider Adapter（当前只有 Fake，无网络）
+  -> 结果 schema 与敏感字段校验
+  -> 独立 SQLite 成本台账
+  -> Shadow 评测（质量、严重错判、P50/P95、失败率、缓存、费用）
+  -> 最终结果仍保留本地基线
+```
+
+核心 contract：
+
+- `public_model_provider.v1`：厂商无关请求、结果、输入规模、调用指标、许可审计快照和决策证据。
+- `public_model_runner.v1`：按 fail-closed 顺序执行策略、缓存、预算、Provider、台账和本地回退。
+- `public_model_ledger.v1`：独立存储调用次数、token、字节、媒体规模、延迟、重试、限流、缓存、费用、许可和安全摘要；不存 API key、提示词正文和原始媒体。
+- `public_model_shadow_evaluation.v1`：只生成 `research_only` 对比报告，不改变生产权重、人工 Gold、导出和发布。
+
+真实 Adapter 的准入顺序固定为：核对厂商官方接口与价格、明确数据许可和保留期限、配置环境变量密钥、配置同币种预算、在冻结集 Shadow 对比，最后才讨论低权重融合。任何门禁缺失均返回本地基线。
+
 ## 5. 核心数据流
 
-### 5.1 上传长视频
+### 5.1 双入口标准化候选
+
+G1 已切短片使用 `precut_batch.v1`：批量任务先按 `account_id + SHA-256` 去重，每个源文件只创建一个 `standard_candidate.v1` 候选。候选固定为 `start_time=0`、`end_time=source.duration_seconds`、`candidate_origin=precut`、`boundary_locked=1`，数据库触发器禁止修改开始、结束、时长或解锁。特征提取失败时保留条目级降级说明，仍可用标题和已有确定性特征进入共享 scorer；不会伪造 ASR、音频或多模态结果。
+
+G2 完整节目继续由 Segment Generator 召回多个候选，写入同一个 `candidate_segments` contract，标记 `candidate_origin=generated`、`boundary_locked=0`。两类候选从这里开始共同使用 `score_segment`、历史证据 ranker、解释、质量 Gate、审核、导出、平台映射和指标回流。
+
+```text
+多条已切短片 -> 批次/内容哈希去重 -> 每文件一个锁边候选 -+
+完整节目 -> 特征抽取 -> 候选召回/边界吸附 -> 多个候选 -----+-> standard_candidate.v1
+                                                               -> 统一 scorer/ranker/review/feedback
+```
+
+### 5.2 上传长视频
 
 输入：
 
@@ -192,7 +298,7 @@ douyin-slice-optimizer/
 - 音频文件。
 - 抽帧目录。
 
-### 5.2 特征抽取
+### 5.3 特征抽取
 
 生成：
 
@@ -211,7 +317,7 @@ MVP 优先级：
 5. 图像 embedding。
 6. OCR。
 
-### 5.3 候选片段生成
+### 5.4 候选片段生成
 
 候选片段来源：
 
@@ -234,7 +340,7 @@ MVP 优先级：
 - 没有完整语义闭环的片段降权。
 - 开头 3 秒无信息增量的片段降权。
 
-### 5.4 多模态缓存
+### 5.5 多模态缓存
 
 每个候选片段缓存：
 
@@ -255,7 +361,7 @@ cover_embedding
 multimodal_embedding = weighted_average(text, cover)
 ```
 
-### 5.5 评分和排序
+### 5.6 评分和排序
 
 音乐综艺第一版使用短视频切片专用评分：
 
@@ -288,7 +394,7 @@ MVP 中没有足够历史数据时：
 - `audience_reaction_score` 先用画面切换、掌声/欢呼峰值和人工校正。
 - `rights_risk_score` 必须优先依赖授权元数据，缺失时提高风险分。
 
-### 5.6 生成切片版本
+### 5.7 生成切片版本
 
 每个候选片段可以生成多个版本：
 
@@ -300,7 +406,7 @@ MVP 中没有足够历史数据时：
 
 MVP 只生成建议，不自动批量发布。
 
-### 5.7 表现数据回流
+### 5.8 表现数据回流
 
 MVP 先手动导入 CSV 或表单录入：
 
@@ -371,6 +477,9 @@ file_path
 duration_seconds
 status
 transcript_path
+input_mode                 # program | precut
+content_hash               # precut 使用 SHA-256
+import_batch_id
 created_at
 updated_at
 ```
@@ -390,9 +499,20 @@ primary_topic
 song_section_type
 music_slice_type
 emotion_type
+candidate_origin           # generated | precut
+boundary_locked
+boundary_strategy
+boundary_confidence
+source_content_hash
+import_batch_id
+candidate_contract_version # standard_candidate.v1
 status
 created_at
 ```
+
+### 6.2.1 precut_import_batches / precut_import_items
+
+`precut_import_batches` 保存账号、批次状态、创建/复用/失败/处理计数和 `precut_batch.v1` 版本；`precut_import_items` 保存原文件名、顺序、内容哈希、源视频、锁边候选、处理状态、错误和降级说明。批次允许部分失败、后台继续处理和显式重试，不因单条坏文件回滚其他已成功条目。
 
 ### 6.3 songs
 
@@ -741,11 +861,21 @@ created_training_samples
 ingest_video(path: str, account_id: str, title: str) -> SourceVideo
 ```
 
+可选的远程获取接口先产出本地文件，再复用上述入口：
+
+```python
+download_video_resource(url: str, ..., ingest: bool = True) -> dict
+```
+
+其返回值包含 provider/版本/许可、策略状态、候选、文件、入库结果与不可变任务目录中的 JSON manifest；不改变候选排名权重。
+
 ### 7.2 Feature Extractor
 
 职责：
 
 - 调用 ASR。
+- 对长音频做可复现的切块、边界吸附和时间轴合并。
+- 把逐块 `text_chars / elapsed / attempts / quality_status` 写入运行清单；请求成功但文本空或可疑时执行受限缩块重试，未恢复则输出 `degraded`，不能伪装为完整转写。
 - 抽帧。
 - 提取音频特征。
 - 生成 embeddings。
@@ -849,6 +979,11 @@ POST /videos
 GET  /videos
 GET  /videos/{id}
 
+POST /precut-batches
+GET  /precut-batches
+GET  /precut-batches/{id}
+POST /precut-batches/{id}/process
+
 POST /videos/{id}/features
 POST /videos/{id}/segments
 GET  /videos/{id}/segments
@@ -866,12 +1001,16 @@ POST /accounts/{id}/platform-sync
 GET  /accounts/{id}/insights
 GET  /accounts/{id}/interest-clock
 GET  /accounts/{id}/topic-clusters
+
+GET  /providers/status
+POST /providers/fake-smoke
 ```
 
 ## 9. CLI 草案
 
 ```bash
 dso ingest ./input.mp4 --account main --title "直播回放 2026-06-23"
+dso precut-import ./clips/*.mp4 --account main --batch-title "首轮候选"
 dso extract-features <video_id>
 dso generate-segments <video_id>
 dso score <video_id>
@@ -879,6 +1018,8 @@ dso suggest <video_id> --top-k 10
 dso export <segment_id> --variant 1
 dso import-metrics ./metrics.csv
 dso insights --account main
+dso provider-status
+dso provider-smoke --repeat 2
 ```
 
 ## 10. MVP 里程碑

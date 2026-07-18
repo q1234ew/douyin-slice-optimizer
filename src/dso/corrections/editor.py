@@ -113,6 +113,16 @@ def update_candidate_segment(segment_id: str, payload: dict[str, Any]) -> dict:
         current = fetch_one(conn, "SELECT * FROM candidate_segments WHERE id = ?", [segment_id])
         if not current:
             raise KeyError(f"segment not found: {segment_id}")
+        if int(current.get("boundary_locked") or 0) == 1:
+            requested_start = _time_value(payload.get("start_time"), default=current["start_time"])
+            requested_end = _time_value(payload.get("end_time"), default=current["end_time"])
+            requested_duration = _time_value(payload.get("duration_seconds"), default=current["duration_seconds"])
+            if (
+                abs(float(requested_start) - float(current["start_time"])) > 0.000001
+                or abs(float(requested_end) - float(current["end_time"])) > 0.000001
+                or abs(float(requested_duration) - float(current["duration_seconds"])) > 0.000001
+            ):
+                raise ValueError("precut candidate boundary is immutable; start, end, and duration cannot be changed")
         video = fetch_one(conn, "SELECT * FROM source_videos WHERE id = ?", [current["source_video_id"]])
         if not video:
             raise KeyError(f"video not found: {current['source_video_id']}")

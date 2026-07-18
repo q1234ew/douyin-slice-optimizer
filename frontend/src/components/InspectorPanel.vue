@@ -12,7 +12,7 @@
         <span class="candidate-time">{{ state.preview?.timeRange || "当前候选" }}</span>
         <strong>{{ titles[0] || row.summary || "候选片段" }}</strong>
         <div class="inspector-decision-meta">
-          <span>综合分 {{ Number(row.final_score || 0).toFixed(1) }}</span>
+          <span>{{ row.omni_status === "ready" ? "混合分" : "综合分" }} {{ displayScore.toFixed(1) }}</span>
           <span class="status" :class="decisionStatusClass(advisorySeverity)">{{ advisoryTitle }}</span>
         </div>
       </div>
@@ -91,12 +91,27 @@
           <div class="detail-section">
             <div class="detail-title"><Icon name="activity" />评分拆解</div>
             <div class="score-breakdown">
-              <div class="score-chip"><span>综合分</span><strong>{{ Number(row.final_score || 0).toFixed(1) }}</strong></div>
+              <div class="score-chip"><span>{{ row.omni_status === "ready" ? "混合分" : "综合分" }}</span><strong>{{ displayScore.toFixed(1) }}</strong></div>
+              <div v-if="row.omni_status === 'ready'" class="score-chip"><span>Omni 证据分</span><strong>{{ Number(row.omni_score || 0).toFixed(1) }}</strong></div>
               <div class="score-chip"><span>首5秒</span><strong>{{ signals.hook }}</strong></div>
               <div class="score-chip"><span>音乐爆点</span><strong>{{ signals.music }}</strong></div>
               <div class="score-chip"><span>上下文</span><strong>{{ signals.context }}</strong></div>
               <div class="score-chip"><span>评论触发</span><strong>{{ signals.comment }}</strong></div>
               <div class="score-chip"><span>低原创风险</span><strong>{{ signals.originality }}</strong></div>
+            </div>
+          </div>
+
+          <div class="detail-section omni-rerank-card">
+            <div class="detail-title"><Icon name="sparkles" />Omni 多窗口复排</div>
+            <div class="detail-metrics">
+              <span>状态<strong>{{ omniStatusLabel }}</strong></span>
+              <span>窗口<strong>{{ omniWindowCount }}</strong></span>
+              <span>模型置信<strong>{{ Math.round(Number(row.omni_confidence || 0) * 100) }}%</strong></span>
+              <span>边界置信<strong>{{ Math.round(Number(row.boundary_confidence || 0) * 100) }}%</strong></span>
+            </div>
+            <div class="meta">{{ omniStatusText }}</div>
+            <div v-if="omniEvidence.length" class="omni-evidence-list">
+              <span v-for="item in omniEvidence" :key="item">{{ item }}</span>
             </div>
           </div>
 
@@ -372,6 +387,36 @@ const latestReviewEvent = computed<ReviewEvent | null>(() => reviewEvents.value[
 const olderReviewEvents = computed(() => reviewEvents.value.slice(1));
 const latestReviewReason = computed(() => String(latestReviewEvent.value?.reason || ""));
 const feedback = computed(() => row.value?.feedback_summary || {});
+const displayScore = computed(() => Number(row.value?.hybrid_score || row.value?.ranker_score || row.value?.final_score || 0));
+const omniAnalysis = computed<Record<string, unknown>>(() => {
+  const value = row.value?.omni_analysis;
+  return value && typeof value === "object" ? value : {};
+});
+const omniWindows = computed<Array<Record<string, unknown>>>(() => {
+  const value = omniAnalysis.value.windows;
+  return Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
+});
+const omniWindowCount = computed(() => Number(omniAnalysis.value.window_count || omniWindows.value.length || 0));
+const omniStatusLabel = computed(() => {
+  if (row.value?.omni_status === "ready") return "已参与复排";
+  if (String(row.value?.omni_status || "").startsWith("fallback_")) return "规则回退";
+  if (row.value?.omni_status === "not_selected") return "未进入复排池";
+  if (row.value?.omni_status === "error") return "单条回退";
+  return "尚未运行";
+});
+const omniStatusText = computed(() => {
+  if (row.value?.omni_status === "ready") return "按 hook / middle / payoff 音视频窗口聚合，低权重参与排序；不会自动改写边界或人工标签。";
+  if (String(row.value?.omni_status || "").startsWith("fallback_")) return "Omni 服务或模型未就绪，本条保持规则分与历史先验排序。";
+  if (row.value?.omni_status === "not_selected") return "本条未进入 Top 预筛池，避免在 16GB 显存上对全部候选逐条推理。";
+  if (row.value?.omni_status === "error") return "该候选的媒体窗口分析失败，系统已保留原排序，不影响继续审核。";
+  return "运行智能切片后，这里会显示多窗口音视频证据。";
+});
+const omniEvidence = computed(() => omniWindows.value.flatMap((item) => {
+  const role = String((item.window as Record<string, unknown> | undefined)?.window || "窗口");
+  const evidence = item.evidence;
+  if (Array.isArray(evidence)) return evidence.slice(0, 1).map(value => `${role}: ${String(value)}`);
+  return evidence ? [`${role}: ${String(evidence)}`] : [];
+}).slice(0, 3));
 const researchHistory = computed<SegmentHistoryResult | null>(() => {
   const signals = row.value?.learning_signals;
   return signals && typeof signals === "object" ? signals : null;

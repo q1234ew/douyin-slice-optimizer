@@ -267,7 +267,7 @@
     <section class="visual-window-panel" aria-labelledby="visual-window-title">
       <header class="visual-window-head">
         <div>
-          <span class="section-kicker">Beta-D-11 / Visual Window Scout</span>
+          <span class="section-kicker">Beta-D-11B / Frozen Window Evaluation</span>
           <h5 id="visual-window-title">视觉候选窗与窗口 Gold</h5>
         </div>
         <div class="visual-window-actions">
@@ -275,13 +275,13 @@
             <span v-if="state.busyKey === 'visual-window-refresh'" class="spinner"></span>
             <Icon v-else name="refresh-cw" />
           </button>
-          <button type="button" :disabled="state.busyKey === 'visual-window-scan'" @click="withBusy('visual-window-scan', runVisualWindowScout)">
+          <button type="button" :disabled="state.busyKey === 'visual-window-scan' || (visualPendingCount > 0 && !visualNeedsEmbeddingRetry)" :title="visualNeedsEmbeddingRetry ? '为当前批次补齐真实窗口向量' : (visualPendingCount > 0 ? '完成当前批次后才能生成下一批' : '生成平衡且不重复的下一批')" @click="withBusy('visual-window-scan', runVisualWindowScout)">
             <span v-if="state.busyKey === 'visual-window-scan'" class="spinner"></span>
-            <Icon v-else name="scan-search" />扫描 5 条
+            <Icon v-else name="scan-search" />{{ visualNeedsEmbeddingRetry ? '重试窗口向量' : (visualPendingCount > 0 ? `待确认 ${visualPendingCount}` : '扫描下一批 10 条') }}
           </button>
-          <button type="button" :disabled="state.busyKey === 'visual-window-experiment'" @click="withBusy('visual-window-experiment', runVisualWindowExperiment)">
+          <button type="button" :disabled="state.busyKey === 'visual-window-experiment' || !visualBatchComplete || visualNeedsEmbeddingRetry" @click="withBusy('visual-window-experiment', runVisualWindowExperiment)">
             <span v-if="state.busyKey === 'visual-window-experiment'" class="spinner"></span>
-            <Icon v-else name="radar" />冻结对比
+            <Icon v-else name="radar" />累计对比
           </button>
         </div>
       </header>
@@ -289,22 +289,30 @@
       <div class="visual-window-stats">
         <span><strong>{{ Number(visualMedia.eligible_count || 0) }}</strong> 视觉可扫描</span>
         <span><strong>{{ Number(visualMedia.audio_ready_count || 0) }}</strong> 音轨就绪</span>
-        <span><strong>{{ Number(visualBuild.embedding_ready_count || 0) }}</strong> 窗口向量</span>
+        <span><strong>{{ Number(visualBuild.embedding_ready_count || 0) }}/{{ Number(visualBuild.candidate_count || 0) }}</strong> 窗口向量</span>
         <span><strong>{{ Number(visualAnnotation.confirmed_count || 0) }}</strong> 窗口 Gold</span>
         <span><strong>{{ visualPendingCount }}</strong> 待确认</span>
+        <span><strong>{{ Number(visualProgress.uncertain_window_count || 0) }}</strong> 弃权</span>
       </div>
 
       <div class="quality-row visual-window-route">
         <span class="status" :class="visualStatus.status === 'ready_for_window_gold_review' ? 'ok' : 'neutral'">{{ visualStatus.status || 'not_started' }}</span>
-        <span>视觉路线按视频准入，音频缺失不再阻断；Omni 只接收融合策略 Top2。</span>
+        <span v-if="visualBuildId">批次 {{ visualBuildId }} · 已审核 {{ Number(visualProgress.reviewed_sample_count || 0) }}/{{ Number(visualProgress.sample_count || 0) }} · manifest 已冻结</span>
+        <span v-else>等待生成首个 D11B 冻结批次</span>
+      </div>
+
+      <div v-if="visualPairedFixed" class="quality-row visual-window-route">
+        <span class="status" :class="visualGatePassed ? 'ok' : 'neutral'">{{ visualGatePassed ? '可进入 Omni Top2' : '研究评测' }}</span>
+        <span>累计 {{ Number(state.visualWindowExperiment?.source_build_count || 0) }} 批 · Fusion vs 固定窗 {{ visualFixedDelta }} · paired {{ Number(visualPairedFixed.paired_sample_count || 0) }} 条 · 原型泄漏 {{ Number(visualLeakage.violation_count || 0) }} 条</span>
       </div>
 
       <div v-if="visualStrategyRows.length" class="visual-window-strategies">
         <article v-for="strategy in visualStrategyRows" :key="strategy.key">
           <strong>{{ strategy.label }}</strong>
-          <span>Recall@2 {{ percent(strategy.recall) }}</span>
-          <span>严重漏选 {{ percent(strategy.severeMiss) }}</span>
-          <em>{{ strategy.evaluated }} 条已评估</em>
+          <span>Recall@2 {{ strategy.recallText }}</span>
+          <span>可判定 {{ percent(strategy.decisionCoverage) }}</span>
+          <span>弃权 {{ percent(strategy.abstentionRate) }}</span>
+          <em>{{ strategy.evaluated }} 条可评估</em>
         </article>
       </div>
 
@@ -469,21 +477,44 @@ const visualStatus = computed(() => state.visualWindowScoutStatus || {});
 const visualMedia = computed<Record<string, unknown>>(() => visualStatus.value.media_readiness && typeof visualStatus.value.media_readiness === "object" ? visualStatus.value.media_readiness as Record<string, unknown> : {});
 const visualAnnotation = computed<Record<string, unknown>>(() => visualStatus.value.annotation_summary && typeof visualStatus.value.annotation_summary === "object" ? visualStatus.value.annotation_summary as Record<string, unknown> : {});
 const visualBuild = computed<Record<string, unknown>>(() => visualStatus.value.latest_build && typeof visualStatus.value.latest_build === "object" ? visualStatus.value.latest_build as Record<string, unknown> : {});
+const visualProgress = computed<Record<string, unknown>>(() => visualStatus.value.batch_progress && typeof visualStatus.value.batch_progress === "object" ? visualStatus.value.batch_progress as Record<string, unknown> : {});
+const visualBuildId = computed(() => clipText(String(visualBuild.value.build_id || ""), 24));
 const visualWindowSamples = computed<VisualWindowReviewSample[]>(() => Array.isArray(visualStatus.value.review_queue?.samples) ? visualStatus.value.review_queue?.samples || [] : []);
 const visualPendingCount = computed(() => Number(visualStatus.value.review_queue?.pending_count || 0));
+const visualNeedsEmbeddingRetry = computed(() => {
+  const candidateCount = Number(visualBuild.value.candidate_count || 0);
+  const readyCount = Number(visualBuild.value.embedding_ready_count || 0);
+  return candidateCount > 0 && readyCount / candidateCount < 0.9;
+});
+const visualBatchComplete = computed(() => Number(visualProgress.value.sample_count || 0) > 0 && visualPendingCount.value === 0);
 const visualSceneOptions = computed(() => windowOptions(visualStatus.value.scene_form_options));
 const visualContextOptions = computed(() => windowOptions(visualStatus.value.program_context_options));
 const visualQualityOptions = computed(() => windowOptions(visualStatus.value.selection_quality_options));
+const visualPairedFixed = computed<Record<string, unknown> | null>(() => {
+  const paired = state.visualWindowExperiment?.paired_comparison;
+  const row = paired && typeof paired === "object" ? paired.fusion_vs_fixed : null;
+  return row && typeof row === "object" ? row as Record<string, unknown> : null;
+});
+const visualLeakage = computed<Record<string, unknown>>(() => state.visualWindowExperiment?.leakage_guard_summary && typeof state.visualWindowExperiment.leakage_guard_summary === "object" ? state.visualWindowExperiment.leakage_guard_summary as Record<string, unknown> : {});
+const visualGatePassed = computed(() => state.visualWindowExperiment?.promotion_gate?.passed === true);
+const visualFixedDelta = computed(() => {
+  const value = visualPairedFixed.value?.recall_delta;
+  return typeof value === "number" ? `${value >= 0 ? "+" : ""}${percent(value)}` : "N/A";
+});
 const visualStrategyRows = computed(() => {
   const comparison = state.visualWindowExperiment?.strategy_comparison || {};
   const labels: Record<string, string> = { fixed: "固定窗", text: "文本窗", visual: "视觉窗", fusion: "动态融合" };
-  return Object.keys(labels).filter(key => comparison[key]).map(key => ({
-    key,
-    label: labels[key],
-    recall: Number(comparison[key]?.recall_at_2 || 0),
-    severeMiss: Number(comparison[key]?.severe_miss_rate || 0),
-    evaluated: Number(comparison[key]?.evaluated_sample_count || 0)
-  }));
+  return Object.keys(labels).filter(key => comparison[key]).map(key => {
+    const recall = comparison[key]?.recall_at_2;
+    return {
+      key,
+      label: labels[key],
+      recallText: typeof recall === "number" ? percent(recall) : "N/A",
+      decisionCoverage: Number(comparison[key]?.decision_coverage || 0),
+      abstentionRate: Number(comparison[key]?.unknown_abstention_rate || 0),
+      evaluated: Number(comparison[key]?.evaluable_sample_count || 0)
+    };
+  });
 });
 const visibleConfusionSamples = computed(() => confusionSamples.value
   .filter(item => selectedConfusionPair.value === "all" || item.confusion_pair === selectedConfusionPair.value)

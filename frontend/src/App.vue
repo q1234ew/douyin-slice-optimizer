@@ -31,7 +31,8 @@ const dashboard = useDashboard();
 provide(dashboardKey, dashboard);
 
 onMounted(() => {
-  const { refreshVideos } = dashboard;
+  const { refreshVideos, loadPrecutBatches } = dashboard;
   refreshVideos().catch(() => {});
+  loadPrecutBatches(false).catch(() => {});
 });
 </script>

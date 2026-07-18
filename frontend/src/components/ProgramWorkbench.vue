@@ -2,10 +2,10 @@
   <section id="videos" class="panel">
     <div class="panel-head">
       <div>
-        <h2 class="panel-title"><Icon name="video" />节目管理</h2>
-        <p class="panel-subtitle">节目素材、切片候选、评分排序、样本导出</p>
+        <h2 class="panel-title"><Icon :name="state.entryMode === 'precut' ? 'list-video' : 'video'" />{{ state.entryMode === "precut" ? "已切短片排名" : "完整节目切片" }}</h2>
+        <p class="panel-subtitle">{{ state.entryMode === "precut" ? "批量导入、边界锁定、统一排名与审核" : "节目理解、候选召回、统一排名与审核" }}</p>
       </div>
-      <div class="toolbar-actions">
+      <div v-if="state.entryMode === 'program'" class="toolbar-actions">
         <button id="refresh-btn" type="button" :disabled="state.busyKey === 'refresh-videos'" @click="withBusy('refresh-videos', refreshVideos)">
           <span v-if="state.busyKey === 'refresh-videos'" class="spinner"></span>
           <Icon v-else name="refresh-cw" />刷新
@@ -14,15 +14,26 @@
           id="run-selected-btn"
           class="primary"
           type="button"
-          :disabled="!state.selectedVideoId || state.busyKey === 'run-selected'"
+          :disabled="!selectedProgramVideo || state.busyKey === 'run-selected'"
           @click="runSelected"
         >
           <span v-if="state.busyKey === 'run-selected'" class="spinner"></span>
-          <Icon v-else name="wand-sparkles" />处理选中
+          <Icon v-else name="wand-sparkles" />智能切片
         </button>
       </div>
     </div>
     <div class="panel-body">
+      <div class="entry-mode-tabs" role="tablist" aria-label="素材入口">
+        <button type="button" role="tab" :aria-selected="state.entryMode === 'precut'" :class="{ active: state.entryMode === 'precut' }" @click="selectEntryMode('precut')">
+          <Icon name="list-video" /><span><strong>已切短片</strong><small>保留原边界，批量排名</small></span>
+        </button>
+        <button type="button" role="tab" :aria-selected="state.entryMode === 'program'" :class="{ active: state.entryMode === 'program' }" @click="selectEntryMode('program')">
+          <Icon name="scissors" /><span><strong>完整节目</strong><small>召回候选，再统一排名</small></span>
+        </button>
+      </div>
+
+      <PrecutBatchWorkbench v-if="state.entryMode === 'precut'" />
+      <template v-else>
       <div class="workbench-focus" aria-live="polite">
         <div class="focus-next">
           <span class="meta">下一步任务</span>
@@ -31,8 +42,8 @@
         </div>
         <div class="focus-current">
           <span class="meta">当前节目</span>
-          <strong>{{ selectedVideo?.title || "未选择节目" }}</strong>
-          <p>{{ selectedVideo ? `${selectedVideo.account_id || "未设置账号"} / ${fmtSeconds(selectedVideo.duration_seconds)} / ${statusLabel(selectedVideo.status)}` : "从上方导入素材，或在下方列表选择已有节目。" }}</p>
+          <strong>{{ selectedProgramVideo?.title || "未选择节目" }}</strong>
+          <p>{{ selectedProgramVideo ? `${selectedProgramVideo.account_id || "未设置账号"} / ${fmtSeconds(selectedProgramVideo.duration_seconds)} / ${statusLabel(selectedProgramVideo.status)}` : "从左侧导入节目，或在下方列表选择已有节目。" }}</p>
         </div>
         <button type="button" class="primary" :data-guide-action="workflowGuide.action" @click="handleGuideAction(workflowGuide.action)">
           <Icon name="arrow-right" />{{ workflowGuide.actionLabel }}
@@ -76,7 +87,7 @@
           </thead>
           <tbody id="video-rows">
             <tr
-              v-for="video in filteredVideos"
+              v-for="video in filteredProgramVideos"
               :key="video.id"
               class="video-row"
               :class="{ selected: video.id === state.selectedVideoId }"
@@ -98,12 +109,12 @@
                   <button class="icon-only" title="评分" aria-label="为节目候选评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
                   <button class="primary" data-action="run-all" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runWholeVideo(video.id)">
                     <span v-if="state.busyKey === `run-all-${video.id}`" class="spinner"></span>
-                    <Icon v-else name="wand-sparkles" />处理
+                    <Icon v-else name="wand-sparkles" />智能切片
                   </button>
                 </div>
               </td>
             </tr>
-            <tr v-if="!filteredVideos.length">
+            <tr v-if="!filteredProgramVideos.length">
               <td colspan="6">
                 <div class="empty"><Icon name="video" /><strong>暂无节目</strong><span>先从上方流程区导入素材，再进入候选审核。</span></div>
               </td>
@@ -111,12 +122,15 @@
           </tbody>
         </table>
       </div>
+      </template>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import Icon from "./Icon.vue";
+import PrecutBatchWorkbench from "./PrecutBatchWorkbench.vue";
 import QualitySentinel from "./QualitySentinel.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
 import type { VideoRow } from "../types";
@@ -137,6 +151,16 @@ const {
   withBusy,
   toast
 } = useDashboardContext();
+
+const filteredProgramVideos = computed(() => filteredVideos.value.filter(video => video.input_mode !== "precut"));
+const selectedProgramVideo = computed(() => selectedVideo.value?.input_mode === "precut" ? null : selectedVideo.value);
+
+function selectEntryMode(mode: "precut" | "program"): void {
+  state.entryMode = mode;
+  if (mode === "program" && !selectedProgramVideo.value && filteredProgramVideos.value.length) {
+    state.selectedVideoId = filteredProgramVideos.value[0].id;
+  }
+}
 
 function statusClass(status?: string): string {
   if (status === "scored" || status === "extracted") return "ok";
@@ -162,11 +186,11 @@ function selectVideo(videoId: string): void {
 }
 
 async function runSelected(): Promise<void> {
-  if (!state.selectedVideoId) {
+  if (!selectedProgramVideo.value) {
     toast("请选择节目");
     return;
   }
-  await withBusy("run-selected", () => runAll(state.selectedVideoId));
+  await withBusy("run-selected", () => runAll(selectedProgramVideo.value!.id));
 }
 
 async function runVideoStep(videoId: string, step: "extract" | "segments" | "score"): Promise<void> {

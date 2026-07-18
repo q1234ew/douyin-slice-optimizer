@@ -12,6 +12,13 @@ from dso.config import ensure_data_dirs
 from dso.db.session import connect
 from dso.features.asr_profile import normalize_asr_profile, resolve_asr_model_size
 from dso.features.asr_routing import route_video_asr
+from dso.features.qwen3_asr import (
+    Qwen3ASRError,
+    qwen3_asr_cache_config,
+    qwen3_asr_health,
+    qwen3_asr_model,
+    transcribe_wav as transcribe_wav_with_qwen3_asr,
+)
 from dso.features.whisper_cpp import (
     whisper_cpp_binary,
     whisper_cpp_language,
@@ -242,13 +249,14 @@ def transcribe_audio_file(
     transcript_dir.mkdir(parents=True, exist_ok=True)
     segments, source = _try_configured_asr(audio_path, transcript_dir, model_size, backend=backend)
     processed = post_process_segments(segments)
+    effective_model = qwen3_asr_model() if source.startswith("qwen3_asr:") else model_size
     return {
         "source": source,
         "segments": processed,
         "metadata": {
             "backend": source.split(":", 1)[0],
             "profile": profile_name,
-            "model_size": model_size,
+            "model_size": effective_model,
             "prompt": asr_prompt(),
             "postprocess_version": POSTPROCESS_VERSION,
             "segment_count_raw": len(segments),
@@ -288,6 +296,14 @@ def active_asr_backend(
         return "whisper_cpp" if whisper_cpp_ready(model_size) else "missing_whisper_cpp"
     if requested in {"faster_whisper", "faster-whisper", "fw"}:
         return "faster_whisper" if importlib.util.find_spec("faster_whisper") is not None else "missing_faster_whisper"
+    if requested in {"qwen3_asr", "qwen3-asr", "qwen_asr", "qwen-asr"}:
+        health = qwen3_asr_health()
+        model = health.get("model") if isinstance(health.get("model"), dict) else {}
+        if model.get("loaded"):
+            return "qwen3_asr"
+        if health.get("status") == "available":
+            return "qwen3_asr_unloaded"
+        return "missing_qwen3_asr"
     return f"unknown:{requested}"
 
 
@@ -328,7 +344,26 @@ def _try_configured_asr(
         return _try_whisper_cpp(audio_path, transcript_dir, model_size)
     if backend in {"faster_whisper", "faster-whisper", "fw"}:
         return _try_faster_whisper(audio_path, model_size)
+    if backend in {"qwen3_asr", "qwen3-asr", "qwen_asr", "qwen-asr"}:
+        return _try_qwen3_asr(audio_path, transcript_dir)
     return [], f"unknown_asr_backend:{backend}"
+
+
+def _try_qwen3_asr(audio_path: Path, transcript_dir: Path) -> tuple[list[dict], str]:
+    try:
+        segments, metadata = transcribe_wav_with_qwen3_asr(audio_path, transcript_dir)
+    except Qwen3ASRError as exc:
+        write_json(
+            transcript_dir / "qwen3_asr_last_run.json",
+            {"status": "failed", "model": qwen3_asr_model(), "error": str(exc), "created_at": utc_now()},
+        )
+        return [], f"qwen3_asr_failed:{type(exc).__name__}"
+    run_status = str(metadata.get("quality_status") or "ready")
+    write_json(
+        transcript_dir / "qwen3_asr_last_run.json",
+        {"status": run_status, **metadata, "segment_count": len(segments), "created_at": utc_now()},
+    )
+    return segments, f"qwen3_asr:{qwen3_asr_model().rsplit('/', 1)[-1]}"
 
 
 def _try_faster_whisper(audio_path: Path, model_size: str) -> tuple[list[dict], str]:
@@ -405,7 +440,7 @@ def _try_whisper_cpp(audio_path: Path, transcript_dir: Path, model_size: str | N
 
 def _asr_cache_key(audio_path: Path, model_size: str, profile_name: str, backend: str | None = None) -> dict:
     backend_preference = (backend or os.getenv("DSO_ASR_BACKEND", "auto")).strip().lower() or "auto"
-    return {
+    cache_key = {
         "audio_sha256": _file_sha256(audio_path),
         "profile": profile_name,
         "model_size": model_size,
@@ -430,6 +465,9 @@ def _asr_cache_key(audio_path: Path, model_size: str, profile_name: str, backend
         "prompt": asr_prompt(),
         "postprocess_version": POSTPROCESS_VERSION,
     }
+    if backend_preference in {"qwen3_asr", "qwen3-asr", "qwen_asr", "qwen-asr"}:
+        cache_key["qwen3_asr"] = qwen3_asr_cache_config()
+    return cache_key
 
 
 def _cached_transcript(transcript_path: Path, cache_key: dict, *, force: bool) -> dict | None:

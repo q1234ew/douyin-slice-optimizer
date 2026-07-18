@@ -1,0 +1,88 @@
+{
+  "contract_version": "dso.asr_replacement_benchmark.v1",
+  "benchmark_id": "dso-qwen3-asr-whisper-replacement-20260718-r1",
+  "locked_at": "2026-07-18T16:45:00+08:00",
+  "objective": "Evaluate whether Qwen3-ASR-1.7B can replace the current Whisper backend for full-program transcription and downstream intelligent slicing.",
+  "source": {
+    "video_id": "video_f62d5de2297c4304",
+    "title": "我是歌手2025",
+    "program_count": 1,
+    "audio_path": "data/cache/video_f62d5de2297c4304/audio/audio.wav",
+    "audio_sha256": "77fc1cb01f48b0cdfcdcba5dc9c8ce2b3847ec179e0697156e37c3dd35866f22",
+    "audio_seconds": 7506.732698,
+    "audio_format": "pcm_s16le mono 16000 Hz",
+    "limitations": [
+      "Only one long-form Chinese music-variety program is available locally.",
+      "There is no official human transcript; visible burned-in subtitles are intermittent.",
+      "Quality conclusions must be reported as program-specific evidence, not cross-domain generalization."
+    ]
+  },
+  "candidates": {
+    "current_default": {
+      "backend": "whisper.cpp",
+      "model": "base",
+      "vad": "silero-v6.2.0",
+      "transcript_path": "data/cache/video_f62d5de2297c4304/transcript/transcript.json",
+      "transcript_sha256": "f8f30be25b1d8e1fc6d59d766f37c13c3242a996aafcfdd92db95b96447af542"
+    },
+    "current_quality": {
+      "backend": "whisper.cpp",
+      "model": "small",
+      "vad": "silero-v6.2.0",
+      "transcript_path": "output/asr-small-full-rerun/small_quality_postprocessed_2026-06-26.1.transcript.json",
+      "transcript_sha256": "0cf12f06c4811fccc777343ff0045e6cc7cd6daf7b23dda3b731adcdc4302c07"
+    },
+    "replacement": {
+      "backend": "qwen3_asr",
+      "model": "Qwen/Qwen3-ASR-1.7B",
+      "aligner": "Qwen/Qwen3-ForcedAligner-0.6B",
+      "qwen_asr_version": "0.0.6",
+      "torch_version": "2.11.0+cu128",
+      "dtype": "bfloat16",
+      "device": "NVIDIA GeForce RTX 5080 Laptop GPU 16GB",
+      "chunk_seconds": 180.0,
+      "overlap_seconds": 1.0,
+      "batch_size": 1,
+      "context": "歌手2025，陈楚生，张韶涵，范玮琪，Grace，竞演，听审，补位歌手，副歌，高音，转调，升key。",
+      "client_sha256": "d462f0ee2da4519c7c9c8af301f3159abcaafa3c7579cc453b240a927f289ece",
+      "service_sha256": "ceae64f38f3050c4b3fc72545f27ab07de4b10f54b3445450f8cc2c69e6bf5eb"
+    }
+  },
+  "evaluation_windows": [
+    {"id": "opening_pressure", "start": 40.0, "duration": 35.0, "tags": ["mandarin", "emotion", "competition_rule"], "visible_anchor": "如果说我没有赢"},
+    {"id": "english_coaching", "start": 140.0, "duration": 35.0, "tags": ["english", "code_switch", "female_speech"], "visible_anchor": "Singer Kinsler"},
+    {"id": "ranking_grace", "start": 575.0, "duration": 35.0, "tags": ["ranking", "proper_name"], "visible_anchor": "按照我们上一场竞演排名"},
+    {"id": "grace_kinsler_name", "start": 780.0, "duration": 30.0, "tags": ["proper_name", "transliteration"], "visible_anchor": "就是当时格瑞丝·金斯勒"},
+    {"id": "weilan_running_order", "start": 1035.0, "duration": 30.0, "tags": ["proper_name", "running_order"], "visible_anchor": "卫兰在第八位出场"},
+    {"id": "sponsor_ad", "start": 1150.0, "duration": 35.0, "tags": ["advertisement", "brand_names", "fast_speech"], "visible_anchor": "来现场的朋友们"},
+    {"id": "mickey_music_comment", "start": 2788.0, "duration": 35.0, "tags": ["music_comment", "proper_name", "long_vowels"], "visible_anchor": "这首歌有着非常蜿蜒的旋律"},
+    {"id": "english_believer", "start": 3505.0, "duration": 65.0, "tags": ["english_song_title", "proper_name", "music_transition"], "visible_anchor": "Believer"},
+    {"id": "voting_rule", "start": 5814.0, "duration": 45.0, "tags": ["competition_rule", "counting", "crowd"], "visible_anchor": "歌手们今晚的命运就掌握在各位听审的手中了"},
+    {"id": "cloud_review", "start": 5935.0, "duration": 35.0, "tags": ["mandarin", "program_term"], "visible_anchor": "听听咱们云端国际听审的心声"},
+    {"id": "final_rank", "start": 7165.0, "duration": 35.0, "tags": ["ranking", "proper_name", "emotion"], "visible_anchor": "本场竞演第七名是"},
+    {"id": "fanfan_narration", "start": 7267.0, "duration": 55.0, "tags": ["long_narration", "proper_name", "emotion"], "visible_anchor": "范玮琪来到歌手2025"},
+    {"id": "music_gap_one", "start": 1930.0, "duration": 40.0, "tags": ["music", "low_speech"], "visible_anchor": ""},
+    {"id": "music_gap_two", "start": 5650.0, "duration": 40.0, "tags": ["music", "low_speech"], "visible_anchor": ""}
+  ],
+  "policy": {
+    "full_program_run_required": true,
+    "same_audio_required": true,
+    "no_whisper_as_gold": true,
+    "visible_subtitle_anchors_are_partial_reference_only": true,
+    "manual_review_required_for_model_disagreements": true,
+    "measure_cold_switch_and_warm_inference_separately": true,
+    "restore_omni_after_benchmark": true,
+    "no_production_default_change_during_evaluation": true
+  },
+  "acceptance": {
+    "reliability": {"full_program_success": true, "failed_chunks": 0, "audio_coverage_ratio_min": 0.99},
+    "performance": {"warm_rtf_max": 0.20, "peak_gpu_memory_gb_max": 14.5},
+    "timestamps": {"median_visible_anchor_onset_error_seconds_max": 1.5, "p95_visible_anchor_onset_error_seconds_max": 3.0},
+    "quality": {
+      "critical_anchor_regression_allowed": 0,
+      "proper_name_and_domain_term_net_wins_min": 1,
+      "music_hallucination_must_not_exceed_current_quality_baseline": true
+    },
+    "decision_rule": "Recommend full replacement only when reliability, performance, timestamp, and quality gates all pass. Otherwise recommend shadow, selective verification, or rejection with an explicit rollback path."
+  }
+}

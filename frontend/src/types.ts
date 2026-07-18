@@ -35,6 +35,77 @@ export interface VideoRow {
   [key: string]: unknown;
 }
 
+export type MaterialEntryMode = "precut" | "program";
+
+export interface PrecutBatchSummary {
+  id: string;
+  account_id?: string;
+  title?: string;
+  status?: string;
+  item_count?: number;
+  created_count?: number;
+  reused_count?: number;
+  failed_count?: number;
+  processed_count?: number;
+  contract_version?: string;
+  error_summary?: string;
+  created_at?: string;
+  updated_at?: string;
+  progress?: {
+    settled_count?: number;
+    total_count?: number;
+    ratio?: number;
+  };
+}
+
+export interface PrecutBatchItem extends CandidateRow {
+  batch_id?: string;
+  candidate_segment_id?: string;
+  status?: string;
+  batch_rank?: number;
+  position?: number;
+  source_name?: string;
+  title?: string;
+  content_hash?: string;
+  size_bytes?: number;
+  ingest_disposition?: string;
+  source_duration_seconds?: number;
+  input_mode?: string;
+  candidate_status?: string;
+  boundary_locked?: number | boolean;
+  boundary_invariant?: boolean;
+  candidate_origin?: string;
+  candidate_contract_version?: string;
+  effective_score?: number | null;
+  processing_notes?: Array<Record<string, unknown>>;
+  error?: string;
+}
+
+export interface PrecutBatchDetail {
+  contract_version?: string;
+  candidate_contract_version?: string;
+  batch_id: string;
+  status?: string;
+  batch: PrecutBatchSummary;
+  items?: PrecutBatchItem[];
+  rankings?: PrecutBatchItem[];
+  summary?: {
+    item_count?: number;
+    created_count?: number;
+    reused_count?: number;
+    failed_count?: number;
+    processed_count?: number;
+    ranked_count?: number;
+    boundary_locked_count?: number;
+  };
+}
+
+export interface PrecutBatchList {
+  contract_version?: string;
+  count?: number;
+  batches?: PrecutBatchSummary[];
+}
+
 export interface VariantRow {
   id?: string;
   status?: string;
@@ -62,6 +133,16 @@ export interface CandidateRow {
   final_score?: number;
   ranker_score?: number;
   ranker_version?: string;
+  hybrid_score?: number;
+  hybrid_rank?: number;
+  hybrid_ranker_version?: string;
+  omni_score?: number;
+  omni_confidence?: number;
+  omni_status?: string;
+  omni_analysis?: Record<string, unknown>;
+  generation_signals?: Record<string, unknown>;
+  boundary_strategy?: string;
+  boundary_confidence?: number;
   learning_signals?: SegmentHistoryResult;
   score_explanation?: string;
   cover_suggestion?: string;
@@ -821,12 +902,15 @@ export interface VisualWindowReviewSample {
 
 export interface VisualWindowScoutStatus {
   contract_version?: string;
+  build_id?: string;
   status?: string;
   mode?: string;
   media_readiness?: Record<string, unknown>;
   annotation_summary?: Record<string, unknown>;
   prototype_summary?: Record<string, unknown>;
   latest_build?: Record<string, unknown>;
+  batch_progress?: Record<string, unknown>;
+  build_history?: Array<Record<string, unknown>>;
   review_queue?: {
     status?: string;
     count?: number;
@@ -840,6 +924,10 @@ export interface VisualWindowScoutStatus {
 }
 
 export interface VisualWindowScoutReport extends VisualWindowScoutStatus {
+  lifecycle?: string;
+  resumed_pending_batch?: boolean;
+  selection_summary?: Record<string, unknown>;
+  manifest_summary?: Record<string, unknown>;
   sample_count?: number;
   candidate_count?: number;
   embedding_ready_count?: number;
@@ -851,8 +939,18 @@ export interface VisualWindowScoutReport extends VisualWindowScoutStatus {
 
 export interface VisualWindowExperiment {
   contract_version?: string;
+  experiment_id?: string;
+  build_id?: string;
+  build_ids?: string[];
+  source_build_count?: number;
+  evaluation_scope?: string;
   status?: string;
   strategy_comparison?: Record<string, Record<string, unknown>>;
+  paired_comparison?: Record<string, Record<string, unknown>>;
+  evaluation_summary?: Record<string, unknown>;
+  leakage_guard_summary?: Record<string, unknown>;
+  build_manifest_verification?: Record<string, unknown>;
+  embedding_coverage_summary?: Record<string, unknown>;
   promotion_gate?: Record<string, unknown>;
   [key: string]: unknown;
 }

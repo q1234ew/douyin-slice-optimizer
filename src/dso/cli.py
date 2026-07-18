@@ -55,8 +55,12 @@ from dso.learning.multimodal_validation import (
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
 from dso.learning.qwen_embeddings import build_qwen_embedding_index, run_qwen_embedding_evidence
 from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
+from dso.learning.omni_slice_ranker import run_hybrid_slice_pipeline
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
 from dso.media.ingest import ingest_video, list_videos
+from dso.media.video_download import VideoDownloadError, download_video_resource
+from dso.precut import create_precut_batch, process_precut_batch
+from dso.providers.service import public_model_status, run_fake_provider_smoke
 from dso.review import mark_candidate_review
 from dso.runtime import runtime_diagnostics
 from dso.scoring.rights import set_rights
@@ -73,6 +77,54 @@ def cmd_init() -> dict:
 def cmd_ingest(video_path: str, account: str, title: str) -> dict:
     init_db()
     return ingest_video(video_path, account_id=account, title=title)
+
+
+def cmd_precut_import(
+    video_paths: list[str],
+    account: str = "main",
+    batch_title: str = "",
+    process: bool = True,
+    force: bool = False,
+    asr_profile: str = "fast",
+) -> dict:
+    init_db()
+    result = create_precut_batch(video_paths, account_id=account, title=batch_title)
+    processable = int(result.get("summary", {}).get("item_count") or 0) - int(
+        result.get("summary", {}).get("failed_count") or 0
+    )
+    if process and processable > 0 and result.get("status") != "completed":
+        return process_precut_batch(
+            result["batch_id"],
+            force=force,
+            asr_profile=asr_profile,
+        )
+    return result
+
+
+def cmd_download_video(
+    url: str,
+    account: str = "main",
+    title: str | None = None,
+    output_dir: str | None = None,
+    threads: int = 4,
+    max_items: int = 1,
+    ingest: bool = True,
+    dry_run: bool = False,
+    acknowledge_noncommercial: bool = False,
+) -> dict:
+    if ingest and not dry_run:
+        init_db()
+    return download_video_resource(
+        url,
+        account_id=account,
+        title=title,
+        output_dir=output_dir,
+        threads=threads,
+        max_items=max_items,
+        ingest=ingest,
+        dry_run=dry_run,
+        acknowledge_noncommercial=acknowledge_noncommercial,
+    )
 
 
 def cmd_rights_set(
@@ -140,6 +192,27 @@ def cmd_score(video_id: str) -> dict:
     init_db()
     rows = score_video(video_id)
     return {"video_id": video_id, "count": len(rows), "scores": rows}
+
+
+def cmd_hybrid_slice(
+    video_id: str,
+    top_k: int,
+    candidate_limit: int,
+    max_clip_seconds: float,
+    omni_weight: float,
+    load_model: bool = False,
+    force: bool = False,
+) -> dict:
+    init_db()
+    return run_hybrid_slice_pipeline(
+        video_id,
+        top_k=top_k,
+        candidate_limit=candidate_limit,
+        max_clip_seconds=max_clip_seconds,
+        omni_weight=omni_weight,
+        load_model=load_model,
+        force=force,
+    )
 
 
 def cmd_suggest(video_id: str, top_k: int) -> dict:
@@ -828,6 +901,18 @@ def cmd_doctor() -> dict:
     return runtime_diagnostics()
 
 
+def cmd_provider_status() -> dict:
+    return public_model_status()
+
+
+def cmd_provider_smoke(
+    text: str = "G3 provider contract smoke",
+    repeat: int = 2,
+    batch_id: str | None = None,
+) -> dict:
+    return run_fake_provider_smoke(text=text, repeat=repeat, batch_id=batch_id)
+
+
 def cmd_web(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
     missing = []
     for module_name in ["fastapi", "uvicorn"]:
@@ -916,6 +1001,18 @@ def _typer_main(typer_module: Any) -> None:
     def doctor_command() -> None:
         _print(cmd_doctor())
 
+    @app.command("provider-status")
+    def provider_status_command() -> None:
+        _print(cmd_provider_status())
+
+    @app.command("provider-smoke")
+    def provider_smoke_command(
+        text: str = typer_module.Option("G3 provider contract smoke", "--text"),
+        repeat: int = typer_module.Option(2, "--repeat", min=1, max=5),
+        batch_id: str | None = typer_module.Option(None, "--batch-id"),
+    ) -> None:
+        _print(cmd_provider_smoke(text, repeat, batch_id))
+
     @app.command("setup-asr")
     def setup_asr_command(
         model: str | None = typer_module.Option(None, "--model"),
@@ -943,6 +1040,51 @@ def _typer_main(typer_module: Any) -> None:
         title: str = typer_module.Option(..., "--title"),
     ) -> None:
         _print(cmd_ingest(video_path, account, title))
+
+    @app.command("precut-import")
+    def precut_import_command(
+        video_paths: list[str] = typer_module.Argument(...),
+        account: str = typer_module.Option("main", "--account"),
+        batch_title: str = typer_module.Option("", "--batch-title"),
+        process: bool = typer_module.Option(True, "--process/--no-process"),
+        force: bool = typer_module.Option(False, "--force"),
+        asr_profile: str = typer_module.Option("fast", "--asr-profile"),
+    ) -> None:
+        _print(cmd_precut_import(video_paths, account, batch_title, process, force, asr_profile))
+
+    @app.command("download-video")
+    def download_video_command(
+        url: str,
+        account: str = typer_module.Option("main", "--account"),
+        title: str | None = typer_module.Option(None, "--title"),
+        output_dir: str | None = typer_module.Option(
+            None,
+            "--output-dir",
+            help="Persistent override; defaults to data/tmp/video_downloads in this project.",
+        ),
+        threads: int = typer_module.Option(4, "--threads", min=1, max=8),
+        max_items: int = typer_module.Option(1, "--max-items", min=1, max=20),
+        ingest: bool = typer_module.Option(True, "--ingest/--no-ingest"),
+        dry_run: bool = typer_module.Option(False, "--dry-run"),
+        acknowledge_noncommercial: bool = typer_module.Option(False, "--acknowledge-noncommercial"),
+    ) -> None:
+        try:
+            _print(
+                cmd_download_video(
+                    url,
+                    account,
+                    title,
+                    output_dir,
+                    threads,
+                    max_items,
+                    ingest,
+                    dry_run,
+                    acknowledge_noncommercial,
+                )
+            )
+        except VideoDownloadError as exc:
+            typer_module.echo(f"Error: {exc}", err=True)
+            raise typer_module.Exit(1)
 
     @rights_app.command("set")
     def rights_set_command(
@@ -975,6 +1117,18 @@ def _typer_main(typer_module: Any) -> None:
     @app.command("score")
     def score_command(video_id: str) -> None:
         _print(cmd_score(video_id))
+
+    @app.command("hybrid-slice")
+    def hybrid_slice_command(
+        video_id: str,
+        top_k: int = typer_module.Option(10, "--top-k"),
+        candidate_limit: int = typer_module.Option(3, "--candidate-limit"),
+        max_clip_seconds: float = typer_module.Option(6.0, "--max-clip-seconds"),
+        omni_weight: float = typer_module.Option(0.15, "--omni-weight"),
+        load_model: bool = typer_module.Option(False, "--load-model"),
+        force: bool = typer_module.Option(False, "--force"),
+    ) -> None:
+        _print(cmd_hybrid_slice(video_id, top_k, candidate_limit, max_clip_seconds, omni_weight, load_model, force))
 
     @app.command("suggest")
     def suggest_command(video_id: str, top_k: int = typer_module.Option(10, "--top-k")) -> None:
@@ -1591,6 +1745,11 @@ def _argparse_main() -> None:
     sub.add_parser("init")
     sub.add_parser("videos")
     sub.add_parser("doctor")
+    sub.add_parser("provider-status")
+    provider_smoke = sub.add_parser("provider-smoke")
+    provider_smoke.add_argument("--text", default="G3 provider contract smoke")
+    provider_smoke.add_argument("--repeat", type=int, default=2)
+    provider_smoke.add_argument("--batch-id")
     setup_asr = sub.add_parser("setup-asr")
     setup_asr.add_argument("--model")
     setup_asr.add_argument("--profile")
@@ -1607,6 +1766,26 @@ def _argparse_main() -> None:
     ingest.add_argument("video_path")
     ingest.add_argument("--account", default="main")
     ingest.add_argument("--title", required=True)
+    precut_import = sub.add_parser("precut-import")
+    precut_import.add_argument("video_paths", nargs="+")
+    precut_import.add_argument("--account", default="main")
+    precut_import.add_argument("--batch-title", default="")
+    precut_import.add_argument("--no-process", action="store_true")
+    precut_import.add_argument("--force", action="store_true")
+    precut_import.add_argument("--asr-profile", default="fast")
+    download_video = sub.add_parser("download-video")
+    download_video.add_argument("url")
+    download_video.add_argument("--account", default="main")
+    download_video.add_argument("--title")
+    download_video.add_argument(
+        "--output-dir",
+        help="Persistent override; defaults to data/tmp/video_downloads in this project.",
+    )
+    download_video.add_argument("--threads", type=int, default=4)
+    download_video.add_argument("--max-items", type=int, default=1)
+    download_video.add_argument("--no-ingest", action="store_true")
+    download_video.add_argument("--dry-run", action="store_true")
+    download_video.add_argument("--acknowledge-noncommercial", action="store_true")
 
     rights = sub.add_parser("rights")
     rights_sub = rights.add_subparsers(dest="rights_command", required=True)
@@ -1632,6 +1811,14 @@ def _argparse_main() -> None:
     gen.add_argument("--top-k", type=int, default=30)
     score = sub.add_parser("score")
     score.add_argument("video_id")
+    hybrid_slice = sub.add_parser("hybrid-slice")
+    hybrid_slice.add_argument("video_id")
+    hybrid_slice.add_argument("--top-k", type=int, default=10)
+    hybrid_slice.add_argument("--candidate-limit", type=int, default=3)
+    hybrid_slice.add_argument("--max-clip-seconds", type=float, default=6.0)
+    hybrid_slice.add_argument("--omni-weight", type=float, default=0.15)
+    hybrid_slice.add_argument("--load-model", action="store_true")
+    hybrid_slice.add_argument("--force", action="store_true")
     suggest = sub.add_parser("suggest")
     suggest.add_argument("video_id")
     suggest.add_argument("--top-k", type=int, default=10)
@@ -1954,12 +2141,41 @@ def _argparse_main() -> None:
         _print({"videos": list_videos()})
     elif args.command == "doctor":
         _print(cmd_doctor())
+    elif args.command == "provider-status":
+        _print(cmd_provider_status())
+    elif args.command == "provider-smoke":
+        _print(cmd_provider_smoke(args.text, args.repeat, args.batch_id))
     elif args.command == "setup-asr":
         _print(cmd_setup_asr(args.model, args.force, args.vad_model, args.profile))
     elif args.command == "bench-asr":
         _print(cmd_bench_asr(args.input_path, args.backend, args.models, args.profile, args.output_dir, args.duration_seconds))
     elif args.command == "ingest":
         _print(cmd_ingest(args.video_path, args.account, args.title))
+    elif args.command == "precut-import":
+        _print(
+            cmd_precut_import(
+                args.video_paths,
+                args.account,
+                args.batch_title,
+                not args.no_process,
+                args.force,
+                args.asr_profile,
+            )
+        )
+    elif args.command == "download-video":
+        _print(
+            cmd_download_video(
+                args.url,
+                args.account,
+                args.title,
+                args.output_dir,
+                args.threads,
+                args.max_items,
+                not args.no_ingest,
+                args.dry_run,
+                args.acknowledge_noncommercial,
+            )
+        )
     elif args.command == "rights" and args.rights_command == "set":
         _print(cmd_rights_set(args.asset_type, args.asset_id, args.program, args.song, args.performance, args.artist, args.platforms, args.duration, args.accounts))
     elif args.command == "extract":
@@ -1968,6 +2184,18 @@ def _argparse_main() -> None:
         _print(cmd_generate_segments(args.video_id, args.top_k))
     elif args.command == "score":
         _print(cmd_score(args.video_id))
+    elif args.command == "hybrid-slice":
+        _print(
+            cmd_hybrid_slice(
+                args.video_id,
+                args.top_k,
+                args.candidate_limit,
+                args.max_clip_seconds,
+                args.omni_weight,
+                args.load_model,
+                args.force,
+            )
+        )
     elif args.command == "suggest":
         _print(cmd_suggest(args.video_id, args.top_k))
     elif args.command == "manifest":

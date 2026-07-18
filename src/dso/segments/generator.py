@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
 from dso.features.audio import energy_between, extract_audio_features
+from dso.features.timeline import build_timeline_signals
 from dso.media.ffmpeg import bounded_window
 from dso.media.ingest import get_video
 from dso.utils import new_id, read_json, utc_now
-from dso.versions import SEGMENTER_VERSION
+from dso.versions import SEGMENTER_VERSION, STANDARD_CANDIDATE_VERSION
 
 
 HOOK_KEYWORDS = [
@@ -170,12 +172,36 @@ OST_STORY_KEYWORDS = ["电视剧", "電視劇", "主题曲", "主題曲", "片�
 
 def generate_segments(video_id: str, top_k: int = 30) -> list[dict]:
     video = get_video(video_id)
+    if video.get("input_mode") == "precut":
+        raise ValueError(
+            "precut source keeps one immutable full-duration candidate; "
+            "process it through the precut batch workflow"
+        )
     transcript = _load_transcript(video)
     audio = extract_audio_features(video_id)
     duration = float(video["duration_seconds"])
+    timeline = build_timeline_signals(
+        video_id,
+        video.get("file_path") or "",
+        audio.get("frames") or [],
+        transcript,
+    )
 
     candidates = _from_transcript(video_id, transcript, audio["frames"], duration)
     candidates.extend(_from_audio_peaks(video_id, audio["peaks"], audio["frames"], duration, transcript))
+    candidates.extend(
+        _from_timeline_onsets(
+            video_id,
+            timeline.get("audio_onsets") or [],
+            audio.get("frames") or [],
+            duration,
+            transcript,
+        )
+    )
+    candidates = [
+        _refine_candidate_boundaries(item, transcript, audio.get("frames") or [], timeline, duration)
+        for item in candidates
+    ]
     ranked = _dedupe_and_rank(candidates)[:top_k]
 
     with connect() as conn:
@@ -230,7 +256,7 @@ def _from_transcript(video_id: str, transcript: list[dict], frames: list[dict], 
         if end - start > max_duration:
             end = min(duration, start + max_duration)
         energy = energy_between(frames, start, end)
-        candidates.append(_candidate_row(video_id, start, end, text, energy))
+        candidates.append(_candidate_row(video_id, start, end, text, energy, generation_source="transcript_window"))
     return candidates
 
 
@@ -251,7 +277,17 @@ def _event_arc_candidates(video_id: str, transcript: list[dict], frames: list[di
             end_index = reaction_index if reaction_index is not None else music_index
             if end_index is None:
                 end_index = min(len(transcript) - 1, index + 3)
-            candidates.append(_candidate_from_indices(video_id, transcript, frames, duration, index, end_index))
+            candidates.append(
+                _candidate_from_indices(
+                    video_id,
+                    transcript,
+                    frames,
+                    duration,
+                    index,
+                    end_index,
+                    generation_source="event_arc_setup",
+                )
+            )
             continue
 
         if flags["music"]:
@@ -265,7 +301,17 @@ def _event_arc_candidates(video_id: str, transcript: list[dict], frames: list[di
             reaction_index = _find_forward(transcript, flags_by_index, index, lambda item: item["reaction"], 24.0)
             start_index = setup_index if setup_index is not None else max(0, index - 1)
             end_index = reaction_index if reaction_index is not None else min(len(transcript) - 1, index + 2)
-            candidates.append(_candidate_from_indices(video_id, transcript, frames, duration, start_index, end_index))
+            candidates.append(
+                _candidate_from_indices(
+                    video_id,
+                    transcript,
+                    frames,
+                    duration,
+                    start_index,
+                    end_index,
+                    generation_source="event_arc_music",
+                )
+            )
             continue
 
         if flags["reaction"]:
@@ -280,7 +326,17 @@ def _event_arc_candidates(video_id: str, transcript: list[dict], frames: list[di
                 42.0,
             )
             start_index = setup_index if setup_index is not None else max(0, music_index - 1)
-            candidates.append(_candidate_from_indices(video_id, transcript, frames, duration, start_index, index))
+            candidates.append(
+                _candidate_from_indices(
+                    video_id,
+                    transcript,
+                    frames,
+                    duration,
+                    start_index,
+                    index,
+                    generation_source="event_arc_reaction",
+                )
+            )
     return candidates
 
 
@@ -291,6 +347,7 @@ def _candidate_from_indices(
     duration: float,
     start_index: int,
     end_index: int,
+    generation_source: str = "event_arc",
 ) -> dict:
     group = transcript[start_index : end_index + 1]
     text = " ".join(str(seg.get("text") or "") for seg in group).strip()
@@ -305,7 +362,7 @@ def _candidate_from_indices(
     if end - start > 75:
         end = min(duration, start + 75.0)
     energy = energy_between(frames, start, end)
-    return _candidate_row(video_id, start, end, text, energy)
+    return _candidate_row(video_id, start, end, text, energy, generation_source=generation_source)
 
 
 def _from_audio_peaks(
@@ -323,7 +380,7 @@ def _from_audio_peaks(
         if transcript:
             start, end, text = _audio_peak_window(peak_time, transcript, start, end, duration)
         energy = energy_between(frames, start, end)
-        candidates.append(_candidate_row(video_id, start, end, text, energy))
+        candidates.append(_candidate_row(video_id, start, end, text, energy, generation_source="audio_peak"))
     return candidates
 
 
@@ -359,8 +416,165 @@ def _audio_peak_window(
     return start, end, text
 
 
-def _candidate_row(video_id: str, start: float, end: float, text: str, energy: float) -> dict:
+def _from_timeline_onsets(
+    video_id: str,
+    onsets: list[dict],
+    frames: list[dict],
+    duration: float,
+    transcript: list[dict],
+) -> list[dict]:
+    candidates: list[dict] = []
+    for onset in onsets[:16]:
+        timestamp = float(onset.get("time") or 0.0)
+        start, end = bounded_window(timestamp + 4.0, 26.0, duration)
+        text = _transcript_text_between(transcript, start, end)
+        if not text:
+            continue
+        energy = energy_between(frames, start, end)
+        candidates.append(_candidate_row(video_id, start, end, text, energy, generation_source="audio_onset"))
+    return candidates
+
+
+def _refine_candidate_boundaries(
+    candidate: dict,
+    transcript: list[dict],
+    frames: list[dict],
+    timeline: dict,
+    duration: float,
+) -> dict:
+    original_start = float(candidate.get("start_time") or 0.0)
+    original_end = float(candidate.get("end_time") or original_start)
+    start_anchor = _best_boundary_anchor(original_start, "start", transcript, timeline)
+    end_anchor = _best_boundary_anchor(original_end, "end", transcript, timeline)
+    start = float(start_anchor.get("time") if start_anchor else original_start)
+    end = float(end_anchor.get("time") if end_anchor else original_end)
+    if end - start < 12.0:
+        start, end = original_start, original_end
+        start_anchor = None
+        end_anchor = None
+    start = max(0.0, min(start, max(0.0, duration - 1.0)))
+    end = min(duration, max(start + 1.0, end))
+    text = _transcript_text_between(transcript, start, end) or str(candidate.get("transcript") or "")
+    refined = _candidate_row(
+        str(candidate.get("source_video_id") or ""),
+        start,
+        end,
+        text,
+        energy_between(frames, start, end),
+        generation_source=_generation_source(candidate),
+    )
+    refined["id"] = candidate.get("id") or refined["id"]
+    evidence = {
+        "version": "semantic_signal_snap.v1",
+        "generation_source": _generation_source(candidate),
+        "original_range": [round(original_start, 3), round(original_end, 3)],
+        "refined_range": [round(start, 3), round(end, 3)],
+        "start_anchor": start_anchor or {},
+        "end_anchor": end_anchor or {},
+        "scene_change_count": _count_timeline_events(timeline.get("scene_changes") or [], start, end),
+        "audio_onset_count": _count_timeline_events(timeline.get("audio_onsets") or [], start, end),
+        "silence_count": sum(
+            1
+            for item in timeline.get("silences") or []
+            if start <= float(item.get("start") or 0.0) <= end
+        ),
+    }
+    anchor_count = int(bool(start_anchor)) + int(bool(end_anchor))
+    refined["generation_signals_json"] = json.dumps(evidence, ensure_ascii=False)
+    refined["boundary_strategy"] = "semantic_signal_snap.v1"
+    refined["boundary_confidence"] = round(min(0.92, 0.52 + anchor_count * 0.18), 3)
+    return refined
+
+
+def _best_boundary_anchor(
+    target: float,
+    side: str,
+    transcript: list[dict],
+    timeline: dict,
+    *,
+    tolerance: float = 3.5,
+) -> dict:
+    anchors: list[dict] = []
+    transcript_field = "start" if side == "start" else "end"
+    transcript_type = "sentence_start" if side == "start" else "sentence_end"
+    for item in transcript:
+        try:
+            anchors.append({"time": float(item.get(transcript_field) or 0.0), "type": transcript_type, "priority": 1.0})
+        except (TypeError, ValueError):
+            continue
+    for silence in timeline.get("silences") or []:
+        field = "end" if side == "start" else "start"
+        anchors.append({"time": float(silence.get(field) or 0.0), "type": f"silence_{field}", "priority": 1.08})
+    for scene in timeline.get("scene_changes") or []:
+        anchors.append({"time": float(scene.get("time") or 0.0), "type": "scene_change", "priority": 0.78})
+    if side == "start":
+        for onset in timeline.get("audio_onsets") or []:
+            anchors.append({"time": float(onset.get("time") or 0.0), "type": "audio_onset", "priority": 0.72})
+    nearby = [item for item in anchors if abs(float(item["time"]) - target) <= tolerance]
+    if not nearby:
+        return {}
+    best = max(
+        nearby,
+        key=lambda item: float(item.get("priority") or 0.0) - abs(float(item["time"]) - target) / max(0.1, tolerance),
+    )
+    return {
+        "time": round(float(best["time"]), 3),
+        "type": str(best.get("type") or "timeline"),
+        "delta_seconds": round(float(best["time"]) - target, 3),
+    }
+
+
+def _generation_source(candidate: dict) -> str:
+    value = candidate.get("generation_signals_json")
+    if isinstance(value, str):
+        try:
+            return str((json.loads(value) or {}).get("generation_source") or "legacy")
+        except Exception:
+            return "legacy"
+    return "legacy"
+
+
+def _count_timeline_events(events: list[dict], start: float, end: float) -> int:
+    return sum(1 for item in events if start <= float(item.get("time") or 0.0) <= end)
+
+
+def _candidate_row(
+    video_id: str,
+    start: float,
+    end: float,
+    text: str,
+    energy: float,
+    *,
+    generation_source: str = "legacy",
+) -> dict:
     duration = max(0.0, end - start)
+    semantics = describe_candidate_content(text, energy, duration)
+    now = utc_now()
+    return {
+        "id": new_id("seg"),
+        "source_video_id": video_id,
+        "performance_id": None,
+        "start_time": round(start, 3),
+        "end_time": round(end, 3),
+        "duration_seconds": round(duration, 3),
+        "transcript": text,
+        **semantics,
+        "cover_time": round(start + min(duration * 0.45, 15), 3),
+        "status": "candidate",
+        "generation_signals_json": json.dumps({"generation_source": generation_source}, ensure_ascii=False),
+        "boundary_strategy": "unrefined",
+        "boundary_confidence": 0.0,
+        "candidate_origin": "generated",
+        "boundary_locked": 0,
+        "source_content_hash": "",
+        "import_batch_id": "",
+        "candidate_contract_version": STANDARD_CANDIDATE_VERSION,
+        "created_at": now,
+    }
+
+
+def describe_candidate_content(text: str, energy: float, duration: float) -> dict:
+    """Return the shared semantic fields used by both candidate entry modes."""
     flags = _cue_flags(text, energy)
     has_context = flags["context"] or flags["story"] or flags["suspense"]
     has_chorus = flags["music"] or energy > 0.72
@@ -375,15 +589,7 @@ def _candidate_row(video_id: str, start: float, end: float, text: str, energy: f
         context = "疑似品牌/广告口播密集，建议只作为上下文补充"
         comment_trigger = "广告口播占比较高，需人工确认是否适合独立切片"
     summary = f"{structure}；{musical_moment}；{context}；{comment_trigger}"
-    now = utc_now()
     return {
-        "id": new_id("seg"),
-        "source_video_id": video_id,
-        "performance_id": None,
-        "start_time": round(start, 3),
-        "end_time": round(end, 3),
-        "duration_seconds": round(duration, 3),
-        "transcript": text,
         "summary": summary,
         "primary_topic": "音乐综艺",
         "song_section_type": "climax_candidate" if has_chorus else "context_or_build",
@@ -393,9 +599,6 @@ def _candidate_row(video_id: str, start: float, end: float, text: str, energy: f
         "musical_moment": musical_moment,
         "program_context": context,
         "comment_trigger": comment_trigger,
-        "cover_time": round(start + min(duration * 0.45, 15), 3),
-        "status": "candidate",
-        "created_at": now,
     }
 
 

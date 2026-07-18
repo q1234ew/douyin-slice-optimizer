@@ -9,7 +9,15 @@ from dso.media.ffmpeg import probe_video
 from dso.utils import new_id, utc_now
 
 
-def ingest_video(path: str | Path, account_id: str, title: str) -> dict:
+def ingest_video(
+    path: str | Path,
+    account_id: str,
+    title: str,
+    *,
+    input_mode: str = "program",
+    content_hash: str = "",
+    import_batch_id: str = "",
+) -> dict:
     settings = ensure_data_dirs()
     source = Path(path).expanduser().resolve()
     if not source.exists():
@@ -34,6 +42,9 @@ def ingest_video(path: str | Path, account_id: str, title: str) -> dict:
         "audio_streams": metadata["audio_streams"],
         "status": "ingested",
         "transcript_path": None,
+        "input_mode": input_mode,
+        "content_hash": content_hash,
+        "import_batch_id": import_batch_id,
         "created_at": now,
         "updated_at": now,
     }

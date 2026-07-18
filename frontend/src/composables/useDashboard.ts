@@ -20,6 +20,7 @@ import type {
   LearningDataset,
   LearningDatasetList,
   Manifest,
+  MaterialEntryMode,
   MaterialCalibrationReplay,
   MaterialConfusionQueue,
   MaterialEvidenceStatus,
@@ -35,6 +36,9 @@ import type {
   MultimodalFeatureExperimentResult,
   MultimodalValidationResult,
   PreviewState,
+  PrecutBatchDetail,
+  PrecutBatchList,
+  PrecutBatchSummary,
   PrototypeBankResult,
   QwenEmbeddingBuildResult,
   QwenEmbeddingEvidenceResult,
@@ -117,6 +121,10 @@ export interface DashboardStore {
   selectCandidate: (segmentId: string, variant?: VariantRow | null, section?: InspectorSectionName) => void;
   openSegmentInCandidates: (segmentId?: string, section?: InspectorSectionName) => Promise<void>;
   uploadVideo: (form: FormData) => Promise<void>;
+  loadPrecutBatches: (notify?: boolean) => Promise<void>;
+  loadPrecutBatch: (batchId: string) => Promise<void>;
+  createPrecutBatch: (form: FormData) => Promise<void>;
+  processPrecutBatch: (batchId: string, force?: boolean) => Promise<void>;
   importMetrics: (form: FormData) => Promise<void>;
   syncDouyinMock: () => Promise<void>;
   syncDouyinFile: (form: FormData) => Promise<void>;
@@ -164,6 +172,9 @@ export interface DashboardStore {
 
 export interface DashboardState {
   videos: VideoRow[];
+  entryMode: MaterialEntryMode;
+  precutBatches: PrecutBatchSummary[];
+  selectedPrecutBatch: PrecutBatchDetail | null;
   stats: DashboardStats;
   selectedVideoId: string;
   selectedSegmentId: string;
@@ -244,6 +255,9 @@ export function useDashboard(): DashboardStore {
   const initial = readInitialState<DashboardInitialState>({});
   const state = reactive<DashboardState>({
     videos: initial.videos || [],
+    entryMode: "precut",
+    precutBatches: [],
+    selectedPrecutBatch: null,
     stats: { ...defaultStats, ...(initial.stats || {}) },
     selectedVideoId: "",
     selectedSegmentId: "",
@@ -314,6 +328,7 @@ export function useDashboard(): DashboardStore {
   let calibrationLoadKey = "";
   let calibrationWorkspaceKey = "";
   let calibrationLoadPromise: Promise<void> | null = null;
+  const precutPollIds = new Set<string>();
 
   const selectedVideo = computed(() => state.videos.find(video => video.id === state.selectedVideoId) || null);
   const selectedSegment = computed(() => state.suggestions.find(row => row.id === state.selectedSegmentId) || null);
@@ -358,7 +373,7 @@ export function useDashboard(): DashboardStore {
         status: "下一步",
         statusClass: "warn",
         title: "处理选中节目",
-        copy: "一键完成提取、候选生成和评分，得到可审核的 Top 列表。",
+        copy: "一键完成多信号候选召回、规则预排和 Omni 多窗口复排，得到可审核的 Top 列表。",
         action: "process",
         actionLabel: "处理选中节目",
         micro: selectedVideo.value?.title || "先选择节目"
@@ -602,12 +617,32 @@ export function useDashboard(): DashboardStore {
   }
 
   async function runAll(videoId: string): Promise<void> {
-    toast("开始处理选中节目");
+    toast("开始智能切片：先生成候选，Omni 随后增量复排");
     await api(`/videos/${encodeURIComponent(videoId)}/extract`, { method: "POST" });
     await api(`/videos/${encodeURIComponent(videoId)}/segments`, { method: "POST" });
     await api(`/videos/${encodeURIComponent(videoId)}/score`, { method: "POST" });
-    toast("候选与评分已更新");
     await refreshVideos();
+    await loadSuggestions(videoId, false);
+    toast("候选已生成，Omni 正在后台检查预筛候选");
+    void api<{
+      status?: string;
+      preselected_count?: number;
+      omni_applied_count?: number;
+    }>(
+      `/videos/${encodeURIComponent(videoId)}/omni-rerank`,
+      jsonBody({
+        candidate_limit: 3,
+        max_clip_seconds: 6,
+        omni_weight: 0.15,
+        load_model: false
+      })
+    ).then(async result => {
+      await loadSuggestions(videoId, false);
+      const applied = Number(result.omni_applied_count || 0);
+      toast(result.status === "ready" ? `Omni 增量复排完成：${applied} 条` : "Omni 未就绪，当前保持规则与历史排序");
+    }).catch(() => {
+      toast("Omni 复排暂不可用，当前保持规则与历史排序");
+    });
   }
 
   function currentFeedbackLoadKey(): string {
@@ -1084,6 +1119,74 @@ export function useDashboard(): DashboardStore {
     await refreshVideos();
   }
 
+  function setPrecutBatch(detail: PrecutBatchDetail): void {
+    state.selectedPrecutBatch = detail;
+    const batch = detail.batch;
+    const index = state.precutBatches.findIndex(item => item.id === batch.id);
+    if (index >= 0) state.precutBatches[index] = batch;
+    else state.precutBatches = [batch, ...state.precutBatches];
+  }
+
+  async function loadPrecutBatches(notify = false): Promise<void> {
+    const result = await api<PrecutBatchList>("/precut-batches?limit=20");
+    state.precutBatches = result.batches || [];
+    const selectedId = state.selectedPrecutBatch?.batch_id || state.precutBatches[0]?.id;
+    if (selectedId) await loadPrecutBatch(selectedId);
+    if (notify) toast("已切短片批次已刷新");
+  }
+
+  async function loadPrecutBatch(batchId: string): Promise<void> {
+    if (!batchId) return;
+    const detail = await api<PrecutBatchDetail>(`/precut-batches/${encodeURIComponent(batchId)}`);
+    setPrecutBatch(detail);
+  }
+
+  async function pollPrecutBatch(batchId: string): Promise<void> {
+    if (!batchId || precutPollIds.has(batchId)) return;
+    precutPollIds.add(batchId);
+    try {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 1250));
+        const detail = await api<PrecutBatchDetail>(`/precut-batches/${encodeURIComponent(batchId)}`);
+        setPrecutBatch(detail);
+        if (["completed", "partial_failed", "failed"].includes(String(detail.status || ""))) {
+          await refreshVideos();
+          await loadStats();
+          toast(detail.status === "completed" ? "批量短片排名已完成" : "批次已结束，请检查失败条目");
+          return;
+        }
+      }
+      toast("批次仍在后台处理，可稍后刷新查看");
+    } catch (error) {
+      toast(errorText(error, "批次状态读取失败"));
+    } finally {
+      precutPollIds.delete(batchId);
+    }
+  }
+
+  async function createPrecutBatch(form: FormData): Promise<void> {
+    const detail = await api<PrecutBatchDetail>("/precut-batches", { method: "POST", body: form });
+    state.entryMode = "precut";
+    setPrecutBatch(detail);
+    await refreshVideos();
+    await loadStats();
+    const summary = detail.summary || {};
+    toast(`已接收 ${Number(summary.item_count || 0)} 条，复用 ${Number(summary.reused_count || 0)} 条`);
+    if (["queued", "processing", "ready"].includes(String(detail.status || ""))) {
+      void pollPrecutBatch(detail.batch_id);
+    }
+  }
+
+  async function processPrecutBatch(batchId: string, force = false): Promise<void> {
+    const detail = await api<PrecutBatchDetail>(
+      `/precut-batches/${encodeURIComponent(batchId)}/process`,
+      jsonBody({ force, asr_profile: "fast" })
+    );
+    setPrecutBatch(detail);
+    toast(force ? "批次已重新进入处理队列" : "批次已进入处理队列");
+    void pollPrecutBatch(batchId);
+  }
+
   async function importMetrics(form: FormData): Promise<void> {
     const result = await api<{
       imported?: number;
@@ -1483,7 +1586,8 @@ export function useDashboard(): DashboardStore {
       syncMaterialWindowDrafts(status.review_queue?.samples || []);
       const readiness = status.media_readiness || {};
       const annotations = status.annotation_summary || {};
-      state.learningResult = `D11 视觉候选窗：可扫描 ${Number(readiness.eligible_count || 0)} / 窗口 Gold ${Number(annotations.confirmed_count || 0)} / ${status.status || "not_started"}`;
+      const progress = status.batch_progress || {};
+      state.learningResult = `D11B 视觉候选窗：可扫描 ${Number(readiness.eligible_count || 0)} / Gold ${Number(annotations.confirmed_count || 0)} / 当前批次 ${Number(progress.reviewed_sample_count || 0)}/${Number(progress.sample_count || 0)} / ${status.status || "not_started"}`;
       finishModule("history");
       if (notify) toast("D11 视觉候选窗状态已刷新");
     } catch (error) {
@@ -1495,21 +1599,41 @@ export function useDashboard(): DashboardStore {
   async function runVisualWindowScout(): Promise<void> {
     const account = state.feedbackAccount.trim();
     const dataset = state.feedbackDataset === "all" ? "" : state.feedbackDataset;
+    const latestBuild = state.visualWindowScoutStatus?.latest_build && typeof state.visualWindowScoutStatus.latest_build === "object"
+      ? state.visualWindowScoutStatus.latest_build as Record<string, unknown>
+      : {};
+    const candidateCount = Number(latestBuild.candidate_count || 0);
+    const embeddingReadyCount = Number(latestBuild.embedding_ready_count || 0);
+    const needsEmbeddingRetry = candidateCount > 0 && embeddingReadyCount / candidateCount < 0.9;
+    const selection = latestBuild.selection_summary && typeof latestBuild.selection_summary === "object"
+      ? latestBuild.selection_summary as Record<string, unknown>
+      : {};
+    const retryIds = Array.isArray(selection.selected_sample_ids) ? selection.selected_sample_ids.map(value => String(value)).filter(Boolean) : [];
+    const retryCurrentBatch = needsEmbeddingRetry && retryIds.length > 0;
     const report = await api<VisualWindowScoutReport>("/learning/visual-window-scout/build", jsonBody({
       account_id: account || null,
       dataset_id: dataset || null,
-      limit: 5,
+      sample_ids: retryCurrentBatch ? retryIds : null,
+      limit: retryCurrentBatch ? retryIds.length : 10,
       window_seconds: 15,
       stride_seconds: 5,
       max_windows_per_sample: 3,
       scan_scenes: true,
       load_model: false,
-      force: false
+      force: false,
+      batch_mode: retryCurrentBatch ? "explicit" : "next",
+      exclude_reviewed: !retryCurrentBatch,
+      resume_pending: !retryCurrentBatch
     }));
     state.visualWindowScoutReport = report;
     await loadVisualWindowScoutStatus(false);
-    state.learningResult = `D11 扫描 ${Number(report.sample_count || 0)} 条 / ${Number(report.candidate_count || 0)} 个候选窗 / embedding ${Number(report.embedding_ready_count || 0)} / ${report.status || "research_only"}`;
-    toast("D11 五条视觉窗口扫描已完成");
+    const buildId = String(report.build_id || "");
+    state.learningResult = report.resumed_pending_batch
+      ? `D11B 当前批次仍有待确认窗口，已恢复 ${buildId || "pending batch"}`
+      : `D11B 批次 ${buildId || "not_created"} / 扫描 ${Number(report.sample_count || 0)} 条 / ${Number(report.candidate_count || 0)} 个候选窗 / embedding ${Number(report.embedding_ready_count || 0)} / ${report.status || "research_only"}`;
+    toast(report.resumed_pending_batch
+      ? "请先完成当前批次窗口审核"
+      : (retryCurrentBatch ? "D11B 当前批次向量重试已完成" : "D11B 下一批视觉窗口已生成"));
   }
 
   async function saveMaterialWindowAnnotation(sampleId: string, windowId: string): Promise<void> {
@@ -1533,16 +1657,24 @@ export function useDashboard(): DashboardStore {
     });
     await loadVisualWindowScoutStatus(false);
     state.learningResult = `D11 窗口 Gold 已保存 / ${draft.scene_form} / ${draft.selection_quality}`;
-    toast("视觉候选窗标注已保存");
+    const pending = Number(state.visualWindowScoutStatus?.review_queue?.pending_count || 0);
+    toast(pending > 0 ? `视觉候选窗已保存，剩余 ${pending} 条` : "当前 D11B 批次审核已完成");
   }
 
   async function runVisualWindowExperiment(): Promise<void> {
-    const report = await api<VisualWindowExperiment>("/learning/visual-window-scout/experiment", jsonBody({}));
+    const latestBuild = state.visualWindowScoutStatus?.latest_build;
+    const buildId = latestBuild && typeof latestBuild === "object" ? String((latestBuild as Record<string, unknown>).build_id || "") : "";
+    const report = await api<VisualWindowExperiment>("/learning/visual-window-scout/experiment", jsonBody({
+      build_id: buildId || null,
+      scope: "cumulative"
+    }));
     state.visualWindowExperiment = report;
     const gate = report.promotion_gate && typeof report.promotion_gate === "object" ? report.promotion_gate as Record<string, unknown> : {};
     const observed = gate.observed && typeof gate.observed === "object" ? gate.observed as Record<string, unknown> : {};
-    state.learningResult = `D11 冻结对比 / Fusion Recall@2 ${percentText(Number(observed.fusion_recall_at_2 || 0))} / 样本 ${Number(observed.evaluated_samples || 0)} / ${report.status || "research_only"}`;
-    toast("D11 fixed/text/visual/fusion 对比已生成");
+    const recall = typeof observed.fusion_recall_at_2 === "number" ? percentText(observed.fusion_recall_at_2) : "N/A";
+    const fixedDelta = typeof observed.delta_vs_fixed === "number" ? `${observed.delta_vs_fixed >= 0 ? "+" : ""}${percentText(observed.delta_vs_fixed)}` : "N/A";
+    state.learningResult = `D11B 累计 ${Number(report.source_build_count || 0)} 批 / Fusion Recall@2 ${recall} / 较固定窗 ${fixedDelta} / 可判定 ${Number(observed.evaluated_samples || 0)} / ${report.status || "research_only"}`;
+    toast("D11B paired evaluation 已生成");
   }
 
   async function saveMaterialGoldAnnotation(sampleId: string): Promise<void> {
@@ -1858,6 +1990,10 @@ export function useDashboard(): DashboardStore {
     selectCandidate,
     openSegmentInCandidates,
     uploadVideo,
+    loadPrecutBatches,
+    loadPrecutBatch,
+    createPrecutBatch,
+    processPrecutBatch,
     importMetrics,
     syncDouyinMock,
     syncDouyinFile,
