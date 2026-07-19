@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>评测与校准页</title>
+  <style id="theme-vars">
+/*
+ * Pinguo design tokens
+ * Brand: Pinguo
+ * Domain: Consumer imaging product
+ * Style: Restrained, elegant, Apple-inspired
+ * Theme mode: light-dark
+ * Source language: zh
+ * Output language: en
+ */
+/* @group-priority: brand, background, text, icon, state-success, state-error */
+:root {
+  --apple-background: var(--background, #ffffff);
+  --apple-foreground: var(--foreground, #0f172a);
+  --apple-card: var(--card, var(--background));
+  --apple-card-foreground: var(--card-foreground, var(--foreground));
+  --apple-popover: var(--popover, var(--card));
+  --apple-popover-foreground: var(--popover-foreground, var(--card-foreground, var(--foreground)));
+  --apple-primary: var(--primary, #111827);
+  --apple-primary-foreground: var(--primary-foreground, #ffffff);
+  --apple-secondary: var(--secondary, var(--muted, var(--card)));
+  --apple-secondary-foreground: var(--secondary-foreground, var(--foreground));
+  --apple-muted: var(--muted, var(--card));
+  --apple-muted-foreground: var(--muted-foreground, var(--foreground));
+  --apple-accent: var(--accent, var(--secondary, var(--muted, var(--card))));
+  --apple-accent-foreground: var(--accent-foreground, var(--foreground));
+  --apple-destructive: var(--destructive, #ef4444);
+  --apple-destructive-foreground: var(--destructive-foreground, #ffffff);
+  --apple-border: var(--border, currentColor);
+  --apple-input: var(--input, var(--border));
+  --apple-ring: var(--ring, var(--primary));
+  --apple-chart-1: var(--chart-1, var(--primary));
+  --apple-chart-2: var(--chart-2, var(--secondary, var(--primary)));
+  --apple-chart-3: var(--chart-3, var(--accent, var(--primary)));
+  --apple-chart-4: var(--chart-4, var(--muted-foreground, var(--foreground)));
+  --apple-chart-5: var(--chart-5, var(--foreground));
+  --apple-sidebar: var(--sidebar, var(--background));
+  --apple-sidebar-foreground: var(--sidebar-foreground, var(--foreground));
+  --apple-sidebar-primary: var(--sidebar-primary, var(--primary));
+  --apple-sidebar-primary-foreground: var(--sidebar-primary-foreground, var(--primary-foreground));
+  --apple-sidebar-accent: var(--sidebar-accent, var(--accent, var(--muted, var(--card))));
+  --apple-sidebar-accent-foreground: var(--sidebar-accent-foreground, var(--accent-foreground, var(--foreground)));
+  --brand-50: #e8f2ff;
+  --brand-100: #cfe5ff;
+  --brand-200: #9fcbff;
+  --brand-300: #66abff;
+  --brand-400: #2e8dff;
+  --brand-500: #007aff;
+  --brand-600: #0064d6;
+  --brand-700: #004fad;
+  --brand-800: #003b82;
+  --brand-900: #00275a;
+  --background-50: #ffffff;
+  --background-100: #f7f7fa;
+  --background-200: #f2f2f7;
+  --background-300: #e5e5ea;
+  --background-400: #d1d1d6;
+  --background-500: #aeaeb2;
+  --background-600: #8e8e93;
+  --background-700: #3a3a3c;
+  --background-800: #1c1c1e;
+  --background-900: #000000;
+  --text-50: #f5f5f7;
+  --text-100: #e3e3e8;
+  --text-200: #c7c7cc;
+  --text-300: #aeaeb2;
+  --text-400: #8e8e93;
+  --text-500: #6e6e73;
+  --text-600: #48484a;
+  --text-700: #3c3c43;
+  --text-800: #1d1d1f;
+  --text-900: #000000;
+  --icon-50: #f5f5f7;
+  --icon-100: #e5e5ea;
+  --icon-200: #d1d1d6;
+  --icon-300: #c7c7cc;
+  --icon-400: #aeaeb2;
+  --icon-500: #8e8e93;
+  --icon-600: #6e6e73;
+  --icon-700: #48484a;
+  --icon-800: #2c2c2e;
+  --icon-900: #1d1d1f;
+  --state-success: #34c759;
+  --state-success-dark: #30d158;
+  --state-success-foreground: #ffffff;
+  --state-error: #ff3b30;
+  --state-error-dark: #ff453a;
+  --state-error-foreground: #ffffff;
+  --background: var(--background-50);
+  --foreground: var(--text-800);
+  --card: var(--background-50);
+  --card-foreground: var(--text-800);
+  --popover: var(--background-50);
+  --popover-foreground: var(--text-900);
+  --primary: var(--brand-500);
+  --primary-foreground: var(--background-50);
+  --secondary: var(--background-200);
+  --secondary-foreground: var(--text-800);
+  --muted: var(--background-200);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-100);
+  --accent-foreground: var(--text-800);
+  --destructive: var(--state-error);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-300);
+  --input: var(--background-400);
+  --ring: var(--brand-500);
+  --icon: var(--icon-900);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success);
+  --chart-2: var(--brand-500);
+  --chart-3: #ff9500;
+  --chart-4: #5856d6;
+  --chart-5: #af52de;
+  --sidebar: var(--background-200);
+  --sidebar-foreground: var(--text-800);
+  --sidebar-primary: var(--brand-500);
+  --sidebar-primary-foreground: var(--background-50);
+  --sidebar-accent: var(--background-300);
+  --sidebar-accent-foreground: var(--text-800);
+  --sidebar-border: var(--background-300);
+  --sidebar-ring: var(--brand-500);
+  --font-sans: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-serif: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-mono: JetBrains Mono, monospace;
+  --tracking-normal: 0em;
+  --radius: 1.2rem;
+  --apple-radius-sm: calc(var(--radius) * 0.66);
+  --apple-radius-md: calc(var(--radius) * 0.86);
+  --apple-radius-lg: var(--radius);
+  --shadow-2xs: 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 1px 3px -1px rgba(0, 0, 0, 0.05);
+  --shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px -8px rgba(0, 0, 0, 0.08), 0 4px 8px -4px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 16px 40px -10px rgba(0, 0, 0, 0.10), 0 8px 16px -8px rgba(0, 0, 0, 0.06);
+  --shadow-2xl: 0 24px 64px -12px rgba(0, 0, 0, 0.12);
+}
+.dark {
+  --background: var(--background-900);
+  --foreground: var(--text-50);
+  --card: var(--background-800);
+  --card-foreground: var(--text-50);
+  --popover: var(--background-700);
+  --popover-foreground: var(--text-50);
+  --primary: var(--brand-400);
+  --primary-foreground: var(--background-900);
+  --secondary: var(--background-800);
+  --secondary-foreground: var(--text-50);
+  --muted: var(--background-800);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-700);
+  --accent-foreground: var(--text-50);
+  --destructive: var(--state-error-dark);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success-dark);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-700);
+  --input: var(--background-700);
+  --ring: var(--brand-400);
+  --icon: var(--icon-50);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success-dark);
+  --chart-2: var(--brand-400);
+  --chart-3: #ff9f0a;
+  --chart-4: #5e5ce6;
+  --chart-5: #bf5af2;
+  --sidebar: var(--background-800);
+  --sidebar-foreground: var(--text-50);
+  --sidebar-primary: var(--brand-400);
+  --sidebar-primary-foreground: var(--background-900);
+  --sidebar-accent: var(--background-700);
+  --sidebar-accent-foreground: var(--text-50);
+  --sidebar-border: var(--background-700);
+  --sidebar-ring: var(--brand-400);
+}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style type="text/tailwindcss">
+@theme inline {
+  --color-background: var(--apple-background);
+  --color-foreground: var(--apple-foreground);
+  --color-card: var(--apple-card);
+  --color-card-foreground: var(--apple-card-foreground);
+  --color-popover: var(--apple-popover);
+  --color-popover-foreground: var(--apple-popover-foreground);
+  --color-primary: var(--apple-primary);
+  --color-primary-foreground: var(--apple-primary-foreground);
+  --color-secondary: var(--apple-secondary);
+  --color-secondary-foreground: var(--apple-secondary-foreground);
+  --color-muted: var(--apple-muted);
+  --color-muted-foreground: var(--apple-muted-foreground);
+  --color-accent: var(--apple-accent);
+  --color-accent-foreground: var(--apple-accent-foreground);
+  --color-destructive: var(--apple-destructive);
+  --color-destructive-foreground: var(--apple-destructive-foreground);
+  --color-border: var(--apple-border);
+  --color-input: var(--apple-input);
+  --color-ring: var(--apple-ring);
+  --color-chart-1: var(--apple-chart-1);
+  --color-chart-2: var(--apple-chart-2);
+  --color-chart-3: var(--apple-chart-3);
+  --color-chart-4: var(--apple-chart-4);
+  --color-chart-5: var(--apple-chart-5);
+  --color-sidebar: var(--apple-sidebar);
+  --color-sidebar-foreground: var(--apple-sidebar-foreground);
+  --color-sidebar-primary: var(--apple-sidebar-primary);
+  --color-sidebar-primary-foreground: var(--apple-sidebar-primary-foreground);
+  --color-sidebar-accent: var(--apple-sidebar-accent);
+  --color-sidebar-accent-foreground: var(--apple-sidebar-accent-foreground);
+  --radius-sm: var(--apple-radius-sm);
+  --radius-md: var(--apple-radius-md);
+  --radius-lg: var(--apple-radius-lg);
+}
+@layer base {
+  body { background: var(--apple-background); color: var(--apple-foreground); }
+  td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+  th { @apply whitespace-nowrap; }
+}
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--apple-background); }
+    .text-background { color: var(--apple-background); }
+    .border-background { border-color: var(--apple-background); }
+    .ring-background { --tw-ring-color: var(--apple-background); }
+    .bg-foreground { background-color: var(--apple-foreground); }
+    .text-foreground { color: var(--apple-foreground); }
+    .border-foreground { border-color: var(--apple-foreground); }
+    .ring-foreground { --tw-ring-color: var(--apple-foreground); }
+    .bg-card { background-color: var(--apple-card); }
+    .text-card { color: var(--apple-card); }
+    .border-card { border-color: var(--apple-card); }
+    .ring-card { --tw-ring-color: var(--apple-card); }
+    .bg-primary { background-color: var(--apple-primary); }
+    .text-primary { color: var(--apple-primary); }
+    .border-primary { border-color: var(--apple-primary); }
+    .ring-primary { --tw-ring-color: var(--apple-primary); }
+    .bg-border { background-color: var(--apple-border); }
+    .text-border { color: var(--apple-border); }
+    .border-border { border-color: var(--apple-border); }
+    .ring-border { --tw-ring-color: var(--apple-border); }
+    .bg-muted { background-color: var(--apple-muted); }
+    .text-muted { color: var(--apple-muted); }
+    .border-muted { border-color: var(--apple-muted); }
+    .ring-muted { --tw-ring-color: var(--apple-muted); }
+    .bg-muted-foreground { background-color: var(--apple-muted-foreground); }
+    .text-muted-foreground { color: var(--apple-muted-foreground); }
+    .border-muted-foreground { border-color: var(--apple-muted-foreground); }
+    .ring-muted-foreground { --tw-ring-color: var(--apple-muted-foreground); }
+  </style>
+</head>
+<body class="h-screen overflow-hidden antialiased" style="font-family: var(--font-sans); background: var(--apple-background); color: var(--apple-foreground);">
+  <div data-viewport-mode="app-shell" class="flex h-screen min-h-0 flex-col overflow-hidden" style="background: linear-gradient(180deg, color-mix(in srgb, var(--apple-background) 96%, var(--apple-card) 4%) 0%, var(--apple-background) 100%);">
+    <header class="w-full border-b" style="border-color: var(--apple-border); background: color-mix(in srgb, var(--apple-background) 95%, white 5%); box-shadow: var(--shadow-2xs);">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-4 py-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,0.95fr)_auto] xl:items-center">
+          <div class="flex min-w-0 items-center gap-4">
+            <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border" style="border-color: var(--apple-border); background: var(--apple-card); color: var(--apple-foreground); box-shadow: var(--shadow-xs);">
+              <i data-lucide="flask-conical" class="h-5 w-5"></i>
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-[13px] font-medium" style="color: var(--apple-muted-foreground);">抖音切片优化器</p>
+              <div class="mt-1 flex min-w-0 flex-wrap items-end gap-3">
+                <h1 class="truncate text-[24px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">评测与校准</h1>
+                <span class="status-pill" data-tone="neutral">研究中心</span>
+              </div>
+            </div>
+          </div>
+
+          <nav class="mode-switch" aria-label="工作模式">
+            <a href="#" class="mode-switch__item">
+              <i data-lucide="layout-panel-top" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">剪辑工作台</span>
+            </a>
+            <a href="#" aria-current="page" class="mode-switch__item is-active">
+              <i data-lucide="flask-conical" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">研究中心</span>
+            </a>
+          </nav>
+
+          <div class="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+            <span class="status-pill" data-tone="neutral">BMK-2026-07-Freeze-03</span>
+            <span class="status-pill" data-tone="neutral">RB-2026-0719-03</span>
+            <span class="status-pill" data-tone="neutral">09:40 更新</span>
+          </div>
+        </div>
+
+        <section class="flex flex-col gap-4 border-t py-3 lg:flex-row lg:items-center lg:justify-between" style="border-color: var(--apple-border);">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="research-badge">研究导航</span>
+            <p class="truncate text-[12px]" style="color: var(--apple-muted-foreground);">已承接概览异常：中段偏乐观、3 条严重错判、shadow 仍在观察；本页只保留会改判的证据与动作。</p>
+          </div>
+          <nav class="research-subnav" aria-label="研究中心二层导航">
+            <a href="#" class="research-tab">概览</a>
+            <a href="#" class="research-tab">样本与标注</a>
+            <a href="#" aria-current="page" class="research-tab is-active">评测与校准</a>
+            <a href="#" class="research-tab">平台连接</a>
+            <a href="#" class="research-tab">模型与环境</a>
+          </nav>
+        </section>
+      </div>
+    </header>
+
+    <main data-scroll-region="primary" class="min-h-0 overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
+        <section class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <article class="hero-panel xl:col-span-8">
+            <div class="hero-panel__top">
+              <div class="min-w-0">
+                <div class="hero-panel__eyebrow">
+                  <span class="research-badge">承接概览</span>
+                  <span class="status-pill" data-tone="neutral">异常已接入</span>
+                </div>
+                <p class="hero-panel__label">当前判断</p>
+                <h2 class="hero-panel__title">继续主链路</h2>
+                <p class="hero-panel__desc">Freeze 03 仍然稳定，Unified-Ranker-v4 继续保留在主链路。当前不扩散处理面，只处理中段校准、回看 3 条严重错判，并暂缓恢复放量。</p>
+              </div>
+              <div class="hero-panel__status">
+                <span class="status-pill" data-tone="success">Freeze 03 稳定</span>
+                <span class="status-pill" data-tone="primary">继续</span>
+                <span class="status-pill" data-tone="neutral">暂不放量</span>
+              </div>
+            </div>
+
+            <div class="hero-kpi-grid">
+              <article class="hero-kpi hero-kpi--active">
+                <p class="hero-kpi__label">当前建议</p>
+                <p class="hero-kpi__value">继续</p>
+                <p class="hero-kpi__desc">主排序继续保留，动作只落在局部校准与复核。</p>
+              </article>
+              <article class="hero-kpi">
+                <p class="hero-kpi__label">观察状态</p>
+                <p class="hero-kpi__value">观察</p>
+                <p class="hero-kpi__desc">只盯中段偏差、严重错判与 shadow 激进度，不扩成整页报表。</p>
+              </article>
+              <article class="hero-kpi">
+                <p class="hero-kpi__label">回滚状态</p>
+                <p class="hero-kpi__value">未触发</p>
+                <p class="hero-kpi__desc">高分头部未扩散、回测仍正向，暂不恢复旧权重。</p>
+              </article>
+            </div>
+
+            <div class="decision-strip">
+              <article class="decision-strip__item is-active">
+                <span class="decision-row__icon"><i data-lucide="shield-check" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3>概览异常</h3>
+                  <p>研究中心概览已上报中段偏乐观，当前只在 0.6–0.8 分段收口。</p>
+                </div>
+              </article>
+              <article class="decision-strip__item">
+                <span class="decision-row__icon"><i data-lucide="scan-search" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3>严重错判</h3>
+                  <p>前强后弱、冷静讲解型与同源桥段三类样本仍会改变判断。</p>
+                </div>
+              </article>
+              <article class="decision-strip__item">
+                <span class="decision-row__icon"><i data-lucide="triangle-alert" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3>放量状态</h3>
+                  <p>恢复放量仍被挂起，需等中段收敛与错判复核一起通过。</p>
+                </div>
+              </article>
+            </div>
+          </article>
+
+          <aside class="xl:col-span-4 surface-card surface-card--sidebar">
+            <div class="panel-head">
+              <div class="min-w-0">
+                <p class="panel-head__label">下一步</p>
+                <h3 class="panel-head__title">动作链</h3>
+                <p class="panel-head__desc">先处理中段，再回看错判，最后判断是否恢复放量；回滚线始终保留在右侧。</p>
+              </div>
+              <span class="status-pill" data-tone="primary">行动区</span>
+            </div>
+
+            <div class="action-stack">
+              <article class="action-step action-step--active">
+                <div class="action-step__meta">
+                  <span class="action-step__index">01</span>
+                  <span class="status-pill" data-tone="primary">当前</span>
+                </div>
+                <h4>继续主链路</h4>
+                <p>维持 Unified-Ranker-v4，不切换主模型，也不回滚旧权重。</p>
+              </article>
+              <article class="action-step">
+                <div class="action-step__meta">
+                  <span class="action-step__index">02</span>
+                  <span class="status-pill" data-tone="neutral">处理中</span>
+                </div>
+                <h4>处理中段</h4>
+                <p>只回拉 0.6–0.8 分段，避免干扰高分头部与低分尾部。</p>
+              </article>
+              <article class="action-step">
+                <div class="action-step__meta">
+                  <span class="action-step__index">03</span>
+                  <span class="status-pill" data-tone="neutral">复核</span>
+                </div>
+                <h4>回看错判</h4>
+                <p>优先回看三类严重错判，补齐解释与样本边界，再决定是否改判。</p>
+              </article>
+              <article class="action-step">
+                <div class="action-step__meta">
+                  <span class="action-step__index">04</span>
+                  <span class="status-pill" data-tone="neutral">门槛</span>
+                </div>
+                <h4>恢复放量</h4>
+                <p>当前维持暂缓，只有中段收敛且错判下降后才重新放量。</p>
+              </article>
+            </div>
+
+            <div class="cta-cluster">
+              <button class="apple-button apple-button--primary" type="button">
+                <span>处理中段</span>
+                <i data-lucide="arrow-right" class="h-4 w-4"></i>
+              </button>
+              <div class="cta-cluster__links">
+                <a href="#" class="inline-link">回看错判<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i></a>
+                <a href="#" class="inline-link">看门槛<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i></a>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="section-block">
+          <div class="section-heading">
+            <div class="min-w-0">
+              <p class="section-heading__label">关键证据</p>
+              <h3 class="section-heading__title">改判证据</h3>
+              <p class="section-heading__desc">这里只保留会改变继续、观察或回滚判断的证据：模型去留、偏差热点、严重错判与回测结论。</p>
+            </div>
+            <div class="toolbar-shell">
+              <label class="apple-input-shell" aria-label="搜索 benchmark">
+                <i data-lucide="search" class="h-4 w-4"></i>
+                <input type="text" value="BMK-2026-07-Freeze-03" readonly>
+              </label>
+              <span class="status-pill" data-tone="neutral">09:40 更新</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <article class="surface-card xl:col-span-7">
+              <div class="panel-head">
+                <div class="min-w-0">
+                  <p class="panel-head__label">模型对比</p>
+                  <h4 class="panel-head__title">模型去留</h4>
+                  <p class="panel-head__desc">重点不是绝对分，而是谁继续承担主链路，谁只保留在观察位。</p>
+                </div>
+                <span class="status-pill" data-tone="primary">主模型在位</span>
+              </div>
+
+              <div class="model-board">
+                <article class="model-row">
+                  <div class="model-row__main">
+                    <div class="model-row__title">
+                      <h5>Rule-Ranker-v1</h5>
+                      <span class="status-pill" data-tone="neutral">规则基线</span>
+                    </div>
+                    <p>稳定但偏保守，只保留为回放基线，不承担本轮放量判断。</p>
+                  </div>
+                  <div class="model-row__verdict">
+                    <span class="status-pill" data-tone="neutral">保留基线</span>
+                  </div>
+                  <div class="metric-ribbon">
+                    <span>NDCG@10 0.612</span>
+                    <span>错判 5 条</span>
+                    <span>成本 1.0x</span>
+                  </div>
+                </article>
+
+                <article class="model-row model-row--active">
+                  <div class="model-row__main">
+                    <div class="model-row__title">
+                      <h5>Unified-Ranker-v4</h5>
+                      <span class="status-pill" data-tone="primary">当前生产</span>
+                    </div>
+                    <p>质量、成本与解释链路最均衡，仍然是当前最稳的生产选择。</p>
+                  </div>
+                  <div class="model-row__verdict">
+                    <span class="status-pill" data-tone="primary">继续生产</span>
+                  </div>
+                  <div class="metric-ribbon">
+                    <span>NDCG@10 0.684</span>
+                    <span>Top-K +11.2%</span>
+                    <span>错判 3 条</span>
+                  </div>
+                </article>
+
+                <article class="model-row">
+                  <div class="model-row__main">
+                    <div class="model-row__title">
+                      <h5>Qwen-Ranker-v3</h5>
+                      <span class="status-pill" data-tone="neutral">shadow</span>
+                    </div>
+                    <p>头部更激进，但校准稳定性与成本都还没到切换门槛。</p>
+                  </div>
+                  <div class="model-row__verdict">
+                    <span class="status-pill" data-tone="neutral">继续观察</span>
+                  </div>
+                  <div class="metric-ribbon">
+                    <span>NDCG@10 0.691</span>
+                    <span>错判 4 条</span>
+                    <span>成本 2.1x</span>
+                  </div>
+                </article>
+              </div>
+            </article>
+
+            <div class="xl:col-span-5 evidence-stack">
+              <article class="surface-card">
+                <div class="panel-head">
+                  <div class="min-w-0">
+                    <p class="panel-head__label">偏差热点</p>
+                    <h4 class="panel-head__title">中段偏差</h4>
+                    <p class="panel-head__desc">只看会触发改判的分段，先决定局部回拉，暂不升级为整体回滚。</p>
+                  </div>
+                  <span class="status-pill" data-tone="neutral">局部处理</span>
+                </div>
+
+                <div class="bias-focus">
+                  <div class="bias-focus__chart">
+                    <div class="bias-focus__line bias-focus__line--ideal"></div>
+                    <div class="bias-focus__line bias-focus__line--actual"></div>
+                    <span class="bias-focus__dot" style="left: 12%; top: 72%;"></span>
+                    <span class="bias-focus__dot" style="left: 30%; top: 58%;"></span>
+                    <span class="bias-focus__dot" style="left: 50%; top: 47%;"></span>
+                    <span class="bias-focus__dot is-hot" style="left: 71%; top: 32%;"></span>
+                    <span class="bias-focus__dot" style="left: 90%; top: 18%;"></span>
+                  </div>
+                  <div class="bias-focus__legend">
+                    <span>预测理想线</span>
+                    <span>当前校准线</span>
+                  </div>
+                </div>
+
+                <div class="bias-ladder">
+                  <div class="bias-row">
+                    <span class="bias-row__label">0.0–0.2</span>
+                    <div class="bias-row__track"><div class="bias-row__fill" style="width: 22%;"></div></div>
+                    <span class="bias-row__value">稳定</span>
+                  </div>
+                  <div class="bias-row">
+                    <span class="bias-row__label">0.2–0.4</span>
+                    <div class="bias-row__track"><div class="bias-row__fill" style="width: 34%;"></div></div>
+                    <span class="bias-row__value">稳定</span>
+                  </div>
+                  <div class="bias-row">
+                    <span class="bias-row__label">0.4–0.6</span>
+                    <div class="bias-row__track"><div class="bias-row__fill" style="width: 54%;"></div></div>
+                    <span class="bias-row__value">轻偏</span>
+                  </div>
+                  <div class="bias-row">
+                    <span class="bias-row__label">0.6–0.8</span>
+                    <div class="bias-row__track"><div class="bias-row__fill bias-row__fill--hot" style="width: 78%;"></div></div>
+                    <span class="bias-row__value bias-row__value--hot">重点</span>
+                  </div>
+                  <div class="bias-row">
+                    <span class="bias-row__label">0.8–1.0</span>
+                    <div class="bias-row__track"><div class="bias-row__fill" style="width: 40%;"></div></div>
+                    <span class="bias-row__value">可控</span>
+                  </div>
+                </div>
+                <div class="signal-list">
+                  <div class="signal-list__row">
+                    <span class="signal-list__label">头部扩散</span>
+                    <p class="signal-list__text">未出现，当前不触发回滚。</p>
+                  </div>
+                  <div class="signal-list__row">
+                    <span class="signal-list__label">中段收敛</span>
+                    <p class="signal-list__text">仍待处理，是恢复放量前的第一门槛。</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="surface-card">
+                <div class="panel-head">
+                  <div class="min-w-0">
+                    <p class="panel-head__label">错判样本</p>
+                    <h4 class="panel-head__title">错判三类</h4>
+                    <p class="panel-head__desc">只保留会改变动作的样本，不展开长解释。</p>
+                  </div>
+                  <span class="status-pill" data-tone="neutral">3 条待复核</span>
+                </div>
+
+                <div class="case-list">
+                  <article class="case-row">
+                    <div class="case-row__meta">
+                      <span class="status-pill" data-tone="neutral">0.84 → 0.31</span>
+                    </div>
+                    <div class="case-row__body">
+                      <h5>前强后弱</h5>
+                      <p>开头钩子被高估，后半段节奏塌陷未被压住。</p>
+                    </div>
+                  </article>
+                  <article class="case-row">
+                    <div class="case-row__meta">
+                      <span class="status-pill" data-tone="neutral">0.42 → 0.73</span>
+                    </div>
+                    <div class="case-row__body">
+                      <h5>冷静讲解型</h5>
+                      <p>信息密度高但表达克制，当前先验低估转发价值。</p>
+                    </div>
+                  </article>
+                  <article class="case-row">
+                    <div class="case-row__meta">
+                      <span class="status-pill" data-tone="neutral">样本冲突</span>
+                    </div>
+                    <div class="case-row__body">
+                      <h5>同源桥段</h5>
+                      <p>同源重复进入正例，后续仅保留单源样本。</p>
+                    </div>
+                  </article>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <article class="surface-card xl:col-span-7">
+            <div class="panel-head">
+              <div class="min-w-0">
+                <p class="panel-head__label">最近回测</p>
+                  <h4 class="panel-head__title">回测结论</h4>
+                  <p class="panel-head__desc">版本、状态与结论同列展示，只回答现在能不能继续、要不要恢复放量。</p>
+              </div>
+              <span class="status-pill" data-tone="success">最近一轮已回写</span>
+            </div>
+
+            <div class="timeline-list">
+              <article class="timeline-row timeline-row--active">
+                <span class="record-row__icon"><i data-lucide="history" class="h-4 w-4"></i></span>
+                <div class="timeline-row__content">
+                  <div class="timeline-row__head">
+                    <div>
+                      <p class="timeline-row__title">RB-2026-0719-03 · 联合回放</p>
+                      <p class="timeline-row__meta">G1 / G2 共链路 · ranker-v4 / calibrator-v2 · 09:40</p>
+                    </div>
+                    <span class="status-pill" data-tone="primary">继续</span>
+                  </div>
+                  <p class="timeline-row__desc">NDCG@10 +0.034，校准误差 0.08。当前结论支持继续生产，但恢复放量仍需等待中段收敛。</p>
+                </div>
+              </article>
+
+              <article class="timeline-row">
+                <span class="record-row__icon"><i data-lucide="flask-conical" class="h-4 w-4"></i></span>
+                <div class="timeline-row__content">
+                  <div class="timeline-row__head">
+                    <div>
+                      <p class="timeline-row__title">RB-2026-0718-07 · Shadow 对照</p>
+                      <p class="timeline-row__meta">Qwen-Ranker-v3 · shadow 通道 · 昨晚 22:14</p>
+                    </div>
+                    <span class="status-pill" data-tone="neutral">观察</span>
+                  </div>
+                  <p class="timeline-row__desc">Top-K 略高，但错判与成本仍高于主模型，本轮继续观察，不升主链路。</p>
+                </div>
+              </article>
+
+              <article class="timeline-row">
+                <span class="record-row__icon"><i data-lucide="list-checks" class="h-4 w-4"></i></span>
+                <div class="timeline-row__content">
+                  <div class="timeline-row__head">
+                    <div>
+                      <p class="timeline-row__title">RB-2026-0716-02 · 错判专项</p>
+                      <p class="timeline-row__meta">review-bucket-c · 07-16 11:03</p>
+                    </div>
+                    <span class="status-pill" data-tone="neutral">待并入</span>
+                  </div>
+                  <p class="timeline-row__desc">新增 12 条高分低播复核标签，等待并入中段校准与错判回看动作。</p>
+                </div>
+              </article>
+            </div>
+          </article>
+
+          <aside class="xl:col-span-5 action-column">
+            <article class="surface-card surface-card--tinted">
+              <div class="panel-head">
+                <div class="min-w-0">
+                  <p class="panel-head__label">恢复放量</p>
+                  <h4 class="panel-head__title">放量门槛</h4>
+                  <p class="panel-head__desc">是否恢复放量只看这三项，不再重复整页证据。</p>
+                </div>
+                <span class="status-pill" data-tone="primary">暂不恢复</span>
+              </div>
+
+              <div class="advice-grid">
+                <article class="advice-card advice-card--active">
+                  <p class="advice-card__index">门槛 1</p>
+                  <h5>中段收敛</h5>
+                  <p>0.6–0.8 分段误差先收口，再讨论是否恢复放量。</p>
+                </article>
+                <article class="advice-card">
+                  <p class="advice-card__index">门槛 2</p>
+                  <h5>错判下降</h5>
+                  <p>严重错判需先压到 2 条以内，且不再新增同类高风险样本。</p>
+                </article>
+                <article class="advice-card">
+                  <p class="advice-card__index">门槛 3</p>
+                  <h5>主模型仍稳</h5>
+                  <p>shadow 继续观察，不以单轮激进收益替代当前主排序稳定性。</p>
+                </article>
+              </div>
+            </article>
+
+            <article class="surface-card">
+              <div class="panel-head">
+                <div class="min-w-0">
+                  <p class="panel-head__label">回滚条件</p>
+                  <h4 class="panel-head__title">回滚线</h4>
+                  <p class="panel-head__desc">回滚条件保持短而明确，方便和概览页判断对齐。</p>
+                </div>
+                <span class="status-pill" data-tone="neutral">监控中</span>
+              </div>
+
+              <div class="stop-list">
+                <div class="stop-list__row">
+                  <span class="stop-list__label">条件一</span>
+                  <p class="stop-list__text">高分头部出现扩散性偏差，且两轮回放都无法收敛。</p>
+                </div>
+                <div class="stop-list__row">
+                  <span class="stop-list__label">条件二</span>
+                  <p class="stop-list__text">严重错判回升到 5 条以上，并影响主模型可信度。</p>
+                </div>
+                <div class="stop-list__row">
+                  <span class="stop-list__label">条件三</span>
+                  <p class="stop-list__text">局部校准导致高分头部排序明显受损。</p>
+                </div>
+              </div>
+            </article>
+          </aside>
+        </section>
+
+        <p class="text-[12px] leading-6" style="color: var(--apple-muted-foreground);">评测口径统一指向优质流量、观看质量、转发价值与关注转化；播放缺失时仅展示高互动代理，不将其他计数冒充播放量。</p>
+      </div>
+    </main>
+  </div>
+  <style>
+    .mode-switch{display:flex;min-width:0;align-items:center;justify-content:center;border:1px solid var(--apple-border);border-radius:999px;padding:6px;background:color-mix(in srgb,var(--apple-card) 76%,var(--apple-background) 24%);box-shadow:var(--shadow-xs)}
+    .mode-switch__item{display:inline-flex;min-width:0;flex:1;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:999px;font-size:13px;font-weight:500;color:var(--apple-muted-foreground);white-space:nowrap;transition:background-color 160ms cubic-bezier(.2,.8,.2,1),color 160ms cubic-bezier(.2,.8,.2,1),opacity 160ms cubic-bezier(.2,.8,.2,1)}
+    .mode-switch__item:hover{opacity:.78}
+    .mode-switch__item.is-active{background:var(--apple-foreground);color:var(--apple-background);box-shadow:var(--shadow-sm)}
+    .research-badge{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 12px;border:1px solid var(--apple-border);border-radius:14px;background:color-mix(in srgb,var(--apple-card) 72%,var(--apple-background) 28%);color:var(--apple-muted-foreground);font-size:12px;font-weight:500}
+    .research-subnav{display:flex;min-width:0;align-items:center;gap:8px;flex-wrap:wrap}
+    .research-tab{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--apple-border);border-radius:14px;background:color-mix(in srgb,var(--apple-card) 80%,var(--apple-background) 20%);color:var(--apple-muted-foreground);font-size:13px;font-weight:500;white-space:nowrap;transition:background-color 160ms cubic-bezier(.2,.8,.2,1),border-color 160ms cubic-bezier(.2,.8,.2,1),color 160ms cubic-bezier(.2,.8,.2,1)}
+    .research-tab:hover{border-color:color-mix(in srgb,var(--apple-primary) 14%,var(--apple-border) 86%);color:var(--apple-foreground)}
+    .research-tab.is-active{border-color:color-mix(in srgb,var(--apple-primary) 24%,var(--apple-border) 76%);background:color-mix(in srgb,var(--apple-primary) 8%,var(--apple-background) 92%);color:var(--apple-primary)}
+    .status-pill{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--apple-border);font-size:12px;color:var(--apple-muted-foreground);background:color-mix(in srgb,var(--apple-background) 74%,var(--apple-card) 26%)}
+    .status-pill[data-tone="primary"]{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .status-pill[data-tone="success"]{border-color:color-mix(in srgb,var(--apple-primary) 14%,var(--apple-border) 86%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-background) 95%);color:var(--apple-foreground)}
+    .status-pill[data-tone="neutral"]{background:color-mix(in srgb,var(--apple-card) 82%,var(--apple-background) 18%)}
+    .hero-panel,.surface-card,.section-block{border:1px solid var(--apple-border);border-radius:20px;background:var(--apple-card);box-shadow:var(--shadow-sm)}
+    .hero-panel{padding:28px;background:linear-gradient(180deg,color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%) 0%,var(--apple-card) 100%)}
+    .hero-panel__top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:start}
+    .hero-panel__eyebrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .hero-panel__label,.panel-head__label,.section-heading__label{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--apple-muted-foreground)}
+    .hero-panel__label{margin-top:18px}
+    .hero-panel__title{margin-top:10px;font-size:clamp(32px,4vw,44px);line-height:1.06;font-weight:600;letter-spacing:-.04em;color:var(--apple-foreground);text-wrap:balance;word-break:keep-all;overflow-wrap:break-word}
+    .hero-panel__desc{margin-top:14px;max-width:760px;font-size:15px;line-height:1.65;color:var(--apple-muted-foreground)}
+    .hero-panel__status{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+    .hero-kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:24px}
+    .hero-kpi{padding:18px;border:1px solid var(--apple-border);border-radius:18px;background:color-mix(in srgb,var(--apple-background) 82%,var(--apple-card) 18%)}
+    .hero-kpi--active{border-color:color-mix(in srgb,var(--apple-primary) 22%,var(--apple-border) 78%);background:color-mix(in srgb,var(--apple-primary) 6%,var(--apple-background) 94%)}
+    .hero-kpi__label,.action-step__index,.advice-card__index{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--apple-muted-foreground)}
+    .hero-kpi__value{margin-top:10px;font-size:28px;line-height:1.08;font-weight:600;letter-spacing:-.04em;color:var(--apple-foreground)}
+    .hero-kpi__desc{margin-top:8px;font-size:13px;line-height:1.6;color:var(--apple-muted-foreground)}
+    .decision-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}
+    .decision-strip__item,.model-row,.case-row,.timeline-row,.action-step,.advice-card{display:flex;gap:12px;padding:16px;border:1px solid var(--apple-border);border-radius:18px;background:color-mix(in srgb,var(--apple-background) 82%,var(--apple-card) 18%);transition:transform 160ms cubic-bezier(.2,.8,.2,1),border-color 160ms cubic-bezier(.2,.8,.2,1),background-color 160ms cubic-bezier(.2,.8,.2,1)}
+    .decision-strip__item:hover,.model-row:hover,.timeline-row:hover,.advice-card:hover{transform:translateY(-2px)}
+    .decision-strip__item.is-active,.model-row--active,.timeline-row--active,.action-step--active,.advice-card--active{border-color:color-mix(in srgb,var(--apple-primary) 22%,var(--apple-border) 78%);background:color-mix(in srgb,var(--apple-primary) 6%,var(--apple-background) 94%)}
+    .decision-strip__item h3,.action-step h4,.panel-head__title,.section-heading__title,.case-row__body h5,.timeline-row__title,.model-row__title h5,.advice-card h5,.stop-list__label{margin:0;color:var(--apple-foreground);font-weight:600;letter-spacing:-.02em}
+    .decision-strip__item h3,.action-step h4,.model-row__title h5,.case-row__body h5,.advice-card h5{font-size:16px;line-height:1.3}
+    .decision-strip__item p,.action-step p,.panel-head__desc,.section-heading__desc,.model-row__main p,.case-row__body p,.timeline-row__meta,.timeline-row__desc,.advice-card p,.stop-list__text{margin:0;color:var(--apple-muted-foreground);font-size:13px;line-height:1.6}
+    .decision-row__icon,.record-row__icon{display:inline-flex;height:36px;width:36px;flex-shrink:0;align-items:center;justify-content:center;border-radius:14px;border:1px solid var(--apple-border);background:color-mix(in srgb,var(--apple-card) 88%,var(--apple-background) 12%);color:var(--apple-muted-foreground)}
+    .decision-strip__item.is-active .decision-row__icon,.timeline-row--active .record-row__icon{border-color:transparent;background:color-mix(in srgb,var(--apple-primary) 12%,var(--apple-background) 88%);color:var(--apple-primary)}
+    .surface-card{padding:24px}
+    .surface-card--sidebar{display:flex;flex-direction:column;gap:18px}
+    .surface-card--tinted{background:linear-gradient(180deg,color-mix(in srgb,var(--apple-primary) 4%,var(--apple-card) 96%) 0%,var(--apple-card) 100%)}
+    .panel-head,.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+    .panel-head__title,.section-heading__title{margin-top:8px;font-size:26px;line-height:1.12;text-wrap:balance;word-break:keep-all;overflow-wrap:break-word}
+    .panel-head__desc,.section-heading__desc{margin-top:10px;max-width:720px}
+    .section-block{padding:24px}
+    .toolbar-shell{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px}
+    .apple-input-shell{display:inline-flex;align-items:center;gap:8px;height:40px;min-width:260px;padding:0 12px;border:1px solid var(--apple-border);border-radius:14px;background:color-mix(in srgb,var(--apple-background) 84%,var(--apple-card) 16%);color:var(--apple-muted-foreground)}
+    .apple-input-shell input{width:100%;border:none;outline:none;background:transparent;color:var(--apple-foreground);font-size:14px}
+    .action-stack,.evidence-stack,.action-column,.timeline-list,.case-list,.stop-list{display:flex;flex-direction:column;gap:12px}
+    .action-step{flex-direction:column}
+    .action-step__meta{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .cta-cluster{display:flex;flex-direction:column;gap:12px;margin-top:auto}
+    .apple-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 18px;border-radius:999px;border:1px solid transparent;font-size:14px;font-weight:600;transition:transform 160ms cubic-bezier(.2,.8,.2,1),background-color 160ms cubic-bezier(.2,.8,.2,1),color 160ms cubic-bezier(.2,.8,.2,1)}
+    .apple-button:hover{transform:translateY(-1px)}
+    .apple-button--primary{background:var(--apple-primary);color:var(--apple-background)}
+    .cta-cluster__links{display:flex;flex-wrap:wrap;gap:14px}
+    .inline-link{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:500;color:var(--apple-primary);transition:gap 160ms cubic-bezier(.2,.8,.2,1)}
+    .inline-link:hover{gap:6px}
+    .model-board{display:flex;flex-direction:column;gap:12px}
+    .model-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px}
+    .model-row__title{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+    .model-row__verdict{display:flex;align-items:flex-start;justify-content:flex-end}
+    .metric-ribbon{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+    .metric-ribbon span{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:14px;background:color-mix(in srgb,var(--apple-card) 80%,var(--apple-background) 20%);border:1px solid var(--apple-border);font-size:12px;color:var(--apple-muted-foreground)}
+    .bias-focus{display:flex;flex-direction:column;gap:10px}
+    .bias-focus__chart{position:relative;height:208px;border:1px solid var(--apple-border);border-radius:18px;background:
+      linear-gradient(to top,color-mix(in srgb,var(--apple-border) 70%,transparent) 1px,transparent 1px) 0 0/100% 25%,
+      linear-gradient(to right,color-mix(in srgb,var(--apple-border) 42%,transparent) 1px,transparent 1px) 0 0/25% 100%,
+      color-mix(in srgb,var(--apple-background) 88%,var(--apple-card) 12%)}
+    .bias-focus__line{position:absolute;left:12%;right:10%;height:2px;border-radius:999px;transform-origin:left center}
+    .bias-focus__line--ideal{top:72%;background:color-mix(in srgb,var(--apple-muted-foreground) 40%,transparent);transform:rotate(-25deg)}
+    .bias-focus__line--actual{top:77%;background:var(--apple-primary);transform:rotate(-18deg)}
+    .bias-focus__dot{position:absolute;width:10px;height:10px;border-radius:999px;background:var(--apple-primary);box-shadow:0 0 0 4px color-mix(in srgb,var(--apple-primary) 14%,transparent)}
+    .bias-focus__dot.is-hot{width:12px;height:12px}
+    .bias-focus__legend{display:flex;flex-wrap:wrap;gap:8px}
+    .bias-focus__legend span{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:14px;background:color-mix(in srgb,var(--apple-card) 84%,var(--apple-background) 16%);border:1px solid var(--apple-border);font-size:12px;color:var(--apple-muted-foreground)}
+    .bias-ladder{display:flex;flex-direction:column;gap:10px}
+    .bias-row{display:grid;grid-template-columns:78px minmax(0,1fr) auto;align-items:center;gap:12px}
+    .bias-row__label{font-size:12px;color:var(--apple-muted-foreground);white-space:nowrap}
+    .bias-row__track{height:10px;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--apple-border) 55%,transparent)}
+    .bias-row__fill{height:100%;border-radius:999px;background:color-mix(in srgb,var(--apple-primary) 38%,var(--apple-background) 62%)}
+    .bias-row__fill--hot{background:var(--apple-primary)}
+    .bias-row__value{font-size:12px;font-weight:600;color:var(--apple-muted-foreground)}
+    .bias-row__value--hot{color:var(--apple-primary)}
+    .signal-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+    .signal-list__row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:12px 0;border-top:1px solid var(--apple-border)}
+    .signal-list__row:first-child{padding-top:0;border-top:none}
+    .signal-list__label{font-size:12px;font-weight:600;color:var(--apple-foreground)}
+    .signal-list__text{margin:0;font-size:13px;line-height:1.6;color:var(--apple-muted-foreground)}
+    .case-row{align-items:flex-start}
+    .case-row__meta{flex-shrink:0}
+    .case-row__body{display:flex;flex-direction:column;gap:6px}
+    .timeline-row{align-items:flex-start}
+    .timeline-row__content{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+    .timeline-row__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .timeline-row__title{font-size:15px}
+    .timeline-row__meta{margin-top:4px;font-size:12px}
+    .advice-grid{display:flex;flex-direction:column;gap:12px}
+    .advice-card{flex-direction:column}
+    .stop-list__row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:14px 0;border-top:1px solid var(--apple-border)}
+    .stop-list__row:first-child{border-top:none;padding-top:0}
+    .stop-list__label{font-size:13px}
+    .stop-list__text{font-size:13px}
+    @media (max-width: 1280px){
+      .hero-panel__top,.panel-head,.section-heading,.model-row,.timeline-row__head{grid-template-columns:minmax(0,1fr);display:flex;flex-direction:column}
+      .hero-panel__status,.toolbar-shell,.model-row__verdict{justify-content:flex-start}
+    }
+    @media (max-width: 900px){
+      .hero-kpi-grid,.decision-strip{grid-template-columns:1fr}
+      .apple-input-shell{min-width:0;width:100%}
+      .toolbar-shell{width:100%}
+    }
+    @media (prefers-reduced-motion: reduce){
+      .mode-switch__item,.research-tab,.decision-strip__item,.model-row,.timeline-row,.advice-card,.apple-button,.inline-link{transition-duration:.01ms}
+      .decision-strip__item:hover,.model-row:hover,.timeline-row:hover,.advice-card:hover,.apple-button:hover{transform:none}
+      .inline-link:hover{gap:4px}
+    }
+  </style>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

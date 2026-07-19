@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>素材与节目</title>
+  <style id="theme-vars">
+/*
+ * Pinguo design tokens
+ * Brand: Pinguo
+ * Domain: Consumer imaging product
+ * Style: Restrained, elegant, Apple-inspired
+ * Theme mode: light-dark
+ * Source language: zh
+ * Output language: en
+ *
+ * Color architecture (two layers):
+ *   1. Primitive palette - six categories. brand / background / text / icon
+ *      are each a 10-step scale (50 lightest to 900 darkest). state-success and
+ *      state-error are functional colors anchored on Apple system colors.
+ *      Anchors follow Apple Human Interface Guidelines system colors
+ *      (System Blue #007AFF, System Green #34C759, System Red #FF3B30,
+ *      system grays / label / background colors).
+ *   2. Semantic tokens - :root (light) and .dark map roles onto primitives.
+ *      Components and UI kits must only consume the semantic tokens below.
+ */
+/* @group-priority: brand, background, text, icon, state-success, state-error */
+:root {
+  --apple-background: var(--background, #ffffff);
+  --apple-foreground: var(--foreground, #0f172a);
+  --apple-card: var(--card, var(--background));
+  --apple-card-foreground: var(--card-foreground, var(--foreground));
+  --apple-popover: var(--popover, var(--card));
+  --apple-popover-foreground: var(--popover-foreground, var(--card-foreground, var(--foreground)));
+  --apple-primary: var(--primary, #111827);
+  --apple-primary-foreground: var(--primary-foreground, #ffffff);
+  --apple-secondary: var(--secondary, var(--muted, var(--card)));
+  --apple-secondary-foreground: var(--secondary-foreground, var(--foreground));
+  --apple-muted: var(--muted, var(--card));
+  --apple-muted-foreground: var(--muted-foreground, var(--foreground));
+  --apple-accent: var(--accent, var(--secondary, var(--muted, var(--card))));
+  --apple-accent-foreground: var(--accent-foreground, var(--foreground));
+  --apple-destructive: var(--destructive, #ef4444);
+  --apple-destructive-foreground: var(--destructive-foreground, #ffffff);
+  --apple-border: var(--border, currentColor);
+  --apple-input: var(--input, var(--border));
+  --apple-ring: var(--ring, var(--primary));
+  --apple-chart-1: var(--chart-1, var(--primary));
+  --apple-chart-2: var(--chart-2, var(--secondary, var(--primary)));
+  --apple-chart-3: var(--chart-3, var(--accent, var(--primary)));
+  --apple-chart-4: var(--chart-4, var(--muted-foreground, var(--foreground)));
+  --apple-chart-5: var(--chart-5, var(--foreground));
+  --apple-sidebar: var(--sidebar, var(--background));
+  --apple-sidebar-foreground: var(--sidebar-foreground, var(--foreground));
+  --apple-sidebar-primary: var(--sidebar-primary, var(--primary));
+  --apple-sidebar-primary-foreground: var(--sidebar-primary-foreground, var(--primary-foreground));
+  --apple-sidebar-accent: var(--sidebar-accent, var(--accent, var(--muted, var(--card))));
+  --apple-sidebar-accent-foreground: var(--sidebar-accent-foreground, var(--accent-foreground, var(--foreground)));
+  --brand-50: #e8f2ff;
+  --brand-100: #cfe5ff;
+  --brand-200: #9fcbff;
+  --brand-300: #66abff;
+  --brand-400: #2e8dff;
+  --brand-500: #007aff;
+  --brand-600: #0064d6;
+  --brand-700: #004fad;
+  --brand-800: #003b82;
+  --brand-900: #00275a;
+  --background-50: #ffffff;
+  --background-100: #f7f7fa;
+  --background-200: #f2f2f7;
+  --background-300: #e5e5ea;
+  --background-400: #d1d1d6;
+  --background-500: #aeaeb2;
+  --background-600: #8e8e93;
+  --background-700: #3a3a3c;
+  --background-800: #1c1c1e;
+  --background-900: #000000;
+  --text-50: #f5f5f7;
+  --text-100: #e3e3e8;
+  --text-200: #c7c7cc;
+  --text-300: #aeaeb2;
+  --text-400: #8e8e93;
+  --text-500: #6e6e73;
+  --text-600: #48484a;
+  --text-700: #3c3c43;
+  --text-800: #1d1d1f;
+  --text-900: #000000;
+  --icon-50: #f5f5f7;
+  --icon-100: #e5e5ea;
+  --icon-200: #d1d1d6;
+  --icon-300: #c7c7cc;
+  --icon-400: #aeaeb2;
+  --icon-500: #8e8e93;
+  --icon-600: #6e6e73;
+  --icon-700: #48484a;
+  --icon-800: #2c2c2e;
+  --icon-900: #1d1d1f;
+  --state-success: #34c759;
+  --state-success-dark: #30d158;
+  --state-success-surface: #e9f9ee;
+  --state-success-foreground: #ffffff;
+  --state-error: #ff3b30;
+  --state-error-dark: #ff453a;
+  --state-error-surface: #ffecea;
+  --state-error-foreground: #ffffff;
+  --background: var(--background-50);
+  --foreground: var(--text-800);
+  --card: var(--background-50);
+  --card-foreground: var(--text-800);
+  --popover: var(--background-50);
+  --popover-foreground: var(--text-900);
+  --primary: var(--brand-500);
+  --primary-foreground: var(--background-50);
+  --secondary: var(--background-200);
+  --secondary-foreground: var(--text-800);
+  --muted: var(--background-200);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-100);
+  --accent-foreground: var(--text-800);
+  --destructive: var(--state-error);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-300);
+  --input: var(--background-400);
+  --ring: var(--brand-500);
+  --icon: var(--icon-900);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success);
+  --chart-2: var(--brand-500);
+  --chart-3: #ff9500;
+  --chart-4: #5856d6;
+  --chart-5: #af52de;
+  --sidebar: var(--background-200);
+  --sidebar-foreground: var(--text-800);
+  --sidebar-primary: var(--brand-500);
+  --sidebar-primary-foreground: var(--background-50);
+  --sidebar-accent: var(--background-300);
+  --sidebar-accent-foreground: var(--text-800);
+  --sidebar-border: var(--background-300);
+  --sidebar-ring: var(--brand-500);
+  --font-sans: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-serif: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-mono: JetBrains Mono, monospace;
+  --tracking-normal: 0em;
+  --radius: 1.2rem;
+  --apple-radius-sm: calc(var(--radius) * 0.66);
+  --apple-radius-md: calc(var(--radius) * 0.86);
+  --apple-radius-lg: var(--radius);
+  --shadow-2xs: 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 1px 3px -1px rgba(0, 0, 0, 0.05);
+  --shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px -8px rgba(0, 0, 0, 0.08), 0 4px 8px -4px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 16px 40px -10px rgba(0, 0, 0, 0.10), 0 8px 16px -8px rgba(0, 0, 0, 0.06);
+  --shadow-2xl: 0 24px 64px -12px rgba(0, 0, 0, 0.12);
+  --spacing: 0.24rem;
+}
+.dark {
+  --background: var(--background-900);
+  --foreground: var(--text-50);
+  --card: var(--background-800);
+  --card-foreground: var(--text-50);
+  --popover: var(--background-700);
+  --popover-foreground: var(--text-50);
+  --primary: var(--brand-400);
+  --primary-foreground: var(--background-900);
+  --secondary: var(--background-800);
+  --secondary-foreground: var(--text-50);
+  --muted: var(--background-800);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-700);
+  --accent-foreground: var(--text-50);
+  --destructive: var(--state-error-dark);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success-dark);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-700);
+  --input: var(--background-700);
+  --ring: var(--brand-400);
+  --icon: var(--icon-50);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success-dark);
+  --chart-2: var(--brand-400);
+  --chart-3: #ff9f0a;
+  --chart-4: #5e5ce6;
+  --chart-5: #bf5af2;
+  --sidebar: var(--background-800);
+  --sidebar-foreground: var(--text-50);
+  --sidebar-primary: var(--brand-400);
+  --sidebar-primary-foreground: var(--background-900);
+  --sidebar-accent: var(--background-700);
+  --sidebar-accent-foreground: var(--text-50);
+  --sidebar-border: var(--background-700);
+  --sidebar-ring: var(--brand-400);
+  --shadow-2xs: 0 1px 2px -1px rgba(0, 0, 0, 0.30);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.36), 0 1px 3px -1px rgba(0, 0, 0, 0.36);
+  --shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.40), 0 1px 2px -1px rgba(0, 0, 0, 0.36);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.44), 0 2px 4px -2px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 8px 24px -8px rgba(0, 0, 0, 0.50), 0 4px 8px -4px rgba(0, 0, 0, 0.40);
+  --shadow-xl: 0 16px 40px -10px rgba(0, 0, 0, 0.55), 0 8px 16px -8px rgba(0, 0, 0, 0.44);
+  --shadow-2xl: 0 24px 64px -12px rgba(0, 0, 0, 0.60);
+}
+  </style>
+  <style id="component-vars">
+body{margin:0;padding:12px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);letter-spacing:var(--tracking-normal)}.row{display:flex;align-items:center;gap:calc(var(--spacing)*3);flex-wrap:wrap;margin:0 0 calc(var(--spacing)*3)}.label{min-width:72px;color:var(--muted-foreground);font:600 10px/1 var(--font-mono);letter-spacing:.12em;text-transform:uppercase}.btn{display:inline-flex;align-items:center;justify-content:center;gap:calc(var(--spacing)*1.5);height:40px;padding:0 20px;border:none;border-radius:calc(var(--radius)*2);background:transparent;color:var(--foreground);font:600 14px/1 var(--font-sans);letter-spacing:var(--tracking-normal);white-space:nowrap;box-shadow:var(--shadow-sm);cursor:pointer;transition:background-color .18s ease,color .18s ease,opacity .18s ease,filter .18s ease}.btn:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.btn:disabled{opacity:.42;cursor:not-allowed}.btn-primary{background:var(--primary);color:var(--primary-foreground)}.btn-primary:hover{filter:brightness(.96)}.btn-secondary{height:48px;padding:0 24px;background:var(--secondary);color:var(--secondary-foreground)}.btn-secondary:hover{background:var(--muted)}.btn-text{height:48px;padding:0 4px;box-shadow:none}.btn-text:hover{color:var(--primary)}.btn-lg{height:56px;padding:0 28px;font-size:16px}.divider{border:0;border-top:1px solid var(--border);margin:calc(var(--spacing)*4) 0}body{margin:0;padding:12px;background:var(--background);color:var(--foreground);font:500 14px/1.45 var(--font-sans);letter-spacing:var(--tracking-normal)}.row{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}.label{width:72px;padding-top:10px;color:var(--muted-foreground);font:700 10px/1 var(--font-sans);letter-spacing:.12em;text-transform:uppercase}.divider{margin:12px 0;border:0;border-top:1px solid var(--border)}.card{width:188px;min-height:148px;padding:calc(var(--spacing)*5);display:flex;flex-direction:column;justify-content:space-between;background:var(--card);color:var(--card-foreground);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);transition:transform .18s ease,box-shadow .18s ease}.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}.card.disabled,.card.disabled:hover{opacity:.5;transform:none;box-shadow:var(--shadow-md)}.eyebrow,.meta{color:var(--muted-foreground);font-size:11px;letter-spacing:.08em;text-transform:uppercase}.title{margin:6px 0 8px;font-size:18px;line-height:1.15}.body-copy{margin:0;color:var(--muted-foreground);font-size:13px}.cta{display:inline-flex;align-items:center;justify-content:center;width:max-content;margin-top:12px;padding:calc(var(--spacing)*2) calc(var(--spacing)*3.5);border-radius:999px;background:var(--primary);color:var(--primary-foreground);font-size:12px;font-weight:700;text-decoration:none}.media{aspect-ratio:4/3;border-radius:calc(var(--radius) - 4px);background:linear-gradient(135deg,var(--secondary),var(--accent));border:1px solid var(--border)}.media-card{min-height:212px;padding:calc(var(--spacing)*4)}.media-card .title{font-size:16px;margin:10px 0 6px}.price{font-size:12px;color:var(--muted-foreground)}.dark{background:var(--card);color:var(--card-foreground)}body{margin:0;padding:12px;background:var(--background);color:var(--foreground);font:500 13px/1.4 var(--font-sans)}.row{display:flex;align-items:center;gap:calc(var(--spacing)*3);flex-wrap:wrap;margin-bottom:8px}.label{min-width:58px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-foreground)}.divider{border:0;border-top:1px solid var(--border);margin:10px 0}.surface{display:flex;gap:calc(var(--spacing)*2);padding:calc(var(--spacing)*3);border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow-sm)}.dark{background:var(--background);color:var(--foreground)}.field{display:flex;align-items:center;gap:calc(var(--spacing)*2);min-width:240px;height:44px;padding:0 calc(var(--spacing)*3);border:1px solid var(--input);border-radius:var(--radius);background:var(--background);color:var(--foreground);box-shadow:var(--shadow-xs)}.field.small{height:40px}.field:focus-within{border-color:var(--ring);box-shadow:0 0 0 1px var(--ring)}.field.disabled{opacity:.55}.icon,.clear{padding:0;border:0;background:transparent;color:var(--icon-muted);font:inherit}.icon{font-size:13px}.control{flex:1;border:0;outline:0;background:transparent;color:inherit;font:inherit}.control::placeholder{color:var(--muted-foreground)}body{margin:0;padding:12px;background:var(--background);color:var(--foreground);font:500 13px/1.4 var(--font-sans);letter-spacing:var(--tracking-normal)}.row{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px}.label{width:72px;padding-top:10px;color:var(--muted-foreground);font:700 10px/1 var(--font-mono);letter-spacing:.12em;text-transform:uppercase}.divider{margin:12px 0;border:0;border-top:1px solid var(--border)}.webbar,.mobile{border:1px solid var(--border);box-shadow:var(--shadow-sm)}.webbar{display:flex;align-items:center;gap:calc(var(--spacing)*2);min-width:320px;height:44px;padding:0 calc(var(--spacing)*3);border-radius:var(--radius);background:var(--sidebar)}.brand{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.rail{display:flex;gap:calc(var(--spacing)*1.5);margin-left:auto}.link,.tab{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;color:inherit;text-decoration:none;white-space:nowrap;transition:background-color .18s ease,color .18s ease,opacity .18s ease}.link{height:32px;padding:0 calc(var(--spacing)*2.5)}.link:hover,.tab:hover{background:var(--secondary)}.link:focus-visible,.tab:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.dark{background:var(--sidebar);color:var(--foreground)}.disabled{opacity:.48}.disabled .link,.disabled .tab{pointer-events:none}.mobile{padding:calc(var(--spacing)*2);border-radius:calc(var(--radius)*1.1);background:var(--card)}.screen{display:flex;align-items:flex-end;justify-content:center;width:188px;height:164px;padding:calc(var(--spacing)*3);border-radius:calc(var(--radius)*.9);background:linear-gradient(180deg,var(--background),var(--secondary))}.tabbar{display:flex;gap:calc(var(--spacing)*1.5);padding:calc(var(--spacing)*1.5);border:1px solid var(--border);border-radius:999px;background:var(--card);box-shadow:var(--shadow-md)}.tab{flex-direction:column;gap:2px;min-width:56px;height:56px;padding:0 calc(var(--spacing)*1.5);font-size:11px;text-align:center}.dot{width:18px;height:18px;border-radius:999px;background:var(--secondary);box-shadow:inset 0 0 0 1px var(--border)}.tab:hover .dot{background:var(--primary)}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style type="text/tailwindcss">
+@theme inline {
+  --color-background: var(--apple-background);
+  --color-foreground: var(--apple-foreground);
+  --color-card: var(--apple-card);
+  --color-card-foreground: var(--apple-card-foreground);
+  --color-popover: var(--apple-popover);
+  --color-popover-foreground: var(--apple-popover-foreground);
+  --color-primary: var(--apple-primary);
+  --color-primary-foreground: var(--apple-primary-foreground);
+  --color-secondary: var(--apple-secondary);
+  --color-secondary-foreground: var(--apple-secondary-foreground);
+  --color-muted: var(--apple-muted);
+  --color-muted-foreground: var(--apple-muted-foreground);
+  --color-accent: var(--apple-accent);
+  --color-accent-foreground: var(--apple-accent-foreground);
+  --color-destructive: var(--apple-destructive);
+  --color-destructive-foreground: var(--apple-destructive-foreground);
+  --color-border: var(--apple-border);
+  --color-input: var(--apple-input);
+  --color-ring: var(--apple-ring);
+  --color-chart-1: var(--apple-chart-1);
+  --color-chart-2: var(--apple-chart-2);
+  --color-chart-3: var(--apple-chart-3);
+  --color-chart-4: var(--apple-chart-4);
+  --color-chart-5: var(--apple-chart-5);
+  --color-sidebar: var(--apple-sidebar);
+  --color-sidebar-foreground: var(--apple-sidebar-foreground);
+  --color-sidebar-primary: var(--apple-sidebar-primary);
+  --color-sidebar-primary-foreground: var(--apple-sidebar-primary-foreground);
+  --color-sidebar-accent: var(--apple-sidebar-accent);
+  --color-sidebar-accent-foreground: var(--apple-sidebar-accent-foreground);
+  --radius-sm: var(--apple-radius-sm);
+  --radius-md: var(--apple-radius-md);
+  --radius-lg: var(--apple-radius-lg);
+}
+@layer base {
+  body { background: var(--apple-background); color: var(--apple-foreground); }
+  td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+  th { @apply whitespace-nowrap; }
+}
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--apple-background); }
+    .text-background { color: var(--apple-background); }
+    .border-background { border-color: var(--apple-background); }
+    .ring-background { --tw-ring-color: var(--apple-background); }
+    .bg-foreground { background-color: var(--apple-foreground); }
+    .text-foreground { color: var(--apple-foreground); }
+    .border-foreground { border-color: var(--apple-foreground); }
+    .ring-foreground { --tw-ring-color: var(--apple-foreground); }
+    .bg-card { background-color: var(--apple-card); }
+    .text-card { color: var(--apple-card); }
+    .border-card { border-color: var(--apple-card); }
+    .ring-card { --tw-ring-color: var(--apple-card); }
+    .bg-primary { background-color: var(--apple-primary); }
+    .text-primary { color: var(--apple-primary); }
+    .border-primary { border-color: var(--apple-primary); }
+    .ring-primary { --tw-ring-color: var(--apple-primary); }
+    .bg-border { background-color: var(--apple-border); }
+    .text-border { color: var(--apple-border); }
+    .border-border { border-color: var(--apple-border); }
+    .ring-border { --tw-ring-color: var(--apple-border); }
+    .bg-muted { background-color: var(--apple-muted); }
+    .text-muted { color: var(--apple-muted); }
+    .border-muted { border-color: var(--apple-muted); }
+    .ring-muted { --tw-ring-color: var(--apple-muted); }
+    .bg-muted-foreground { background-color: var(--apple-muted-foreground); }
+    .text-muted-foreground { color: var(--apple-muted-foreground); }
+    .border-muted-foreground { border-color: var(--apple-muted-foreground); }
+    .ring-muted-foreground { --tw-ring-color: var(--apple-muted-foreground); }
+  </style>
+  <style>
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    [data-icon] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-mask-size: contain;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
+      background-color: currentColor;
+    }
+  </style>
+</head>
+<body class="h-screen overflow-hidden antialiased" style="font-family: var(--font-sans); background: var(--apple-background); color: var(--apple-foreground);">
+  <div data-viewport-mode="app-shell" class="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--apple-background)]">
+    <header class="w-full border-b border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_94%,white_6%)]">
+      <div class="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-6 px-6 py-4 lg:px-8">
+        <div class="flex min-w-0 items-center gap-4">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] shadow-[var(--shadow-xs)] text-[var(--apple-foreground)]">
+            <i data-lucide="clapperboard" class="h-5 w-5"></i>
+          </div>
+          <div class="min-w-0">
+            <p class="truncate text-[13px] font-medium text-[var(--apple-muted-foreground)]">抖音切片优化</p>
+            <nav aria-label="工作模式切换" class="mt-2 inline-flex items-center gap-1 rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] p-1 shadow-[var(--shadow-xs)]">
+              <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] px-4 text-[14px] font-medium text-[var(--apple-primary)] transition-[background-color,transform] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[color-mix(in_srgb,var(--apple-primary)_16%,var(--apple-background)_84%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">剪辑工作台</button>
+              <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full px-4 text-[14px] font-medium text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_72%,var(--apple-card)_28%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">研究中心</button>
+            </nav>
+          </div>
+        </div>
+        <div class="hidden items-center gap-3 lg:flex">
+          <span class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] text-[var(--apple-muted-foreground)] shadow-[var(--shadow-xs)]">账号 main</span>
+          <span class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] text-[var(--apple-muted-foreground)] shadow-[var(--shadow-xs)]">今日待复核 6</span>
+        </div>
+      </div>
+      <div class="mx-auto w-full max-w-[1440px] px-6 pb-4 lg:px-8">
+        <nav aria-label="流程阶段导航" class="flex min-w-0 items-center gap-2 overflow-x-auto no-scrollbar">
+          <div class="flex shrink-0 items-center gap-2 rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] px-3 py-2 shadow-[var(--shadow-xs)]">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] text-[13px] font-semibold text-[var(--apple-primary)]">01</span>
+            <span class="whitespace-nowrap text-[14px] font-medium text-[var(--apple-foreground)]">素材与节目</span>
+          </div>
+          <span class="h-px min-w-8 flex-1 bg-[var(--apple-border)]"></span>
+          <div class="flex shrink-0 items-center gap-2 rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] px-3 py-2">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--apple-muted)] text-[13px] font-semibold text-[var(--apple-muted-foreground)]">02</span>
+            <span class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]">候选审核</span>
+          </div>
+          <span class="h-px min-w-8 flex-1 bg-[var(--apple-border)]"></span>
+          <div class="flex shrink-0 items-center gap-2 rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] px-3 py-2">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--apple-muted)] text-[13px] font-semibold text-[var(--apple-muted-foreground)]">03</span>
+            <span class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]">发布准备</span>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main data-scroll-region="primary" class="min-h-0 overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-6 py-8 lg:px-8">
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <div class="flex min-w-0 flex-col gap-6 xl:col-span-8">
+            <div class="min-w-0">
+              <p class="text-[13px] font-medium text-[var(--apple-muted-foreground)]">剪辑工作台</p>
+              <h1 class="mt-2 text-[clamp(30px,3.2vw,42px)] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]" style="text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">素材与节目</h1>
+            </div>
+
+            <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] p-6 shadow-[var(--shadow-xs)]">
+              <div class="flex items-center justify-between gap-4">
+                <h2 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">当前对象</h2>
+                <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] font-medium text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">切换节目</button>
+              </div>
+              <div class="mt-5 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="truncate text-[28px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">我是歌手2025 第7期</h3>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] px-3 text-[12px] font-medium text-[var(--apple-primary)]">待复核</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[color-mix(in_srgb,var(--state-error)_20%,var(--apple-border)_80%)] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--apple-background)_92%)] px-3 text-[12px] font-medium text-[color-mix(in_srgb,var(--state-error)_80%,var(--apple-foreground)_20%)]">部分异常</span>
+                  </div>
+                  <div class="mt-4 flex flex-wrap items-center gap-2">
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">账号 main</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">综艺正片</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">01:48:20</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">10:24 更新</span>
+                  </div>
+                  <div class="mt-5 flex flex-wrap items-center gap-2">
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">已转写</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">已生成候选</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">已评分</span>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] px-3 text-[12px] font-medium text-[var(--apple-primary)]">待复核</span>
+                  </div>
+                </div>
+                <div class="grid min-w-0 shrink-0 grid-cols-2 gap-3 lg:w-[320px]">
+                  <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                    <p class="truncate text-[12px] text-[var(--apple-muted-foreground)]">候选</p>
+                    <p class="mt-2 whitespace-nowrap text-[24px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]" style="font-variant-numeric: tabular-nums;">26</p>
+                  </div>
+                  <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                    <p class="truncate text-[12px] text-[var(--apple-muted-foreground)]">待复核</p>
+                    <p class="mt-2 whitespace-nowrap text-[24px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]" style="font-variant-numeric: tabular-nums;">6</p>
+                  </div>
+                  <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                    <p class="truncate text-[12px] text-[var(--apple-muted-foreground)]">重合片段</p>
+                    <p class="mt-2 whitespace-nowrap text-[24px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]" style="font-variant-numeric: tabular-nums;">2 组</p>
+                  </div>
+                  <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                    <p class="truncate text-[12px] text-[var(--apple-muted-foreground)]">待处理</p>
+                    <p class="mt-2 whitespace-nowrap text-[24px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]" style="font-variant-numeric: tabular-nums;">3 项</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_82%,var(--apple-card)_18%)] p-6 shadow-[var(--shadow-xs)]">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h2 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">当前判断</h2>
+                    <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[color-mix(in_srgb,var(--state-error)_20%,var(--apple-border)_80%)] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--apple-background)_92%)] px-3 text-[12px] font-medium text-[color-mix(in_srgb,var(--state-error)_80%,var(--apple-foreground)_20%)]">部分异常</span>
+                  </div>
+                  <p class="mt-3 text-[22px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">副歌重复，先复核再进审核。</p>
+                  <div class="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 py-4">
+                      <p class="text-[12px] text-[var(--apple-muted-foreground)]">重合</p>
+                      <p class="mt-2 text-[14px] font-medium text-[var(--apple-foreground)]">00:42:18 与 00:43:05 重叠</p>
+                    </div>
+                    <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 py-4">
+                      <p class="text-[12px] text-[var(--apple-muted-foreground)]">排序</p>
+                      <p class="mt-2 text-[14px] font-medium text-[var(--apple-foreground)]">中后段情绪峰值偏少</p>
+                    </div>
+                    <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 py-4">
+                      <p class="text-[12px] text-[var(--apple-muted-foreground)]">包装</p>
+                      <p class="mt-2 text-[14px] font-medium text-[var(--apple-foreground)]">标题口径仍需统一</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] p-6 shadow-[var(--shadow-xs)]">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div class="min-w-0">
+                  <h2 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">下一步动作</h2>
+                  <p class="mt-2 text-[14px] text-[var(--apple-muted-foreground)]">先清掉复核阻塞，再进入候选审核。</p>
+                </div>
+                <button class="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-full bg-[var(--apple-primary)] px-6 text-[15px] font-medium text-[var(--apple-primary-foreground)] shadow-[var(--shadow-xs)] transition-[background-color,transform] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[color-mix(in_srgb,var(--apple-primary)_90%,white_10%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  开始复核
+                  <i data-lucide="arrow-right" class="ml-2 h-4 w-4"></i>
+                </button>
+              </div>
+              <div class="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <button class="flex min-w-0 items-start gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] p-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] text-[var(--apple-primary)]"><i data-lucide="scissors-line-dashed" class="h-4 w-4"></i></span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">处理重合片段</span>
+                    <span class="mt-2 block line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">先合并副歌重复片段，再保留最稳的一条。</span>
+                  </span>
+                </button>
+                <button class="flex min-w-0 items-start gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] p-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] text-[var(--apple-muted-foreground)]"><i data-lucide="list-checks" class="h-4 w-4"></i></span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">查看待复核 6 条</span>
+                    <span class="mt-2 block line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">按排序查看重叠、标题和中后段候选。</span>
+                  </span>
+                </button>
+                <button class="flex min-w-0 items-start gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] p-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] text-[var(--apple-muted-foreground)]"><i data-lucide="flask-conical" class="h-4 w-4"></i></span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">查看研究原因</span>
+                    <span class="mt-2 block line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">需要解释排序时，再切到研究中心。</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <aside class="flex min-w-0 flex-col gap-6 xl:col-span-4">
+            <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] p-5 shadow-[var(--shadow-xs)]">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">紧凑队列</h2>
+                <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">4 个节目</span>
+              </div>
+              <div class="mt-4 space-y-3">
+                <button class="flex w-full min-w-0 items-center gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-primary)_5%,var(--apple-card)_95%)] px-4 py-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--apple-radius-md)] bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] text-[var(--apple-primary)]"><i data-lucide="film" class="h-4 w-4"></i></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">我是歌手2025 第7期</span>
+                    <span class="mt-1 block truncate text-[13px] text-[var(--apple-muted-foreground)]">待复核 · 10:24</span>
+                  </span>
+                </button>
+                <button class="flex w-full min-w-0 items-center gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] text-[var(--apple-muted-foreground)]"><i data-lucide="mic-2" class="h-4 w-4"></i></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">脱口秀大会·上半场</span>
+                    <span class="mt-1 block truncate text-[13px] text-[var(--apple-muted-foreground)]">已评分 · 待复核</span>
+                  </span>
+                </button>
+                <button class="flex w-full min-w-0 items-center gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] text-[var(--apple-muted-foreground)]"><i data-lucide="music" class="h-4 w-4"></i></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">乐队现场特辑</span>
+                    <span class="mt-1 block truncate text-[13px] text-[var(--apple-muted-foreground)]">已转写 · 待处理</span>
+                  </span>
+                </button>
+                <button class="flex w-full min-w-0 items-center gap-3 rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4 text-left transition-[transform,background-color] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[var(--apple-card)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">
+                  <span class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[var(--apple-card)] text-[var(--apple-muted-foreground)]"><i data-lucide="map" class="h-4 w-4"></i></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-[15px] font-medium text-[var(--apple-foreground)]">旅行慢综</span>
+                    <span class="mt-1 block truncate text-[13px] text-[var(--apple-muted-foreground)]">已完成 · 昨天 21:18</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+
+            <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] p-5 shadow-[var(--shadow-xs)]">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="text-[18px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">今日概览</h2>
+                <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-3 text-[12px] text-[var(--apple-muted-foreground)]">主链路</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                  <p class="text-[12px] text-[var(--apple-muted-foreground)]">待处理</p>
+                  <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">9</p>
+                </div>
+                <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                  <p class="text-[12px] text-[var(--apple-muted-foreground)]">已转写</p>
+                  <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">4</p>
+                </div>
+                <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                  <p class="text-[12px] text-[var(--apple-muted-foreground)]">已生成候选</p>
+                  <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">7</p>
+                </div>
+                <div class="rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 py-4">
+                  <p class="text-[12px] text-[var(--apple-muted-foreground)]">已完成</p>
+                  <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em] text-[var(--apple-foreground)]">3</p>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </section>
+
+        <section class="rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)] bg-[var(--apple-card)] p-6 shadow-[var(--shadow-xs)]">
+          <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div class="min-w-0">
+              <h2 class="text-[24px] font-semibold tracking-[-0.02em] text-[var(--apple-foreground)]">节目列表</h2>
+            </div>
+            <div class="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[620px] lg:flex-row lg:items-center">
+              <label class="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-full border border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_78%,var(--apple-card)_22%)] px-4 text-[14px] text-[var(--apple-muted-foreground)] shadow-[var(--shadow-xs)] focus-within:border-[var(--apple-primary)] focus-within:ring-1 focus-within:ring-[var(--apple-primary)]">
+                <i data-lucide="search" class="h-4 w-4 shrink-0"></i>
+                <input class="min-w-0 flex-1 border-0 bg-transparent text-[var(--apple-foreground)] outline-none placeholder:text-[var(--apple-muted-foreground)]" placeholder="搜索节目、账号或状态" aria-label="搜索节目">
+              </label>
+              <div class="flex flex-wrap items-center gap-2">
+                <button class="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[14px] text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">全部账号</button>
+                <button class="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[14px] text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">待处理</button>
+                <button class="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[14px] text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">待复核</button>
+                <button class="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[14px] text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">部分异常</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6 overflow-hidden rounded-[var(--apple-radius-lg)] border border-[var(--apple-border)]">
+            <div class="hidden grid-cols-[minmax(0,2.6fr)_120px_140px_140px_140px_120px] gap-3 border-b border-[var(--apple-border)] bg-[color-mix(in_srgb,var(--apple-background)_76%,var(--apple-card)_24%)] px-5 py-3 text-[12px] font-medium text-[var(--apple-muted-foreground)] lg:grid">
+              <div class="truncate">节目</div>
+              <div class="whitespace-nowrap">时长</div>
+              <div class="truncate">素材状态</div>
+              <div class="truncate">阶段状态</div>
+              <div class="truncate">当前判断</div>
+              <div class="truncate text-right">动作</div>
+            </div>
+
+            <div class="divide-y divide-[var(--apple-border)]">
+              <article class="grid grid-cols-1 gap-4 px-5 py-5 lg:grid-cols-[minmax(0,2.6fr)_120px_140px_140px_140px_120px] lg:items-center lg:gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-[15px] font-medium text-[var(--apple-foreground)]">我是歌手2025 第7期</p>
+                    <span class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] bg-[color-mix(in_srgb,var(--apple-primary)_12%,var(--apple-background)_88%)] px-3 text-[12px] font-medium text-[var(--apple-primary)]">main</span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">当前主对象。先复核，再进入候选审核。</p>
+                </div>
+                <p class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]" style="font-variant-numeric: tabular-nums;">01:48:20</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已转写</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">待复核</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">部分异常</p>
+                <div class="flex justify-start lg:justify-end">
+                  <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full bg-[var(--apple-primary)] px-4 text-[13px] font-medium text-[var(--apple-primary-foreground)] transition-[background-color,transform] duration-150 ease-out hover:translate-y-[-1px] hover:bg-[color-mix(in_srgb,var(--apple-primary)_90%,white_10%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">复核</button>
+                </div>
+              </article>
+
+              <article class="grid grid-cols-1 gap-4 px-5 py-5 lg:grid-cols-[minmax(0,2.6fr)_120px_140px_140px_140px_120px] lg:items-center lg:gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-[15px] font-medium text-[var(--apple-foreground)]">脱口秀大会·上半场</p>
+                    <span class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] px-3 text-[12px] font-medium text-[var(--apple-muted-foreground)]">main</span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">候选已经齐全，等人工给出放行判断。</p>
+                </div>
+                <p class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]" style="font-variant-numeric: tabular-nums;">00:58:40</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已生成候选</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已评分</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">待复核</p>
+                <div class="flex justify-start lg:justify-end">
+                  <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] font-medium text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">查看</button>
+                </div>
+              </article>
+
+              <article class="grid grid-cols-1 gap-4 px-5 py-5 lg:grid-cols-[minmax(0,2.6fr)_120px_140px_140px_140px_120px] lg:items-center lg:gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-[15px] font-medium text-[var(--apple-foreground)]">乐队现场特辑</p>
+                    <span class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] px-3 text-[12px] font-medium text-[var(--apple-muted-foreground)]">music-lab</span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">素材已转写，但仍缺少完整候选。</p>
+                </div>
+                <p class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]" style="font-variant-numeric: tabular-nums;">01:12:15</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已转写</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">待处理</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">待处理</p>
+                <div class="flex justify-start lg:justify-end">
+                  <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] font-medium text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">继续</button>
+                </div>
+              </article>
+
+              <article class="grid grid-cols-1 gap-4 px-5 py-5 lg:grid-cols-[minmax(0,2.6fr)_120px_140px_140px_140px_120px] lg:items-center lg:gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-[15px] font-medium text-[var(--apple-foreground)]">旅行慢综</p>
+                    <span class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-[var(--apple-radius-md)] border border-[var(--apple-border)] px-3 text-[12px] font-medium text-[var(--apple-muted-foreground)]">main</span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-[13px] leading-6 text-[var(--apple-muted-foreground)]">上一轮节目已经完整走完主链路。</p>
+                </div>
+                <p class="whitespace-nowrap text-[14px] text-[var(--apple-muted-foreground)]" style="font-variant-numeric: tabular-nums;">00:46:30</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已生成候选</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已完成</p>
+                <p class="truncate text-[14px] text-[var(--apple-foreground)]">已完成</p>
+                <div class="flex justify-start lg:justify-end">
+                  <button class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-[var(--apple-border)] bg-[var(--apple-card)] px-4 text-[13px] font-medium text-[var(--apple-muted-foreground)] transition-[background-color,color] duration-150 ease-out hover:bg-[color-mix(in_srgb,var(--apple-background)_74%,var(--apple-card)_26%)] hover:text-[var(--apple-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apple-primary)] motion-reduce:transition-none">进入</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

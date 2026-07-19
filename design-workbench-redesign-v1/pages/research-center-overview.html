@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>研究中心概览</title>
+  <style id="theme-vars">
+/*
+ * Pinguo design tokens
+ * Brand: Pinguo
+ * Domain: Consumer imaging product
+ * Style: Restrained, elegant, Apple-inspired
+ * Theme mode: light-dark
+ */
+:root{--apple-background:var(--background,#ffffff);--apple-foreground:var(--foreground,#0f172a);--apple-card:var(--card,var(--background));--apple-card-foreground:var(--card-foreground,var(--foreground));--apple-popover:var(--popover,var(--card));--apple-popover-foreground:var(--popover-foreground,var(--card-foreground,var(--foreground)));--apple-primary:var(--primary,#111827);--apple-primary-foreground:var(--primary-foreground,#ffffff);--apple-secondary:var(--secondary,var(--muted,var(--card)));--apple-secondary-foreground:var(--secondary-foreground,var(--foreground));--apple-muted:var(--muted,var(--card));--apple-muted-foreground:var(--muted-foreground,var(--foreground));--apple-accent:var(--accent,var(--secondary,var(--muted,var(--card))));--apple-accent-foreground:var(--accent-foreground,var(--foreground));--apple-destructive:var(--destructive,#ef4444);--apple-destructive-foreground:var(--destructive-foreground,#ffffff);--apple-border:var(--border,currentColor);--apple-input:var(--input,var(--border));--apple-ring:var(--ring,var(--primary));--apple-chart-1:var(--chart-1,var(--primary));--apple-chart-2:var(--chart-2,var(--secondary,var(--primary)));--apple-chart-3:var(--chart-3,var(--accent,var(--primary)));--apple-chart-4:var(--chart-4,var(--muted-foreground,var(--foreground)));--apple-chart-5:var(--chart-5,var(--foreground));--apple-sidebar:var(--sidebar,var(--background));--apple-sidebar-foreground:var(--sidebar-foreground,var(--foreground));--apple-sidebar-primary:var(--sidebar-primary,var(--primary));--apple-sidebar-primary-foreground:var(--sidebar-primary-foreground,var(--primary-foreground));--apple-sidebar-accent:var(--sidebar-accent,var(--accent,var(--muted,var(--card))));--apple-sidebar-accent-foreground:var(--sidebar-accent-foreground,var(--accent-foreground,var(--foreground)));--brand-50:#e8f2ff;--brand-100:#cfe5ff;--brand-200:#9fcbff;--brand-300:#66abff;--brand-400:#2e8dff;--brand-500:#007aff;--brand-600:#0064d6;--brand-700:#004fad;--brand-800:#003b82;--brand-900:#00275a;--background-50:#ffffff;--background-100:#f7f7fa;--background-200:#f2f2f7;--background-300:#e5e5ea;--background-400:#d1d1d6;--background-500:#aeaeb2;--background-600:#8e8e93;--background-700:#3a3a3c;--background-800:#1c1c1e;--background-900:#000000;--text-50:#f5f5f7;--text-100:#e3e3e8;--text-200:#c7c7cc;--text-300:#aeaeb2;--text-400:#8e8e93;--text-500:#6e6e73;--text-600:#48484a;--text-700:#3c3c43;--text-800:#1d1d1f;--text-900:#000000;--icon-50:#f5f5f7;--icon-100:#e5e5ea;--icon-200:#d1d1d6;--icon-300:#c7c7cc;--icon-400:#aeaeb2;--icon-500:#8e8e93;--icon-600:#6e6e73;--icon-700:#48484a;--icon-800:#2c2c2e;--icon-900:#1d1d1f;--state-success:#34c759;--state-success-dark:#30d158;--state-success-foreground:#ffffff;--state-error:#ff3b30;--state-error-dark:#ff453a;--state-error-foreground:#ffffff;--background:var(--background-50);--foreground:var(--text-800);--card:var(--background-50);--card-foreground:var(--text-800);--popover:var(--background-50);--popover-foreground:var(--text-900);--primary:var(--brand-500);--primary-foreground:var(--background-50);--secondary:var(--background-200);--secondary-foreground:var(--text-800);--muted:var(--background-200);--muted-foreground:var(--text-400);--accent:var(--background-100);--accent-foreground:var(--text-800);--destructive:var(--state-error);--destructive-foreground:var(--state-error-foreground);--success:var(--state-success);--success-foreground:var(--state-success-foreground);--border:var(--background-300);--input:var(--background-400);--ring:var(--brand-500);--icon:var(--icon-900);--icon-muted:var(--icon-500);--chart-1:var(--state-success);--chart-2:var(--brand-500);--chart-3:#ff9500;--chart-4:#5856d6;--chart-5:#af52de;--sidebar:var(--background-200);--sidebar-foreground:var(--text-800);--sidebar-primary:var(--brand-500);--sidebar-primary-foreground:var(--background-50);--sidebar-accent:var(--background-300);--sidebar-accent-foreground:var(--text-800);--sidebar-border:var(--background-300);--sidebar-ring:var(--brand-500);--font-sans:DM Sans,ui-sans-serif,sans-serif,system-ui;--font-serif:DM Sans,ui-sans-serif,sans-serif,system-ui;--font-mono:JetBrains Mono,monospace;--tracking-normal:0em;--radius:1.2rem;--apple-radius-sm:calc(var(--radius)*0.66);--apple-radius-md:calc(var(--radius)*0.86);--apple-radius-lg:var(--radius);--shadow-2xs:0 1px 2px -1px rgba(0,0,0,0.04);--shadow-xs:0 1px 2px 0 rgba(0,0,0,0.04);--shadow-sm:0 1px 2px 0 rgba(0,0,0,0.05),0 1px 3px -1px rgba(0,0,0,0.05);--shadow-md:0 4px 8px -2px rgba(0,0,0,0.06),0 2px 4px -2px rgba(0,0,0,0.05);}
+.dark{--background:var(--background-900);--foreground:var(--text-50);--card:var(--background-800);--card-foreground:var(--text-50);--popover:var(--background-700);--popover-foreground:var(--text-50);--primary:var(--brand-400);--primary-foreground:var(--background-900);--secondary:var(--background-800);--secondary-foreground:var(--text-50);--muted:var(--background-800);--muted-foreground:var(--text-400);--accent:var(--background-700);--accent-foreground:var(--text-50);--destructive:var(--state-error-dark);--destructive-foreground:var(--state-error-foreground);--success:var(--state-success-dark);--success-foreground:var(--state-success-foreground);--border:var(--background-700);--input:var(--background-700);--ring:var(--brand-400);--icon:var(--icon-50);--icon-muted:var(--icon-500);--chart-1:var(--state-success-dark);--chart-2:var(--brand-400);--chart-3:#ff9f0a;--chart-4:#5e5ce6;--chart-5:#bf5af2;--sidebar:var(--background-800);--sidebar-foreground:var(--text-50);--sidebar-primary:var(--brand-400);--sidebar-primary-foreground:var(--background-900);--sidebar-accent:var(--background-700);--sidebar-accent-foreground:var(--text-50);--sidebar-border:var(--background-700);--sidebar-ring:var(--brand-400);}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style type="text/tailwindcss">
+@theme inline{--color-background:var(--apple-background);--color-foreground:var(--apple-foreground);--color-card:var(--apple-card);--color-card-foreground:var(--apple-card-foreground);--color-popover:var(--apple-popover);--color-popover-foreground:var(--apple-popover-foreground);--color-primary:var(--apple-primary);--color-primary-foreground:var(--apple-primary-foreground);--color-secondary:var(--apple-secondary);--color-secondary-foreground:var(--apple-secondary-foreground);--color-muted:var(--apple-muted);--color-muted-foreground:var(--apple-muted-foreground);--color-accent:var(--apple-accent);--color-accent-foreground:var(--apple-accent-foreground);--color-destructive:var(--apple-destructive);--color-destructive-foreground:var(--apple-destructive-foreground);--color-border:var(--apple-border);--color-input:var(--apple-input);--color-ring:var(--apple-ring);--radius-sm:var(--apple-radius-sm);--radius-md:var(--apple-radius-md);--radius-lg:var(--apple-radius-lg);}
+@layer base{body{background:var(--apple-background);color:var(--apple-foreground);}td,th{@apply break-words;word-break:break-all;word-break:auto-phrase;}th{@apply whitespace-nowrap;}}
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background{background-color:var(--apple-background)} .text-foreground{color:var(--apple-foreground)} .bg-card{background-color:var(--apple-card)} .border-border{border-color:var(--apple-border)} .bg-primary{background-color:var(--apple-primary)} .text-primary{color:var(--apple-primary)} .bg-muted{background-color:var(--apple-muted)} .text-muted-foreground{color:var(--apple-muted-foreground)}
+  </style>
+</head>
+<body class="h-screen overflow-hidden antialiased" style="font-family:var(--font-sans);background:var(--apple-background);color:var(--apple-foreground);">
+  <div data-viewport-mode="app-shell" class="flex h-screen min-h-0 flex-col overflow-hidden" style="background:linear-gradient(180deg,color-mix(in srgb,var(--apple-background) 96%,var(--apple-card) 4%) 0%,var(--apple-background) 100%);">
+    <header class="w-full border-b" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 94%,var(--apple-card) 6%);box-shadow:var(--shadow-2xs);">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-4 py-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.9fr)_auto] xl:items-center">
+          <div class="flex min-w-0 items-center gap-4">
+            <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-xs);color:var(--apple-foreground);">
+              <i data-lucide="flask-conical" class="h-5 w-5"></i>
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-[13px] font-medium" style="color:var(--apple-muted-foreground);">抖音剪辑工作台</p>
+              <div class="mt-1 flex min-w-0 flex-wrap items-end gap-2">
+                <h1 class="text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">研究中心概览</h1>
+                <span class="quick-chip">研究域总控页</span>
+              </div>
+            </div>
+          </div>
+          <nav class="flex min-w-0 items-center justify-center rounded-full border p-1.5" aria-label="工作模式切换" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-card) 78%,var(--apple-background) 22%);box-shadow:var(--shadow-xs);">
+            <button class="flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium" style="color:var(--apple-muted-foreground);">
+              <i data-lucide="folder-kanban" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">剪辑工作台</span>
+            </button>
+            <button class="flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium" style="background:var(--apple-foreground);color:var(--apple-background);box-shadow:var(--shadow-sm);">
+              <i data-lucide="flask-conical" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">研究中心</span>
+            </button>
+          </nav>
+          <div class="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+            <span class="quick-chip">关键异常 3</span>
+            <span class="quick-chip">待处理 7</span>
+            <span class="quick-chip">最近变更 4</span>
+          </div>
+        </div>
+
+        <section class="border-t py-4" style="border-color:var(--apple-border);">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div class="min-w-0">
+              <p class="text-[12px]" style="color:var(--apple-muted-foreground);">优先看异常、待处理、当前判断和支撑状态，再决定进入哪个研究子域。</p>
+            </div>
+            <nav class="stage-rail no-scrollbar" aria-label="研究中心子域导航">
+              <a href="#" aria-current="page" class="stage-card is-active">
+                <span class="stage-card__index">01</span>
+                <span class="min-w-0">
+                  <span class="stage-card__label">概览</span>
+                  <span class="stage-card__meta">先看异常与优先级</span>
+                </span>
+              </a>
+              <a href="#" class="stage-card">
+                <span class="stage-card__index">02</span>
+                <span class="min-w-0">
+                  <span class="stage-card__label">样本与标注</span>
+                  <span class="stage-card__meta">确认数据基础</span>
+                </span>
+              </a>
+              <a href="#" class="stage-card">
+                <span class="stage-card__index">03</span>
+                <span class="min-w-0">
+                  <span class="stage-card__label">评测与校准</span>
+                  <span class="stage-card__meta">复核判断偏移</span>
+                </span>
+              </a>
+              <a href="#" class="stage-card">
+                <span class="stage-card__index">04</span>
+                <span class="min-w-0">
+                  <span class="stage-card__label">平台连接</span>
+                  <span class="stage-card__meta">检查授权回流</span>
+                </span>
+              </a>
+              <a href="#" class="stage-card">
+                <span class="stage-card__index">05</span>
+                <span class="min-w-0">
+                  <span class="stage-card__label">模型与环境</span>
+                  <span class="stage-card__meta">确认预算与降级</span>
+                </span>
+              </a>
+            </nav>
+          </div>
+        </section>
+      </div>
+    </header>
+
+    <main data-scroll-region="primary" class="min-h-0 overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-6 py-7 lg:px-8">
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="surface-card surface-card--focus xl:col-span-8">
+            <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="section-kicker">当前最优先处理的问题</p>
+                <h2 class="mt-2 text-[clamp(32px,3vw,46px)] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);text-wrap:balance;word-break:keep-all;overflow-wrap:break-word;">先复核 07-18 冻结评测批次的校准偏移</h2>
+                <p class="mt-4 max-w-[760px] text-[15px] leading-7" style="color:var(--apple-muted-foreground);">当前判断已经明确：研究链路仍可继续，但这批新权重不能先放量。先回到评测与校准复核娱乐类高分样本，再决定是修标签、调权重，还是保持挂起。</p>
+              </div>
+              <span class="status-pill status-pill--danger">待处理</span>
+            </div>
+
+            <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <article class="summary-card summary-card--strong p-4">
+                <p class="summary-card__label">影响批次</p>
+                <p class="summary-card__value">2 批</p>
+                <p class="summary-card__meta">连续两批误差抬升</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="summary-card__label">误差变化</p>
+                <p class="summary-card__value">11.6%</p>
+                <p class="summary-card__meta">娱乐类人工通过率低于预估</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="summary-card__label">当前动作</p>
+                <p class="summary-card__value">挂起写入</p>
+                <p class="summary-card__meta">默认排序先不接入新权重</p>
+              </article>
+            </div>
+
+            <div class="mt-5 grid gap-3 lg:grid-cols-2">
+              <article class="research-row research-row--focus">
+                <span class="research-row__icon"><i data-lucide="scan-search" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="research-row__title">先抽 42 条误差最大样本</h3>
+                  <p class="research-row__text">先确认偏差落在标签漂移、样本窗口，还是分段预测过乐观。</p>
+                </div>
+                <span class="status-pill status-pill--danger">待处理</span>
+              </article>
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="pause-circle" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="research-row__title">保持默认排序写入挂起</h3>
+                  <p class="research-row__text">在复核结论回写前，继续把这批新权重停留在研究域。</p>
+                </div>
+                <span class="status-pill status-pill--warning">挂起中</span>
+              </article>
+            </div>
+
+            <div class="mt-6 flex flex-wrap items-center gap-3">
+              <button class="action-btn action-btn--primary">
+                <i data-lucide="arrow-right" class="h-4 w-4"></i>
+                <span>进入评测与校准</span>
+              </button>
+              <button class="action-btn action-btn--secondary">
+                <span>查看最近变更</span>
+              </button>
+            </div>
+          </article>
+
+          <aside class="flex min-w-0 flex-col gap-4 xl:col-span-4">
+            <article class="surface-card">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="section-kicker" style="color:var(--apple-muted-foreground);">当前判断</p>
+                  <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先收紧研究动作，再恢复节奏</h3>
+                </div>
+                <span class="status-pill status-pill--warning">持续观察</span>
+              </div>
+              <p class="mt-3 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">主链路没有停，但研究域今天只保留会改变判断的动作。异常先收口，待处理随后清空，其他实验继续收敛。</p>
+            </article>
+
+            <article class="surface-card">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="section-kicker" style="color:var(--apple-muted-foreground);">支撑状态</p>
+                  <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">研究支撑状态一览</h3>
+                </div>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <article class="summary-card p-4">
+                  <p class="summary-card__label">数据集状态</p>
+                  <p class="summary-card__value">稳定在线</p>
+                  <p class="summary-card__meta">主池覆盖仍然完整</p>
+                </article>
+                <article class="summary-card p-4">
+                  <p class="summary-card__label">授权回流</p>
+                  <p class="summary-card__value">待处理</p>
+                  <p class="summary-card__meta">视频号续签未完成</p>
+                </article>
+                <article class="summary-card p-4">
+                  <p class="summary-card__label">模型环境</p>
+                  <p class="summary-card__value">受控放行</p>
+                  <p class="summary-card__meta">公网预算保持收紧</p>
+                </article>
+                <article class="summary-card p-4">
+                  <p class="summary-card__label">影子实验</p>
+                  <p class="summary-card__value">已关闭</p>
+                  <p class="summary-card__meta">不再新增试验请求</p>
+                </article>
+              </div>
+            </article>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="surface-card xl:col-span-7">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-kicker">待处理事项</p>
+                <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先处理会改变研究判断的项</h3>
+              </div>
+              <span class="status-pill">7 项</span>
+            </div>
+            <p class="mt-3 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">所有事项都用同一套动作语气呈现，先做会影响结论输出的项，再做补充性收口。</p>
+
+            <div class="mt-5 flex flex-col gap-3">
+              <article class="research-row research-row--focus">
+                <span class="research-row__icon"><i data-lucide="triangle-alert" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">复核娱乐类评测偏移样本</h4>
+                  <p class="research-row__text">先核对高分片段的转发价值标签，再决定是否调整当前负反馈权重。</p>
+                  <p class="research-row__note">负责人：嘉宁 · 目标：今天 18:00 前给出初步结论</p>
+                </div>
+                <span class="status-pill status-pill--danger">待处理</span>
+              </article>
+
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="plug-zap" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">续签视频号授权并恢复自动回流</h4>
+                  <p class="research-row__text">先把 07-16 之后的指标补齐，再恢复跨平台对比和授权健康判断。</p>
+                  <p class="research-row__note">负责人：平台组 · 当前仍依赖手工导入</p>
+                </div>
+                <span class="status-pill status-pill--danger">待处理</span>
+              </article>
+
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="folders" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">补齐访谈类负反馈样本</h4>
+                  <p class="research-row__text">先补 26 条“高完播但低分享”的片段，再回看是否需要单独拉开这类内容的排序阈值。</p>
+                  <p class="research-row__note">负责人：若涵 · 本周继续补齐</p>
+                </div>
+                <span class="status-pill status-pill--warning">持续观察</span>
+              </article>
+
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="moon-star" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">影子 Provider 试验保持关闭</h4>
+                  <p class="research-row__text">先不新增公网样本请求，把预算留给后续已确认的问题复核。</p>
+                  <p class="research-row__note">负责人：模型组 · 关闭后仅保留日志查看</p>
+                </div>
+                <span class="status-pill status-pill--disabled">已关闭</span>
+              </article>
+            </div>
+          </article>
+
+          <article class="surface-card xl:col-span-5">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-kicker">数据集状态</p>
+                <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先确认数据基础还能支撑判断</h3>
+              </div>
+              <span class="status-pill status-pill--success">稳定在线</span>
+            </div>
+            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <article class="summary-card p-4">
+                <p class="summary-card__label">人工标注主池</p>
+                <p class="summary-card__value">4,286</p>
+                <p class="summary-card__meta">覆盖 82.3%，近 7 天新增 128 条，当前状态稳定在线。</p>
+              </article>
+              <article class="summary-card summary-card--warning p-4">
+                <p class="summary-card__label">冻结评测集</p>
+                <p class="summary-card__value">待处理</p>
+                <p class="summary-card__meta">07-18 批次的校准误差抬升，先回到偏差样本复核。</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="summary-card__label">负反馈回流样本</p>
+                <p class="summary-card__value">63 条</p>
+                <p class="summary-card__meta">近 72 小时新增 63 条，8 条曝光上下文仍在持续观察。</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="summary-card__label">标注一致性</p>
+                <p class="summary-card__value">94%</p>
+                <p class="summary-card__meta">7 条分歧单待回看，先围绕“转发价值”维度复训。</p>
+              </article>
+            </div>
+          </article>
+        </section>
+
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="surface-card xl:col-span-6">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-kicker">授权回流</p>
+                <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先看平台连接是否拖慢研究结论</h3>
+              </div>
+              <span class="status-pill status-pill--warning">持续观察</span>
+            </div>
+            <div class="mt-5 flex flex-col gap-3">
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="badge-check" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">抖音授权与回流保持稳定</h4>
+                  <p class="research-row__text">近 24 小时入库 4,812 条指标记录，缺失率回落到 3.6%。</p>
+                </div>
+                <span class="status-pill status-pill--success">稳定在线</span>
+              </article>
+              <article class="research-row research-row--focus">
+                <span class="research-row__icon"><i data-lucide="key-round" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">视频号授权续签还没完成</h4>
+                  <p class="research-row__text">自动拉取停留在 07-16，跨平台对比仍然缺上下文，只能先手工导入兜底。</p>
+                </div>
+                <span class="status-pill status-pill--danger">待处理</span>
+              </article>
+              <article class="research-row">
+                <span class="research-row__icon"><i data-lucide="refresh-cw" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="research-row__title">字段完整性对账继续巡检</h4>
+                  <p class="research-row__text">今天继续核对分享率和关注转化的延迟回写，避免回测结论被迟到指标干扰。</p>
+                </div>
+                <span class="status-pill status-pill--warning">持续观察</span>
+              </article>
+            </div>
+          </article>
+
+          <article class="surface-card xl:col-span-6">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="section-kicker">模型环境</p>
+                <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先确认环境还能支撑当前收口动作</h3>
+              </div>
+              <span class="status-pill status-pill--primary">受控放行</span>
+            </div>
+            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <article class="summary-card p-4">
+                <p class="summary-card__label">本地推理环境</p>
+                <p class="summary-card__value">稳定在线</p>
+                <p class="summary-card__meta">Embedding 与 reranker 已加载，显存占用 11.2 / 16 GB。</p>
+              </article>
+              <article class="summary-card summary-card--strong p-4">
+                <p class="summary-card__label">公网 Provider</p>
+                <p class="summary-card__value">受控放行</p>
+                <p class="summary-card__meta">预算窗口保持收紧，只给已确认的高分歧样本留入口。</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="summary-card__label">缓存与降级</p>
+                <p class="summary-card__value">稳定在线</p>
+                <p class="summary-card__meta">缓存命中率 71%，公网不可用时仍能回退本地链路。</p>
+              </article>
+              <article class="summary-card summary-card--disabled p-4">
+                <p class="summary-card__label">影子实验</p>
+                <p class="summary-card__value">已关闭</p>
+                <p class="summary-card__meta">暂停新增试验请求，只保留已完成结果的对照查看。</p>
+              </article>
+            </div>
+          </article>
+        </section>
+
+        <section class="surface-card">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p class="section-kicker">最近变更</p>
+              <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">按时间回看会改变判断的变化</h3>
+            </div>
+            <span class="quick-chip">按时间倒序</span>
+          </div>
+          <div class="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <article class="research-row">
+              <span class="research-row__icon"><i data-lucide="activity" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <h4 class="research-row__title">抖音回流恢复稳定</h4>
+                <p class="research-row__text">过去 6 小时的曝光、观看和分享指标已正常回写，研究结论重新拿回平台侧证据。</p>
+                <p class="research-row__note">今天 09:42</p>
+              </div>
+              <span class="status-pill status-pill--success">稳定在线</span>
+            </article>
+            <article class="research-row research-row--focus">
+              <span class="research-row__icon"><i data-lucide="siren" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <h4 class="research-row__title">07-18 冻结评测批次转入待处理</h4>
+                <p class="research-row__text">娱乐类片段的人工通过率与预估分继续拉开，默认排序写入同步转入挂起。</p>
+                <p class="research-row__note">昨天 21:40</p>
+              </div>
+              <span class="status-pill status-pill--danger">待处理</span>
+            </article>
+            <article class="research-row">
+              <span class="research-row__icon"><i data-lucide="wallet-cards" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <h4 class="research-row__title">公网 Provider 继续收紧预算</h4>
+                <p class="research-row__text">高分歧样本仍保留入口，普通对照请求继续留在本地链路处理。</p>
+                <p class="research-row__note">07-18 19:30</p>
+              </div>
+              <span class="status-pill status-pill--primary">受控放行</span>
+            </article>
+            <article class="research-row">
+              <span class="research-row__icon"><i data-lucide="notebook-tabs" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <h4 class="research-row__title">访谈类补样本加入本周队列</h4>
+                <p class="research-row__text">这批样本先服务评测偏移复核，后续再决定是否扩到新的标注轮次。</p>
+                <p class="research-row__note">07-18 16:20</p>
+              </div>
+              <span class="status-pill status-pill--warning">持续观察</span>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <style>
+    .no-scrollbar::-webkit-scrollbar{display:none}
+    .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+    .quick-chip{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 12px;border:1px solid var(--apple-border);border-radius:999px;background:color-mix(in srgb,var(--apple-card) 78%,var(--apple-background) 22%);color:var(--apple-muted-foreground);font-size:12px;font-weight:500;white-space:nowrap}
+    .section-kicker{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--apple-primary)}
+    .stage-rail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;width:100%}
+    .stage-card{display:flex;min-width:0;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-card) 80%,var(--apple-background) 20%);box-shadow:var(--shadow-xs)}
+    .stage-card__index{display:inline-flex;height:28px;width:28px;flex-shrink:0;align-items:center;justify-content:center;border-radius:999px;border:1px solid var(--apple-border);background:var(--apple-background);font-size:11px;font-weight:600;color:var(--apple-muted-foreground)}
+    .stage-card__label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600;color:var(--apple-foreground)}
+    .stage-card__meta{display:block;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--apple-muted-foreground)}
+    .stage-card.is-active{border-color:color-mix(in srgb,var(--apple-primary) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-primary) 6%,var(--apple-card) 94%)}
+    .stage-card.is-active .stage-card__index{border-color:transparent;background:var(--apple-primary);color:var(--apple-primary-foreground)}
+    .surface-card{border:1px solid var(--apple-border);border-radius:var(--apple-radius-lg);padding:24px;background:var(--apple-card);box-shadow:var(--shadow-sm)}
+    .surface-card--focus{background:linear-gradient(180deg,color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%) 0%,var(--apple-card) 100%);border-color:color-mix(in srgb,var(--apple-primary) 16%,var(--apple-border) 84%)}
+    .summary-card{border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 76%,var(--apple-card) 24%)}
+    .summary-card--strong{border-color:color-mix(in srgb,var(--apple-primary) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-primary) 7%,var(--apple-card) 93%)}
+    .summary-card--warning{border-color:color-mix(in srgb,var(--apple-destructive) 14%,var(--apple-border) 86%);background:color-mix(in srgb,var(--apple-destructive) 6%,var(--apple-card) 94%)}
+    .summary-card--disabled{border-color:color-mix(in srgb,var(--apple-muted-foreground) 14%,var(--apple-border) 86%);background:color-mix(in srgb,var(--apple-muted) 56%,var(--apple-card) 44%)}
+    .summary-card__label{font-size:12px;color:var(--apple-muted-foreground)}
+    .summary-card__value{margin-top:10px;font-size:22px;font-weight:600;line-height:1.15;letter-spacing:-.03em;color:var(--apple-foreground)}
+    .summary-card__meta{margin-top:8px;font-size:13px;line-height:1.55;color:var(--apple-muted-foreground)}
+    .status-pill{display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;border:1px solid var(--apple-border);border-radius:999px;background:color-mix(in srgb,var(--apple-background) 74%,var(--apple-card) 26%);font-size:12px;color:var(--apple-muted-foreground);white-space:nowrap}
+    .status-pill--primary{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .status-pill--success{border-color:color-mix(in srgb,var(--apple-chart-1) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-chart-1) 10%,var(--apple-background) 90%);color:var(--apple-chart-1)}
+    .status-pill--warning{border-color:color-mix(in srgb,var(--apple-chart-3) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-chart-3) 12%,var(--apple-background) 88%);color:var(--apple-chart-3)}
+    .status-pill--danger{border-color:color-mix(in srgb,var(--apple-destructive) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-destructive) 10%,var(--apple-background) 90%);color:var(--apple-destructive)}
+    .status-pill--disabled{border-color:color-mix(in srgb,var(--apple-muted-foreground) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-muted) 58%,var(--apple-background) 42%);color:var(--apple-muted-foreground)}
+    .research-row{display:flex;align-items:flex-start;gap:12px;padding:16px;border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 76%,var(--apple-card) 24%)}
+    .research-row--focus{border-color:color-mix(in srgb,var(--apple-primary) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%)}
+    .research-row__icon{display:inline-flex;height:36px;width:36px;flex-shrink:0;align-items:center;justify-content:center;border:1px solid var(--apple-border);border-radius:calc(var(--apple-radius-md) - 2px);background:var(--apple-card);color:var(--apple-muted-foreground)}
+    .research-row--focus .research-row__icon{border-color:transparent;background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .research-row__title{font-size:16px;font-weight:600;color:var(--apple-foreground)}
+    .research-row__text{margin-top:4px;font-size:13px;line-height:1.6;color:var(--apple-muted-foreground)}
+    .research-row__note{margin-top:8px;font-size:12px;line-height:1.5;color:var(--apple-muted-foreground)}
+    .action-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px;border-radius:999px;font-size:14px;font-weight:600;white-space:nowrap}
+    .action-btn--primary{background:var(--apple-primary);color:var(--apple-primary-foreground);box-shadow:var(--shadow-sm)}
+    .action-btn--secondary{border:1px solid var(--apple-border);background:var(--apple-card);color:var(--apple-foreground)}
+    @media (max-width:1280px){
+      .stage-rail{grid-template-columns:repeat(5,minmax(210px,1fr));overflow-x:auto;padding-bottom:2px}
+    }
+    @media (max-width:768px){
+      .surface-card{padding:20px}
+    }
+  </style>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

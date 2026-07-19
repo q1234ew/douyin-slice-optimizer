@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>研究中心概览</title>
+  <style id="theme-vars">
+/*
+ * Pinguo design tokens
+ * Brand: Pinguo
+ * Domain: Consumer imaging product
+ * Style: Restrained, elegant, Apple-inspired
+ * Theme mode: light-dark
+ */
+:root{--apple-background:var(--background,#ffffff);--apple-foreground:var(--foreground,#0f172a);--apple-card:var(--card,var(--background));--apple-card-foreground:var(--card-foreground,var(--foreground));--apple-popover:var(--popover,var(--card));--apple-popover-foreground:var(--popover-foreground,var(--card-foreground,var(--foreground)));--apple-primary:var(--primary,#111827);--apple-primary-foreground:var(--primary-foreground,#ffffff);--apple-secondary:var(--secondary,var(--muted,var(--card)));--apple-secondary-foreground:var(--secondary-foreground,var(--foreground));--apple-muted:var(--muted,var(--card));--apple-muted-foreground:var(--muted-foreground,var(--foreground));--apple-accent:var(--accent,var(--secondary,var(--muted,var(--card))));--apple-accent-foreground:var(--accent-foreground,var(--foreground));--apple-destructive:var(--destructive,#ef4444);--apple-destructive-foreground:var(--destructive-foreground,#ffffff);--apple-border:var(--border,currentColor);--apple-input:var(--input,var(--border));--apple-ring:var(--ring,var(--primary));--apple-chart-1:var(--chart-1,var(--primary));--apple-chart-2:var(--chart-2,var(--secondary,var(--primary)));--apple-chart-3:var(--chart-3,var(--accent,var(--primary)));--apple-chart-4:var(--chart-4,var(--muted-foreground,var(--foreground)));--apple-chart-5:var(--chart-5,var(--foreground));--apple-sidebar:var(--sidebar,var(--background));--apple-sidebar-foreground:var(--sidebar-foreground,var(--foreground));--apple-sidebar-primary:var(--sidebar-primary,var(--primary));--apple-sidebar-primary-foreground:var(--sidebar-primary-foreground,var(--primary-foreground));--apple-sidebar-accent:var(--sidebar-accent,var(--accent,var(--muted,var(--card))));--apple-sidebar-accent-foreground:var(--sidebar-accent-foreground,var(--accent-foreground,var(--foreground)));--brand-50:#e8f2ff;--brand-100:#cfe5ff;--brand-200:#9fcbff;--brand-300:#66abff;--brand-400:#2e8dff;--brand-500:#007aff;--brand-600:#0064d6;--brand-700:#004fad;--brand-800:#003b82;--brand-900:#00275a;--background-50:#ffffff;--background-100:#f7f7fa;--background-200:#f2f2f7;--background-300:#e5e5ea;--background-400:#d1d1d6;--background-500:#aeaeb2;--background-600:#8e8e93;--background-700:#3a3a3c;--background-800:#1c1c1e;--background-900:#000000;--text-50:#f5f5f7;--text-100:#e3e3e8;--text-200:#c7c7cc;--text-300:#aeaeb2;--text-400:#8e8e93;--text-500:#6e6e73;--text-600:#48484a;--text-700:#3c3c43;--text-800:#1d1d1f;--text-900:#000000;--icon-50:#f5f5f7;--icon-100:#e5e5ea;--icon-200:#d1d1d6;--icon-300:#c7c7cc;--icon-400:#aeaeb2;--icon-500:#8e8e93;--icon-600:#6e6e73;--icon-700:#48484a;--icon-800:#2c2c2e;--icon-900:#1d1d1f;--state-success:#34c759;--state-success-dark:#30d158;--state-success-foreground:#ffffff;--state-error:#ff3b30;--state-error-dark:#ff453a;--state-error-foreground:#ffffff;--background:var(--background-50);--foreground:var(--text-800);--card:var(--background-50);--card-foreground:var(--text-800);--popover:var(--background-50);--popover-foreground:var(--text-900);--primary:var(--brand-500);--primary-foreground:var(--background-50);--secondary:var(--background-200);--secondary-foreground:var(--text-800);--muted:var(--background-200);--muted-foreground:var(--text-400);--accent:var(--background-100);--accent-foreground:var(--text-800);--destructive:var(--state-error);--destructive-foreground:var(--state-error-foreground);--success:var(--state-success);--success-foreground:var(--state-success-foreground);--border:var(--background-300);--input:var(--background-400);--ring:var(--brand-500);--icon:var(--icon-900);--icon-muted:var(--icon-500);--chart-1:var(--state-success);--chart-2:var(--brand-500);--chart-3:#ff9500;--chart-4:#5856d6;--chart-5:#af52de;--sidebar:var(--background-200);--sidebar-foreground:var(--text-800);--sidebar-primary:var(--brand-500);--sidebar-primary-foreground:var(--background-50);--sidebar-accent:var(--background-300);--sidebar-accent-foreground:var(--text-800);--sidebar-border:var(--background-300);--sidebar-ring:var(--brand-500);--font-sans:DM Sans,ui-sans-serif,sans-serif,system-ui;--font-serif:DM Sans,ui-sans-serif,sans-serif,system-ui;--font-mono:JetBrains Mono,monospace;--tracking-normal:0em;--radius:1.2rem;--apple-radius-sm:calc(var(--radius)*0.66);--apple-radius-md:calc(var(--radius)*0.86);--apple-radius-lg:var(--radius);--shadow-2xs:0 1px 2px -1px rgba(0,0,0,0.04);--shadow-xs:0 1px 2px 0 rgba(0,0,0,0.04);--shadow-sm:0 1px 2px 0 rgba(0,0,0,0.05),0 1px 3px -1px rgba(0,0,0,0.05);--shadow-md:0 4px 8px -2px rgba(0,0,0,0.06),0 2px 4px -2px rgba(0,0,0,0.05);}
+.dark{--background:var(--background-900);--foreground:var(--text-50);--card:var(--background-800);--card-foreground:var(--text-50);--popover:var(--background-700);--popover-foreground:var(--text-50);--primary:var(--brand-400);--primary-foreground:var(--background-900);--secondary:var(--background-800);--secondary-foreground:var(--text-50);--muted:var(--background-800);--muted-foreground:var(--text-400);--accent:var(--background-700);--accent-foreground:var(--text-50);--destructive:var(--state-error-dark);--destructive-foreground:var(--state-error-foreground);--success:var(--state-success-dark);--success-foreground:var(--state-success-foreground);--border:var(--background-700);--input:var(--background-700);--ring:var(--brand-400);--icon:var(--icon-50);--icon-muted:var(--icon-500);--chart-1:var(--state-success-dark);--chart-2:var(--brand-400);--chart-3:#ff9f0a;--chart-4:#5e5ce6;--chart-5:#bf5af2;--sidebar:var(--background-800);--sidebar-foreground:var(--text-50);--sidebar-primary:var(--brand-400);--sidebar-primary-foreground:var(--background-900);--sidebar-accent:var(--background-700);--sidebar-accent-foreground:var(--text-50);--sidebar-border:var(--background-700);--sidebar-ring:var(--brand-400);}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style type="text/tailwindcss">
+@theme inline{--color-background:var(--apple-background);--color-foreground:var(--apple-foreground);--color-card:var(--apple-card);--color-card-foreground:var(--apple-card-foreground);--color-popover:var(--apple-popover);--color-popover-foreground:var(--apple-popover-foreground);--color-primary:var(--apple-primary);--color-primary-foreground:var(--apple-primary-foreground);--color-secondary:var(--apple-secondary);--color-secondary-foreground:var(--apple-secondary-foreground);--color-muted:var(--apple-muted);--color-muted-foreground:var(--apple-muted-foreground);--color-accent:var(--apple-accent);--color-accent-foreground:var(--apple-accent-foreground);--color-destructive:var(--apple-destructive);--color-destructive-foreground:var(--apple-destructive-foreground);--color-border:var(--apple-border);--color-input:var(--apple-input);--color-ring:var(--apple-ring);--radius-sm:var(--apple-radius-sm);--radius-md:var(--apple-radius-md);--radius-lg:var(--apple-radius-lg);}
+@layer base{body{background:var(--apple-background);color:var(--apple-foreground);}td,th{@apply break-words;word-break:break-all;word-break:auto-phrase;}th{@apply whitespace-nowrap;}}
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background{background-color:var(--apple-background)} .text-foreground{color:var(--apple-foreground)} .bg-card{background-color:var(--apple-card)} .border-border{border-color:var(--apple-border)} .bg-primary{background-color:var(--apple-primary)} .text-primary{color:var(--apple-primary)} .bg-muted{background-color:var(--apple-muted)} .text-muted-foreground{color:var(--apple-muted-foreground)}
+  </style>
+</head>
+<body class="h-screen overflow-hidden antialiased" style="font-family:var(--font-sans);background:var(--apple-background);color:var(--apple-foreground);">
+  <div data-viewport-mode="app-shell" class="flex h-screen min-h-0 flex-col overflow-hidden" style="background:linear-gradient(180deg,color-mix(in srgb,var(--apple-background) 94%,var(--apple-card) 6%) 0%,var(--apple-background) 100%);">
+    <header class="w-full border-b" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 94%,var(--apple-card) 6%);box-shadow:var(--shadow-2xs);">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-4 py-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(420px,0.95fr)_auto] xl:items-center">
+          <div class="flex min-w-0 items-center gap-4">
+            <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border bg-card" style="border-color:var(--apple-border);box-shadow:var(--shadow-xs);color:var(--apple-foreground);">
+              <i data-lucide="flask-conical" class="h-5 w-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex min-w-0 items-center gap-2">
+                <p class="truncate text-[13px] font-medium" style="color:var(--apple-muted-foreground);">抖音剪辑工作台</p>
+              </div>
+              <div class="mt-1 flex min-w-0 flex-wrap items-end gap-2">
+                <h1 class="truncate text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">研究中心概览</h1>
+              </div>
+            </div>
+          </div>
+          <nav class="flex min-w-0 items-center justify-center rounded-full border p-1.5" aria-label="工作模式切换" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-card) 76%,var(--apple-background) 24%);box-shadow:var(--shadow-xs);">
+            <button class="flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium" style="color:var(--apple-muted-foreground);">
+              <i data-lucide="folder-kanban" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">剪辑工作台</span>
+            </button>
+            <button class="flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium" style="background:var(--apple-foreground);color:var(--apple-background);box-shadow:var(--shadow-sm);">
+              <i data-lucide="flask-conical" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">研究中心</span>
+            </button>
+            <button class="hidden min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[13px] font-medium 2xl:flex" style="color:var(--apple-muted-foreground);">
+              <i data-lucide="chart-column" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">结果回流</span>
+            </button>
+          </nav>
+          <div class="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+            <span class="inline-flex h-9 items-center justify-center whitespace-nowrap border px-4 text-[13px]" style="border-color:var(--apple-border);border-radius:999px;background:var(--apple-card);color:var(--apple-muted-foreground);">异常 4 · 待处理 11</span>
+            <span class="inline-flex h-9 items-center justify-center whitespace-nowrap border px-4 text-[13px]" style="border-color:var(--apple-border);border-radius:999px;background:var(--apple-card);color:var(--apple-muted-foreground);">最后同步 6 分钟前</span>
+          </div>
+        </div>
+        <section class="flex flex-col gap-4 border-t py-3" style="border-color:var(--apple-border);">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="flex min-w-0 items-center gap-3">
+              <span class="research-badge">研究工作台</span>
+              <p class="text-[12px]" style="color:var(--apple-muted-foreground);">围绕异常、待处理、状态与时间线连续推进</p>
+            </div>
+            <nav class="research-subnav overflow-x-auto no-scrollbar" aria-label="研究中心二级导航">
+              <a href="#" aria-current="page" class="research-tab is-active">概览</a>
+              <a href="#" class="research-tab">样本与标注</a>
+              <a href="#" class="research-tab">评测与校准</a>
+              <a href="#" class="research-tab">平台连接</a>
+              <a href="#" class="research-tab">模型与环境</a>
+            </nav>
+          </div>
+          <div class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <article class="summary-card summary-card--active p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-primary);">异常</p>
+                  <p class="mt-2 text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">4</p>
+                </div>
+                <span class="status-pill status-pill--danger">先处理</span>
+              </div>
+              <p class="mt-3 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">先收敛评测偏移，再恢复其余研究动作。</p>
+            </article>
+            <article class="summary-card p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-muted-foreground);">待处理</p>
+                  <p class="mt-2 text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">11</p>
+                </div>
+                <span class="status-pill">排队中</span>
+              </div>
+              <p class="mt-3 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">优先清空会阻塞结论输出的事项。</p>
+            </article>
+            <article class="summary-card p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-muted-foreground);">状态</p>
+                  <p class="mt-2 text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">3 / 4 在线</p>
+                </div>
+                <span class="status-pill status-pill--success">可继续</span>
+              </div>
+              <p class="mt-3 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">主链路稳定，授权与预算仍需持续盯防。</p>
+            </article>
+            <article class="summary-card p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-muted-foreground);">时间线</p>
+                  <p class="mt-2 text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">6 分钟前</p>
+                </div>
+                <span class="status-pill">持续刷新</span>
+              </div>
+              <p class="mt-3 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">关键变更已汇总到同一条研究记录流里。</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </header>
+    <main data-scroll-region="primary" class="min-h-0 overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-6 py-7 lg:px-8">
+        <section class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <article class="xl:col-span-8 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:linear-gradient(180deg,color-mix(in srgb,var(--apple-primary) 4%,var(--apple-card) 96%) 0%,var(--apple-card) 100%);box-shadow:var(--shadow-sm);">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-muted-foreground);">当前态</p>
+                <h2 class="mt-2 text-[clamp(32px,3vw,44px)] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);text-wrap:balance;word-break:keep-all;overflow-wrap:break-word;">研究中心当前态</h2>
+                <p class="mt-3 max-w-[760px] text-[15px] leading-7" style="color:var(--apple-muted-foreground);">研究链路整体可继续推进，但今天只围绕两类动作收口：先压住评测偏移，再把会拖慢结论输出的待处理清空。</p>
+              </div>
+              <span class="status-pill status-pill--warning">先收敛风险，再恢复节奏</span>
+            </div>
+            <div class="mt-6 grid gap-3 lg:grid-cols-2">
+              <article class="summary-card summary-card--active p-5">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-primary);">当前焦点</p>
+                    <p class="mt-2 text-[20px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">先复核 eval-2026-07-18 的校准偏移</p>
+                  </div>
+                  <span class="status-pill status-pill--danger">立即处理</span>
+                </div>
+                <p class="mt-3 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">先锁住默认排序写入，再回看误差最大的娱乐类样本与近两周新增标签。</p>
+              </article>
+              <article class="summary-card p-5">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color:var(--apple-muted-foreground);">今日节奏</p>
+                    <p class="mt-2 text-[20px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">不扩新实验，只推进会影响结论的事项</p>
+                  </div>
+                  <span class="status-pill">保持收口</span>
+                </div>
+                <p class="mt-3 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">授权续签、补样本和状态巡检并行推进，但不再制造新的分支任务。</p>
+              </article>
+            </div>
+            <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <article class="work-item work-item--active">
+                <span class="work-item__icon"><i data-lucide="triangle-alert" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color:var(--apple-foreground);">先做异常复核</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">抽取偏差最大的样本，确认问题是标签漂移还是分段预测过乐观。</p>
+                </div>
+                <span class="status-pill status-pill--danger">优先一</span>
+              </article>
+              <article class="work-item">
+                <span class="work-item__icon"><i data-lucide="list-todo" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color:var(--apple-foreground);">再清待处理</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">续签视频号授权、补齐访谈负反馈样本，让回测与平台对比回到完整状态。</p>
+                </div>
+                <span class="status-pill">优先二</span>
+              </article>
+            </div>
+          </article>
+          <aside class="flex min-w-0 flex-col gap-4 xl:col-span-4">
+            <article class="rounded-[var(--apple-radius-lg)] border p-5" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-[12px]" style="color:var(--apple-muted-foreground);">工作判断</p>
+                  <p class="mt-2 text-[20px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">异常优先，其次清空阻塞项</p>
+                </div>
+                <span class="status-pill status-pill--primary">研究当前态</span>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <div class="summary-card p-4">
+                  <p class="text-[11px]" style="color:var(--apple-muted-foreground);">待处理事项</p>
+                  <p class="mt-2 text-[28px] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);">11</p>
+                  <p class="mt-2 text-[12px] leading-5" style="color:var(--apple-muted-foreground);">其中 3 项直接影响评测结论。</p>
+                </div>
+                <div class="summary-card p-4">
+                  <p class="text-[11px]" style="color:var(--apple-muted-foreground);">近 7 天新增标注</p>
+                  <p class="mt-2 text-[28px] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);">128</p>
+                  <p class="mt-2 text-[12px] leading-5" style="color:var(--apple-muted-foreground);">娱乐与访谈类补齐速度更快。</p>
+                </div>
+                <div class="summary-card p-4">
+                  <p class="text-[11px]" style="color:var(--apple-muted-foreground);">冻结评测批次</p>
+                  <p class="mt-2 text-[28px] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);">6</p>
+                  <p class="mt-2 text-[12px] leading-5" style="color:var(--apple-muted-foreground);">最近两批误差连续抬升。</p>
+                </div>
+                <div class="summary-card p-4">
+                  <p class="text-[11px]" style="color:var(--apple-muted-foreground);">模型环境在线</p>
+                  <p class="mt-2 text-[28px] font-semibold tracking-[-0.04em]" style="color:var(--apple-foreground);">3 / 4</p>
+                  <p class="mt-2 text-[12px] leading-5" style="color:var(--apple-muted-foreground);">公网 Provider 预算关闭。</p>
+                </div>
+              </div>
+            </article>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="xl:col-span-8 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:linear-gradient(180deg,color-mix(in srgb,var(--apple-destructive) 6%,var(--apple-card) 94%) 0%,color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%) 100%);box-shadow:var(--shadow-sm);">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <span class="status-pill status-pill--danger">关键异常</span>
+                <h3 class="mt-4 text-[30px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);text-wrap:balance;word-break:keep-all;overflow-wrap:break-word;">校准偏移待处理</h3>
+                <p class="mt-3 max-w-[760px] text-[15px] leading-7" style="color:var(--apple-muted-foreground);">最近 3 个冻结评测批次里，娱乐类样本的人工通过率比排序预估低 11.6%。现在不再解释背景，而是直接回到动作：先抽偏差最大的样本复核，再核对负反馈权重，继续挂起该批新权重写入默认排序。</p>
+              </div>
+              <span class="status-pill status-pill--danger">建议今天 18:00 前完成初步复核</span>
+            </div>
+            <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div class="summary-card p-4">
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">影响评测集</p>
+                <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">2 批</p>
+              </div>
+              <div class="summary-card p-4">
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">首次发现</p>
+                <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">昨天 21:40</p>
+              </div>
+              <div class="summary-card p-4">
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">当前动作</p>
+                <p class="mt-2 whitespace-nowrap text-[22px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">挂起写权重</p>
+              </div>
+            </div>
+            <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <article class="work-item work-item--active">
+                <span class="work-item__icon"><i data-lucide="scan-search" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">先抽取 42 条误差最大样本</h4>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">确认问题落在标签漂移、样本窗口还是模型分段乐观。</p>
+                </div>
+                <span class="status-pill status-pill--danger">立即执行</span>
+              </article>
+              <article class="work-item">
+                <span class="work-item__icon"><i data-lucide="pause-circle" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">保持默认排序写入挂起</h4>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">在复核结论回写前，不放开这批新权重进入主链路。</p>
+                </div>
+                <span class="status-pill">挂起中</span>
+              </article>
+            </div>
+          </article>
+          <aside class="xl:col-span-4 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">待处理事项</p>
+                <h3 class="mt-2 text-[24px] font-semibold tracking-[-0.03em]" style="color:var(--apple-foreground);">按主次推进</h3>
+              </div>
+              <span class="status-pill">11 项待处理</span>
+            </div>
+            <p class="mt-3 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">所有事项都用同一套动作语气呈现，先做会直接改变研究判断的项。</p>
+            <div class="mt-5 flex flex-col gap-3">
+              <article class="work-item work-item--active">
+                <span class="work-item__icon"><i data-lucide="scan-search" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">复核娱乐类评测偏移样本</h4>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">抽取 42 条误差最大的片段，确认标签是否被“热闹但不转化”的镜头误导。</p>
+                  <p class="mt-2 text-[12px]" style="color:var(--apple-muted-foreground);">负责人：嘉宁</p>
+                </div>
+                <span class="status-pill status-pill--danger">最高优先级</span>
+              </article>
+              <article class="work-item">
+                <span class="work-item__icon"><i data-lucide="plug-zap" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">续签视频号授权并恢复回流</h4>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">自动拉取停留在 07-16，只能依赖手工导入，跨平台对比暂时不完整。</p>
+                  <p class="mt-2 text-[12px]" style="color:var(--apple-muted-foreground);">负责人：平台组</p>
+                </div>
+                <span class="status-pill status-pill--warning">等待续签</span>
+              </article>
+              <article class="work-item">
+                <span class="work-item__icon"><i data-lucide="folders" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">补齐访谈类负反馈样本</h4>
+                  <p class="mt-1 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">需补充 26 条“高完播但低分享”的访谈片段，避免排序对单一互动信号过拟合。</p>
+                  <p class="mt-2 text-[12px]" style="color:var(--apple-muted-foreground);">负责人：若涵</p>
+                </div>
+                <span class="status-pill">待补样本</span>
+              </article>
+            </div>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="xl:col-span-8 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">状态</p>
+                <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.025em]" style="color:var(--apple-foreground);">数据集状态</h3>
+                <p class="mt-2 text-[14px] leading-7" style="color:var(--apple-muted-foreground);">围绕样本沉淀、标注覆盖与冻结评测集的最新健康状态，确保研究链路可以持续复现。</p>
+              </div>
+              <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-full border px-3 text-[12px]" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 72%,var(--apple-card) 28%);color:var(--apple-muted-foreground);">最近更新 16 分钟前</span>
+            </div>
+            <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[17px] font-medium" style="color:var(--apple-foreground);">人工标注主池</h4>
+              <span class="status-pill status-pill--success">稳定</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">总样本 4,286，有效覆盖 82.3%，近 7 天新增 128 条，待复审 19 条。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[17px] font-medium" style="color:var(--apple-foreground);">冻结评测集</h4>
+                  <span class="status-pill status-pill--danger">需复核</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">最新批次 07-18，校准误差 0.118，严重错判率 3.4%，娱乐类偏移待处理。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[17px] font-medium" style="color:var(--apple-foreground);">负反馈回流样本</h4>
+                  <span class="status-pill">巡检中</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">近 72 小时新增 63 条，已结构化 55 条，仍有 8 条曝光上下文待补齐。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[17px] font-medium" style="color:var(--apple-foreground);">标注规范执行</h4>
+                  <span class="status-pill">复训 2 人</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">抽查通过率 94%，分歧工单 7 条，2 位标注员需要围绕“转发价值”维度复训。</p>
+              </div>
+            </div>
+          </article>
+          <aside class="xl:col-span-4 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">状态</p>
+                <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.025em]" style="color:var(--apple-foreground);">授权回流</h3>
+              </div>
+              <span class="status-pill">平台连接</span>
+            </div>
+            <p class="mt-2 text-[14px] leading-7" style="color:var(--apple-muted-foreground);">聚焦平台授权与回流健康度，快速定位研究中心的数据缺口。</p>
+            <div class="mt-5 flex flex-col gap-3">
+              <div class="rounded-[var(--apple-radius-md)] border p-4" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">抖音授权已连接</h4>
+                  <span class="status-pill status-pill--success">正常</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">近 24 小时入库 4,812 条指标记录，缺失率 3.6%。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-4" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">视频号授权待续签</h4>
+                  <span class="status-pill status-pill--warning">中断</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">自动拉取停留在 07-16，只能使用手工导入兜底，跨平台对比暂时不完整。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-4" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">授权回流校验</h4>
+                  <span class="status-pill">巡检中</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">今日 12:30 继续执行字段完整性对账，重点核对分享率与关注转化延迟回写。</p>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <article class="xl:col-span-8 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">状态</p>
+                <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.025em]" style="color:var(--apple-foreground);">模型环境</h3>
+                <p class="mt-2 text-[14px] leading-7" style="color:var(--apple-muted-foreground);">展示本地与公网模型环境的可用性、预算与降级情况，支持快速判断研究是否能继续运行。</p>
+              </div>
+              <span class="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-full border px-3 text-[12px]" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 72%,var(--apple-card) 28%);color:var(--apple-muted-foreground);">3 / 4 在线</span>
+            </div>
+            <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">本地推理环境</h4>
+                  <span class="status-pill status-pill--success">正常</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">GPU 已加载 embedding 与 reranker，显存占用 11.2 / 16 GB，当前延迟稳定。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">Qwen Provider 预算关闭</h4>
+                  <span class="status-pill status-pill--warning">已回退</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">高分歧样本全部回退本地模型，等待预算窗口重新确认。</p>
+              </div>
+              <div class="rounded-[var(--apple-radius-md)] border p-5" style="border-color:var(--apple-border);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%);">
+                <div class="flex items-center justify-between gap-3">
+                  <h4 class="text-[16px] font-medium" style="color:var(--apple-foreground);">缓存与降级链路</h4>
+                  <span class="status-pill">命中率 71%</span>
+                </div>
+                <p class="mt-2 text-[14px] leading-6" style="color:var(--apple-muted-foreground);">公网能力不可用时仍可保持基础召回和解释输出，避免主流程中断。</p>
+              </div>
+            </div>
+          </article>
+          <aside class="xl:col-span-4 rounded-[var(--apple-radius-lg)] border p-6" style="border-color:var(--apple-border);background:var(--apple-card);box-shadow:var(--shadow-sm);">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12px]" style="color:var(--apple-muted-foreground);">时间线</p>
+                <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.025em]" style="color:var(--apple-foreground);">最近变更</h3>
+              </div>
+              <span class="status-pill">按时间倒序</span>
+            </div>
+            <p class="mt-2 text-[14px] leading-7" style="color:var(--apple-muted-foreground);">记录近两天影响研究中心判断的关键变化，帮助快速理解状态变动来源。</p>
+            <div class="mt-5 flex flex-col gap-3">
+              <div class="record-item">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <h4 class="text-[15px] font-medium" style="color:var(--apple-foreground);">抖音授权已连接，回流链路恢复稳定</h4>
+                    <p class="mt-2 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">过去 6 小时新增曝光、观看和分享指标已正常入库，缺失率降到 3.6%。</p>
+                  </div>
+                  <span class="status-pill status-pill--success">今天 09:42</span>
+                </div>
+              </div>
+              <div class="record-item">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <h4 class="text-[15px] font-medium" style="color:var(--apple-foreground);">eval-2026-07-18 发现校准偏移</h4>
+                    <p class="mt-2 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">娱乐类片段人工通过率与预估分差异扩大，系统自动挂起新权重进入默认排序。</p>
+                  </div>
+                  <span class="status-pill status-pill--danger">昨天 21:40</span>
+                </div>
+              </div>
+              <div class="record-item">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <h4 class="text-[15px] font-medium" style="color:var(--apple-foreground);">Qwen Provider 预算关闭</h4>
+                    <p class="mt-2 text-[13px] leading-6" style="color:var(--apple-muted-foreground);">公网模型影子实验暂停新增请求，未完成任务已回退本地推理链路。</p>
+                  </div>
+                  <span class="status-pill">07-18 19:30</span>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+      </div>
+    </main>
+  </div>
+  <style>
+    .no-scrollbar::-webkit-scrollbar{display:none}
+    .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+    .research-badge{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 12px;border:1px solid var(--apple-border);border-radius:999px;background:color-mix(in srgb,var(--apple-card) 72%,var(--apple-background) 28%);color:var(--apple-muted-foreground);font-size:12px;font-weight:500}
+    .research-subnav{display:flex;min-width:0;align-items:center;gap:8px;flex-wrap:wrap}
+    .research-tab{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--apple-border);border-radius:14px;background:color-mix(in srgb,var(--apple-card) 80%,var(--apple-background) 20%);color:var(--apple-muted-foreground);font-size:13px;font-weight:500;white-space:nowrap}
+    .research-tab.is-active{border-color:color-mix(in srgb,var(--apple-primary) 24%,var(--apple-border) 76%);background:color-mix(in srgb,var(--apple-primary) 8%,var(--apple-background) 92%);color:var(--apple-primary)}
+    .summary-card{border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 76%,var(--apple-card) 24%)}
+    .summary-card--active{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%)}
+    .status-pill{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;height:28px;padding:0 12px;border-radius:999px;border:1px solid var(--apple-border);font-size:12px;color:var(--apple-muted-foreground);background:color-mix(in srgb,var(--apple-background) 74%,var(--apple-card) 26%)}
+    .status-pill--primary{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .status-pill--danger{border-color:color-mix(in srgb,var(--apple-destructive) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-destructive) 10%,var(--apple-background) 90%);color:var(--apple-destructive)}
+    .status-pill--warning{border-color:color-mix(in srgb,var(--apple-chart-3) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-chart-3) 12%,var(--apple-background) 88%);color:var(--apple-chart-3)}
+    .status-pill--success{border-color:color-mix(in srgb,var(--success) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--success) 10%,var(--apple-background) 90%);color:var(--success)}
+    .work-item{display:flex;align-items:flex-start;gap:12px;padding:15px 16px;border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 76%,var(--apple-card) 24%)}
+    .work-item--active{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%)}
+    .work-item__icon{display:inline-flex;height:36px;width:36px;flex-shrink:0;align-items:center;justify-content:center;border-radius:calc(var(--apple-radius-md) - 2px);border:1px solid var(--apple-border);background:var(--apple-card);color:var(--apple-muted-foreground)}
+    .work-item--active .work-item__icon{border-color:transparent;background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .record-item{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%)}
+  </style>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

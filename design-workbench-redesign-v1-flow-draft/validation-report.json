@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "skillProvenance": {
+    "name": "solo-design",
+    "version": "2026.07.06.8",
+    "version_source": "skill-version.json",
+    "runtime_skill_dir": "/Users/fuqiang/.trae/builtin/design/default/skills/solo-design",
+    "recorded_at": "2026-07-18T20:19:30Z",
+    "read_status": "ok"
+  },
+  "operatingMode": "library-bound",
+  "renderBlockingErrorCount": 0,
+  "softWarningCount": 2,
+  "renderBlockingErrors": [],
+  "softWarnings": [
+    "[library-bound-css] research-center-overview.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .quick-chip, .section-kicker, .stage-rail, .stage-card, .stage-card__index, .stage-card__label, .stage-card__meta). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-evaluation.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.mode-switch, .mode-switch__item, .is-active, .research-badge, .research-subnav, .research-tab, .status-pill, .section-block). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead."
+  ],
+  "repairPlanHints": [],
+  "errorCount": 0,
+  "warningCount": 2,
+  "errors": [],
+  "warnings": [
+    "[library-bound-css] research-center-overview.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .quick-chip, .section-kicker, .stage-rail, .stage-card, .stage-card__index, .stage-card__label, .stage-card__meta). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-evaluation.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.mode-switch, .mode-switch__item, .is-active, .research-badge, .research-subnav, .research-tab, .status-pill, .section-block). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead."
+  ],
+  "designDir": "/Users/fuqiang/Dev/douyin-slice-optimizer/design-workbench-redesign-v1-flow-draft",
+  "expectedPages": 6,
+  "requireInteractions": null,
+  "checkedAt": "2026-07-19T10:16:56.870Z"
+}

@@ -1,0 +1,354 @@
+{
+  "skillProvenance": {
+    "name": "solo-design",
+    "version": "2026.07.06.8",
+    "version_source": "skill-version.json",
+    "runtime_skill_dir": "/Users/fuqiang/.trae/builtin/design/default/skills/solo-design",
+    "recorded_at": "2026-07-18T20:19:30Z"
+  },
+  "project": {
+    "name": "工作台重构第一版",
+    "path": "/Users/fuqiang/Dev/douyin-slice-optimizer/design-workbench-redesign-v1",
+    "operation": "redesign",
+    "deviceType": "desktop",
+    "language": "zh-CN",
+    "dashboardMode": true,
+    "intentProfile": {
+      "caseFamily": "library_bound",
+      "graphicStrategy": null,
+      "sourceType": null,
+      "routingReason": "基于功能逻辑、业务流程、状态系统和组件替换清单，重构整套设计稿第一版。"
+    },
+    "replicationMode": null,
+    "sourceUrl": null,
+    "contextReadBudget": {
+      "workflowFileReadLimit": 1,
+      "largeWorkflowFilesCachedInSummary": [
+        "workflows/redesign-ui.md"
+      ],
+      "restoreInputsCached": [],
+      "subAgentReadsFullSummary": false
+    },
+    "readBudgetLedger": [
+      {
+        "file": "workflows/redesign-ui.md",
+        "readCount": 1,
+        "limit": 1,
+        "reason": "project-wide redesign route",
+        "exceeded": false
+      }
+    ],
+    "dispatchPreflightManifest": [],
+    "cssPreflightEvidence": {
+      "applies": false,
+      "status": "not-needed",
+      "command": null,
+      "brandPrefix": "apple",
+      "checks": {
+        "themeVars": "not-needed",
+        "semanticTokenFallback": "not-needed",
+        "themeInline": "not-needed",
+        "tailwindCdn": "not-needed",
+        "htmlClass": "not-needed"
+      },
+      "retryCount": 0,
+      "blockingReason": null
+    },
+    "repairEntryEvidence": [],
+    "finishReadinessEvidence": null,
+    "referenceCaptureEvidence": null,
+    "visualSpecExcerpt": null,
+    "restoreVisualCheckpoints": null,
+    "restorationContractLite": null,
+    "restoreEvidenceReview": null,
+    "styleDefinitionBrief": null,
+    "designRead": "桌面端短视频工作台重构第一版，基于业务流程和状态系统重新组织整套主界面。",
+    "designDials": {
+      "layoutVariance": 3,
+      "motionIntensity": 1,
+      "visualDensity": 4
+    },
+    "styleContinuityAnchors": null,
+    "sharedProjectShellContract": {
+      "navigationShell": "顶部双层导航，第一层区分工作模式，第二层区分当前阶段或研究子域，强调框架感与当前位置识别。",
+      "primaryColorSystem": "中性色为主，苹果蓝仅用于主焦点、当前态与单一主 CTA。",
+      "typographySystem": "标题短、说明少、正文可读性优先，避免解释型大段文案。",
+      "radiusScale": "统一柔和圆角，减少重卡片感。",
+      "surfaceDepthModel": "依赖边框、弱阴影与浅层表面区分层级，不使用复杂渐变。",
+      "ctaStyle": "同一屏只保留一个强主按钮，其余动作保持安静与次级。",
+      "alignmentRules": "围绕当前对象、当前判断、下一步动作组织信息，左到右层级稳定。"
+    },
+    "generationTree": null
+  },
+  "designSource": {
+    "operatingMode": "library-bound",
+    "libraryIdentity": {
+      "name": "苹果",
+      "id": "dl_builtin_apple",
+      "version": "1",
+      "scope": "built-in-global",
+      "path": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple",
+      "versionSource": "selected-context"
+    },
+    "libraryPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple",
+    "cssFilePath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/colors_and_type.css",
+    "brandPrefix": "apple",
+    "themeMode": "light",
+    "designDecisionSummary": "以功能逻辑、状态系统和组件语言为基础，重构剪辑工作台与研究中心两条主链路的整套设计稿。",
+    "componentContractKind": "legacy-json",
+    "forbiddenInventedComponents": [
+      "layout",
+      "space"
+    ],
+    "allowedComponents": [
+      "button",
+      "card",
+      "comparison-table",
+      "input",
+      "navigation",
+      "product-grid"
+    ],
+    "styleConstraints": {
+      "radiusMax": 20,
+      "spacingBase": 4,
+      "fontSizeBody": 14,
+      "fontSizeMin": 11,
+      "controlHeightDefault": 40,
+      "controlHeightLarge": 48
+    },
+    "productContext": {
+      "kitType": "apple-inspired-ui-library",
+      "productType": "短视频剪辑与研究工作台"
+    },
+    "actualTokenNameReference": [
+      {
+        "semanticPurpose": "页面背景",
+        "tokenName": "apple-background"
+      },
+      {
+        "semanticPurpose": "主文本",
+        "tokenName": "apple-foreground"
+      },
+      {
+        "semanticPurpose": "主按钮与焦点色",
+        "tokenName": "apple-primary"
+      },
+      {
+        "semanticPurpose": "卡片表面",
+        "tokenName": "apple-card"
+      },
+      {
+        "semanticPurpose": "边框",
+        "tokenName": "apple-border"
+      },
+      {
+        "semanticPurpose": "次级文本",
+        "tokenName": "apple-muted-foreground"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "nodeId": "page-materials-program",
+      "slug": "materials-program",
+      "title": "素材与节目页",
+      "htmlSrc": "pages/materials-program.html",
+      "pageIndex": 1,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "剪辑工作台入口页，承接节目选择、风险判断和下一步动作。",
+      "visualNorthStar": "先看当前对象、风险结论与下一步动作。",
+      "compositionPattern": "task-driven workbench",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "单一主 CTA",
+        "统一状态标签"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "入口信息过多",
+        "列表层级混乱"
+      ]
+    },
+    {
+      "nodeId": "page-candidate-review",
+      "slug": "candidate-review",
+      "title": "候选审核页",
+      "htmlSrc": "pages/candidate-review.html",
+      "pageIndex": 2,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "候选判断中心，承接通过、修整、观察和进入发布准备。",
+      "visualNorthStar": "先结论，后证据。",
+      "compositionPattern": "review board",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "单一主 CTA",
+        "统一状态标签"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button",
+        "comparison-table"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "信息过载",
+        "决策动作不聚焦"
+      ]
+    },
+    {
+      "nodeId": "page-publish-prep",
+      "slug": "publish-prep",
+      "title": "发布准备页",
+      "htmlSrc": "pages/publish-prep.html",
+      "pageIndex": 3,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "审核通过后的包装、校验和导出工作台。",
+      "visualNorthStar": "把可发布变成可交付。",
+      "compositionPattern": "publish workstation",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "单一主 CTA",
+        "统一状态标签"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "导出前检查不成体系",
+        "预览与包装关系松散"
+      ]
+    },
+    {
+      "nodeId": "page-research-center-overview",
+      "slug": "research-center-overview",
+      "title": "研究中心页",
+      "htmlSrc": "pages/research-center-overview.html",
+      "pageIndex": 4,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "研究域总览页，承接异常、待处理、状态和时间线。",
+      "visualNorthStar": "研究中心是总控页，不是空白 tab 容器。",
+      "compositionPattern": "research operations dashboard",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "统一研究标签",
+        "摘要卡与记录行"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "异常优先级不明确",
+        "研究项碎片化"
+      ]
+    },
+    {
+      "nodeId": "page-research-evaluation",
+      "slug": "research-evaluation",
+      "title": "评测与校准页",
+      "htmlSrc": "pages/research-evaluation.html",
+      "pageIndex": 5,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "评测、校准、回测与结论建议工作台。",
+      "visualNorthStar": "把指标组织成判断，而不是报表。",
+      "compositionPattern": "evaluation workbench",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "统一研究标签",
+        "摘要卡与记录行"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "指标多于结论",
+        "校准信息难以快速理解"
+      ]
+    },
+    {
+      "nodeId": "page-research-connections",
+      "slug": "research-connections",
+      "title": "平台连接与模型页",
+      "htmlSrc": "pages/research-connections.html",
+      "pageIndex": 6,
+      "pageType": "task-driven",
+      "viewportMode": "app-shell",
+      "businessScenario": "平台授权、Provider、预算、环境和回流状态工作台。",
+      "visualNorthStar": "像运维与连接控制台，而不是设置页。",
+      "compositionPattern": "ops console",
+      "continuityAnchors": [
+        "双层导航",
+        "低噪音表面",
+        "统一研究标签",
+        "摘要卡与记录行"
+      ],
+      "libraryRestraintMode": true,
+      "uiKitPath": "/Users/fuqiang/.trae/design_libraries/dl_builtin_apple/ui_kits/website/index.html",
+      "componentPlan": [
+        "navigation",
+        "card",
+        "input",
+        "button"
+      ],
+      "imagePlan": [],
+      "chartsRequired": false,
+      "miniProgramStyle": false,
+      "qualityRisks": [
+        "连接与环境状态过散",
+        "Provider 信息不成体系"
+      ]
+    }
+  ],
+  "assets": [],
+  "wiringPlan": [],
+  "hiddenInteractionPlan": []
+}

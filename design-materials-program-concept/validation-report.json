@@ -10,16 +10,24 @@
   },
   "operatingMode": "library-bound",
   "renderBlockingErrorCount": 0,
-  "softWarningCount": 0,
+  "softWarningCount": 3,
   "renderBlockingErrors": [],
-  "softWarnings": [],
+  "softWarnings": [
+    "[library-bound-css] materials-program-nav-refined.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.status-pill, .is-primary, .is-neutral, .is-success, .is-warning, .toolbar-shell, .toolbar-chip, .is-active). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-center-overview.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .research-badge, .research-subnav, .research-tab, .is-active, .summary-card, .summary-card--active, .status-pill). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-evaluation.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .research-badge, .research-subnav, .research-tab, .is-active, .summary-card, .summary-card--active, .status-pill). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead."
+  ],
   "repairPlanHints": [],
   "errorCount": 0,
-  "warningCount": 0,
+  "warningCount": 3,
   "errors": [],
-  "warnings": [],
+  "warnings": [
+    "[library-bound-css] materials-program-nav-refined.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.status-pill, .is-primary, .is-neutral, .is-success, .is-warning, .toolbar-shell, .toolbar-chip, .is-active). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-center-overview.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .research-badge, .research-subnav, .research-tab, .is-active, .summary-card, .summary-card--active, .status-pill). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead.",
+    "[library-bound-css] research-evaluation.html: Library-bound mode discourages custom CSS class definitions in <style> blocks (.no-scrollbar, .research-badge, .research-subnav, .research-tab, .is-active, .summary-card, .summary-card--active, .status-pill). Prefer Tailwind utilities plus Library brand CSS variables/component JSON instead."
+  ],
   "designDir": "/Users/fuqiang/Dev/douyin-slice-optimizer/design-materials-program-concept",
-  "expectedPages": 1,
+  "expectedPages": 8,
   "requireInteractions": null,
-  "checkedAt": "2026-07-18T12:09:56.682Z"
+  "checkedAt": "2026-07-18T20:05:28.455Z"
 }

@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>评测与校准页</title>
+  <style id="theme-vars">
+/*
+ * Pinguo design tokens
+ * Brand: Pinguo
+ * Domain: Consumer imaging product
+ * Style: Restrained, elegant, Apple-inspired
+ * Theme mode: light-dark
+ * Source language: zh
+ * Output language: en
+ */
+/* @group-priority: brand, background, text, icon, state-success, state-error */
+:root {
+  --apple-background: var(--background, #ffffff);
+  --apple-foreground: var(--foreground, #0f172a);
+  --apple-card: var(--card, var(--background));
+  --apple-card-foreground: var(--card-foreground, var(--foreground));
+  --apple-popover: var(--popover, var(--card));
+  --apple-popover-foreground: var(--popover-foreground, var(--card-foreground, var(--foreground)));
+  --apple-primary: var(--primary, #111827);
+  --apple-primary-foreground: var(--primary-foreground, #ffffff);
+  --apple-secondary: var(--secondary, var(--muted, var(--card)));
+  --apple-secondary-foreground: var(--secondary-foreground, var(--foreground));
+  --apple-muted: var(--muted, var(--card));
+  --apple-muted-foreground: var(--muted-foreground, var(--foreground));
+  --apple-accent: var(--accent, var(--secondary, var(--muted, var(--card))));
+  --apple-accent-foreground: var(--accent-foreground, var(--foreground));
+  --apple-destructive: var(--destructive, #ef4444);
+  --apple-destructive-foreground: var(--destructive-foreground, #ffffff);
+  --apple-border: var(--border, currentColor);
+  --apple-input: var(--input, var(--border));
+  --apple-ring: var(--ring, var(--primary));
+  --apple-chart-1: var(--chart-1, var(--primary));
+  --apple-chart-2: var(--chart-2, var(--secondary, var(--primary)));
+  --apple-chart-3: var(--chart-3, var(--accent, var(--primary)));
+  --apple-chart-4: var(--chart-4, var(--muted-foreground, var(--foreground)));
+  --apple-chart-5: var(--chart-5, var(--foreground));
+  --apple-sidebar: var(--sidebar, var(--background));
+  --apple-sidebar-foreground: var(--sidebar-foreground, var(--foreground));
+  --apple-sidebar-primary: var(--sidebar-primary, var(--primary));
+  --apple-sidebar-primary-foreground: var(--sidebar-primary-foreground, var(--primary-foreground));
+  --apple-sidebar-accent: var(--sidebar-accent, var(--accent, var(--muted, var(--card))));
+  --apple-sidebar-accent-foreground: var(--sidebar-accent-foreground, var(--accent-foreground, var(--foreground)));
+  --brand-50: #e8f2ff;
+  --brand-100: #cfe5ff;
+  --brand-200: #9fcbff;
+  --brand-300: #66abff;
+  --brand-400: #2e8dff;
+  --brand-500: #007aff;
+  --brand-600: #0064d6;
+  --brand-700: #004fad;
+  --brand-800: #003b82;
+  --brand-900: #00275a;
+  --background-50: #ffffff;
+  --background-100: #f7f7fa;
+  --background-200: #f2f2f7;
+  --background-300: #e5e5ea;
+  --background-400: #d1d1d6;
+  --background-500: #aeaeb2;
+  --background-600: #8e8e93;
+  --background-700: #3a3a3c;
+  --background-800: #1c1c1e;
+  --background-900: #000000;
+  --text-50: #f5f5f7;
+  --text-100: #e3e3e8;
+  --text-200: #c7c7cc;
+  --text-300: #aeaeb2;
+  --text-400: #8e8e93;
+  --text-500: #6e6e73;
+  --text-600: #48484a;
+  --text-700: #3c3c43;
+  --text-800: #1d1d1f;
+  --text-900: #000000;
+  --icon-50: #f5f5f7;
+  --icon-100: #e5e5ea;
+  --icon-200: #d1d1d6;
+  --icon-300: #c7c7cc;
+  --icon-400: #aeaeb2;
+  --icon-500: #8e8e93;
+  --icon-600: #6e6e73;
+  --icon-700: #48484a;
+  --icon-800: #2c2c2e;
+  --icon-900: #1d1d1f;
+  --state-success: #34c759;
+  --state-success-dark: #30d158;
+  --state-success-foreground: #ffffff;
+  --state-error: #ff3b30;
+  --state-error-dark: #ff453a;
+  --state-error-foreground: #ffffff;
+  --background: var(--background-50);
+  --foreground: var(--text-800);
+  --card: var(--background-50);
+  --card-foreground: var(--text-800);
+  --popover: var(--background-50);
+  --popover-foreground: var(--text-900);
+  --primary: var(--brand-500);
+  --primary-foreground: var(--background-50);
+  --secondary: var(--background-200);
+  --secondary-foreground: var(--text-800);
+  --muted: var(--background-200);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-100);
+  --accent-foreground: var(--text-800);
+  --destructive: var(--state-error);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-300);
+  --input: var(--background-400);
+  --ring: var(--brand-500);
+  --icon: var(--icon-900);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success);
+  --chart-2: var(--brand-500);
+  --chart-3: #ff9500;
+  --chart-4: #5856d6;
+  --chart-5: #af52de;
+  --sidebar: var(--background-200);
+  --sidebar-foreground: var(--text-800);
+  --sidebar-primary: var(--brand-500);
+  --sidebar-primary-foreground: var(--background-50);
+  --sidebar-accent: var(--background-300);
+  --sidebar-accent-foreground: var(--text-800);
+  --sidebar-border: var(--background-300);
+  --sidebar-ring: var(--brand-500);
+  --font-sans: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-serif: DM Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-mono: JetBrains Mono, monospace;
+  --tracking-normal: 0em;
+  --radius: 1.2rem;
+  --apple-radius-sm: calc(var(--radius) * 0.66);
+  --apple-radius-md: calc(var(--radius) * 0.86);
+  --apple-radius-lg: var(--radius);
+  --shadow-2xs: 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 1px 3px -1px rgba(0, 0, 0, 0.05);
+  --shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px -8px rgba(0, 0, 0, 0.08), 0 4px 8px -4px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 16px 40px -10px rgba(0, 0, 0, 0.10), 0 8px 16px -8px rgba(0, 0, 0, 0.06);
+  --shadow-2xl: 0 24px 64px -12px rgba(0, 0, 0, 0.12);
+}
+.dark {
+  --background: var(--background-900);
+  --foreground: var(--text-50);
+  --card: var(--background-800);
+  --card-foreground: var(--text-50);
+  --popover: var(--background-700);
+  --popover-foreground: var(--text-50);
+  --primary: var(--brand-400);
+  --primary-foreground: var(--background-900);
+  --secondary: var(--background-800);
+  --secondary-foreground: var(--text-50);
+  --muted: var(--background-800);
+  --muted-foreground: var(--text-400);
+  --accent: var(--background-700);
+  --accent-foreground: var(--text-50);
+  --destructive: var(--state-error-dark);
+  --destructive-foreground: var(--state-error-foreground);
+  --success: var(--state-success-dark);
+  --success-foreground: var(--state-success-foreground);
+  --border: var(--background-700);
+  --input: var(--background-700);
+  --ring: var(--brand-400);
+  --icon: var(--icon-50);
+  --icon-muted: var(--icon-500);
+  --chart-1: var(--state-success-dark);
+  --chart-2: var(--brand-400);
+  --chart-3: #ff9f0a;
+  --chart-4: #5e5ce6;
+  --chart-5: #bf5af2;
+  --sidebar: var(--background-800);
+  --sidebar-foreground: var(--text-50);
+  --sidebar-primary: var(--brand-400);
+  --sidebar-primary-foreground: var(--background-900);
+  --sidebar-accent: var(--background-700);
+  --sidebar-accent-foreground: var(--text-50);
+  --sidebar-border: var(--background-700);
+  --sidebar-ring: var(--brand-400);
+}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+  <style type="text/tailwindcss">
+@theme inline {
+  --color-background: var(--apple-background);
+  --color-foreground: var(--apple-foreground);
+  --color-card: var(--apple-card);
+  --color-card-foreground: var(--apple-card-foreground);
+  --color-popover: var(--apple-popover);
+  --color-popover-foreground: var(--apple-popover-foreground);
+  --color-primary: var(--apple-primary);
+  --color-primary-foreground: var(--apple-primary-foreground);
+  --color-secondary: var(--apple-secondary);
+  --color-secondary-foreground: var(--apple-secondary-foreground);
+  --color-muted: var(--apple-muted);
+  --color-muted-foreground: var(--apple-muted-foreground);
+  --color-accent: var(--apple-accent);
+  --color-accent-foreground: var(--apple-accent-foreground);
+  --color-destructive: var(--apple-destructive);
+  --color-destructive-foreground: var(--apple-destructive-foreground);
+  --color-border: var(--apple-border);
+  --color-input: var(--apple-input);
+  --color-ring: var(--apple-ring);
+  --color-chart-1: var(--apple-chart-1);
+  --color-chart-2: var(--apple-chart-2);
+  --color-chart-3: var(--apple-chart-3);
+  --color-chart-4: var(--apple-chart-4);
+  --color-chart-5: var(--apple-chart-5);
+  --color-sidebar: var(--apple-sidebar);
+  --color-sidebar-foreground: var(--apple-sidebar-foreground);
+  --color-sidebar-primary: var(--apple-sidebar-primary);
+  --color-sidebar-primary-foreground: var(--apple-sidebar-primary-foreground);
+  --color-sidebar-accent: var(--apple-sidebar-accent);
+  --color-sidebar-accent-foreground: var(--apple-sidebar-accent-foreground);
+  --radius-sm: var(--apple-radius-sm);
+  --radius-md: var(--apple-radius-md);
+  --radius-lg: var(--apple-radius-lg);
+}
+@layer base {
+  body { background: var(--apple-background); color: var(--apple-foreground); }
+  td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+  th { @apply whitespace-nowrap; }
+}
+  </style>
+  <style id="semantic-token-fallback">
+    .bg-background { background-color: var(--apple-background); }
+    .text-background { color: var(--apple-background); }
+    .border-background { border-color: var(--apple-background); }
+    .ring-background { --tw-ring-color: var(--apple-background); }
+    .bg-foreground { background-color: var(--apple-foreground); }
+    .text-foreground { color: var(--apple-foreground); }
+    .border-foreground { border-color: var(--apple-foreground); }
+    .ring-foreground { --tw-ring-color: var(--apple-foreground); }
+    .bg-card { background-color: var(--apple-card); }
+    .text-card { color: var(--apple-card); }
+    .border-card { border-color: var(--apple-card); }
+    .ring-card { --tw-ring-color: var(--apple-card); }
+    .bg-primary { background-color: var(--apple-primary); }
+    .text-primary { color: var(--apple-primary); }
+    .border-primary { border-color: var(--apple-primary); }
+    .ring-primary { --tw-ring-color: var(--apple-primary); }
+    .bg-border { background-color: var(--apple-border); }
+    .text-border { color: var(--apple-border); }
+    .border-border { border-color: var(--apple-border); }
+    .ring-border { --tw-ring-color: var(--apple-border); }
+    .bg-muted { background-color: var(--apple-muted); }
+    .text-muted { color: var(--apple-muted); }
+    .border-muted { border-color: var(--apple-muted); }
+    .ring-muted { --tw-ring-color: var(--apple-muted); }
+    .bg-muted-foreground { background-color: var(--apple-muted-foreground); }
+    .text-muted-foreground { color: var(--apple-muted-foreground); }
+    .border-muted-foreground { border-color: var(--apple-muted-foreground); }
+    .ring-muted-foreground { --tw-ring-color: var(--apple-muted-foreground); }
+  </style>
+</head>
+<body class="h-screen overflow-hidden antialiased" style="font-family: var(--font-sans); background: var(--apple-background); color: var(--apple-foreground);">
+  <div data-viewport-mode="app-shell" class="flex h-screen min-h-0 flex-col overflow-hidden" style="background: linear-gradient(180deg, color-mix(in srgb, var(--apple-background) 96%, var(--apple-card) 4%) 0%, var(--apple-background) 100%);">
+    <header class="w-full border-b" style="border-color: var(--apple-border); background: color-mix(in srgb, var(--apple-background) 95%, white 5%); box-shadow: var(--shadow-2xs);">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-4 py-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,0.95fr)_auto] xl:items-center">
+          <div class="flex min-w-0 items-center gap-4">
+            <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--apple-radius-md)] border" style="border-color: var(--apple-border); background: var(--apple-card); color: var(--apple-foreground); box-shadow: var(--shadow-xs);">
+              <i data-lucide="flask-conical" class="h-5 w-5"></i>
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-[13px] font-medium" style="color: var(--apple-muted-foreground);">抖音切片优化器</p>
+              <div class="mt-1 flex min-w-0 flex-wrap items-end gap-3">
+                <h1 class="truncate text-[24px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">评测与校准</h1>
+                <span class="status-pill" data-tone="neutral">研究中心</span>
+              </div>
+            </div>
+          </div>
+
+          <nav class="mode-switch" aria-label="工作模式">
+            <a href="#" class="mode-switch__item">
+              <i data-lucide="layout-panel-top" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">剪辑工作台</span>
+            </a>
+            <a href="#" aria-current="page" class="mode-switch__item is-active">
+              <i data-lucide="flask-conical" class="h-4 w-4 shrink-0"></i>
+              <span class="truncate">研究中心</span>
+            </a>
+          </nav>
+
+          <div class="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
+            <span class="status-pill" data-tone="neutral">BMK-2026-07-Freeze-03</span>
+            <span class="status-pill" data-tone="neutral">RB-2026-0719-03</span>
+            <span class="status-pill" data-tone="neutral">09:40 更新</span>
+          </div>
+        </div>
+
+        <section class="flex flex-col gap-4 border-t py-3 lg:flex-row lg:items-center lg:justify-between" style="border-color: var(--apple-border);">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="research-badge">研究导航</span>
+            <p class="truncate text-[12px]" style="color: var(--apple-muted-foreground);">冻结 benchmark、模型判断、校准偏差与回测结论在同一判断链路内展开</p>
+          </div>
+          <nav class="research-subnav" aria-label="研究中心二层导航">
+            <a href="#" class="research-tab">概览</a>
+            <a href="#" class="research-tab">样本与标注</a>
+            <a href="#" aria-current="page" class="research-tab is-active">评测与校准</a>
+            <a href="#" class="research-tab">平台连接</a>
+            <a href="#" class="research-tab">模型与环境</a>
+          </nav>
+        </section>
+      </div>
+    </header>
+
+    <main data-scroll-region="primary" class="min-h-0 overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
+        <section class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <article class="xl:col-span-8 rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: linear-gradient(180deg, color-mix(in srgb, var(--apple-primary) 4%, var(--apple-card) 96%) 0%, var(--apple-card) 100%); box-shadow: var(--shadow-sm);">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">当前 benchmark 判断</p>
+                <h2 class="mt-2 text-[clamp(30px,3vw,42px)] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground); text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">冻结口径稳定，主排序继续保留在生产链路</h2>
+                <p class="mt-3 max-w-[820px] text-[15px] leading-7" style="color: var(--apple-muted-foreground);">本轮 benchmark 先确认样本、标签窗口和解释版本都可复现，再做模型对比与校准判断。当前不做整体验证回滚，只对 0.6–0.7 分段执行局部校准，并把严重错判样本送回应急复核。</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="status-pill" data-tone="success">稳定在线</span>
+                <span class="status-pill" data-tone="primary">受控放行</span>
+              </div>
+            </div>
+
+            <div class="mt-6 grid gap-3">
+              <article class="decision-row is-active">
+                <span class="decision-row__icon"><i data-lucide="database" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color: var(--apple-foreground);">冻结 benchmark 已签名并可回放</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">48 档节目、862 个标准化候选、210 条高价值标注均锁定在同一口径下，本轮结论具备复现基础。</p>
+                </div>
+                <span class="status-pill" data-tone="success">稳定在线</span>
+              </article>
+              <article class="decision-row">
+                <span class="decision-row__icon"><i data-lucide="sparkles" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color: var(--apple-foreground);">Unified-Ranker-v4 继续作为生产主排序</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">NDCG@10 与 Top-K 提升仍领先规则基线，同时保持更低的严重错判和更可控的单候选成本。</p>
+                </div>
+                <span class="status-pill" data-tone="primary">受控放行</span>
+              </article>
+              <article class="decision-row">
+                <span class="decision-row__icon"><i data-lucide="scan-search" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color: var(--apple-foreground);">校准偏差集中在中段分数</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">0.6–0.7 分段预测偏乐观，风险还未扩散到高分头部，适合局部回拉而不是整体系数重写。</p>
+                </div>
+                <span class="status-pill" data-tone="warning">持续观察</span>
+              </article>
+              <article class="decision-row">
+                <span class="decision-row__icon"><i data-lucide="triangle-alert" class="h-4 w-4"></i></span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[16px] font-medium" style="color: var(--apple-foreground);">严重错判仍需单独复核</h3>
+                  <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">高分低播与低分高播案例已收敛到 3 条，但仍会影响校准可信度，必须继续补样本与复核解释。</p>
+                </div>
+                <span class="status-pill" data-tone="danger">待处理</span>
+              </article>
+            </div>
+          </article>
+
+          <aside class="xl:col-span-4 rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: var(--apple-card); box-shadow: var(--shadow-sm);">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">关键摘要</p>
+                <h3 class="mt-2 text-[28px] font-semibold tracking-[-0.035em]" style="color: var(--apple-foreground); text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">先保留主排序，再压缩处理面</h3>
+                <p class="mt-3 text-[14px] leading-7" style="color: var(--apple-muted-foreground);">当前最重要的不是继续堆评测卡，而是确认哪些结论已经足够稳定、哪些风险必须单独收口。</p>
+              </div>
+              <span class="status-pill" data-tone="primary">当前判断</span>
+            </div>
+
+            <div class="mt-6 grid gap-3">
+              <article class="summary-card summary-card--active p-4">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">benchmark</p>
+                <div class="mt-3 flex items-end justify-between gap-3">
+                  <p class="text-[26px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">稳定在线</p>
+                  <span class="status-pill" data-tone="success">可回放</span>
+                </div>
+                <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">manifest、候选 hash 与解释版本已全部锁定。</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">主排序</p>
+                <div class="mt-3 flex items-end justify-between gap-3">
+                  <p class="text-[26px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">受控放行</p>
+                  <span class="status-pill" data-tone="primary">继续生产</span>
+                </div>
+                <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">保持 Unified-Ranker-v4 作为默认生产主模型。</p>
+              </article>
+              <article class="summary-card p-4">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">校准与错判</p>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <span class="status-pill" data-tone="warning">持续观察</span>
+                  <span class="status-pill" data-tone="danger">待处理</span>
+                </div>
+                <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">只局部回拉中段分数，并把 3 条严重错判送回样本与标注队列。</p>
+              </article>
+            </div>
+          </aside>
+        </section>
+
+        <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <article class="summary-card p-4">
+            <p class="text-[12px]" style="color: var(--apple-muted-foreground);">Freeze ID</p>
+            <p class="mt-3 text-[30px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">03</p>
+            <span class="mt-2 status-pill" data-tone="success">稳定在线</span>
+            <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">时间切分、节目隔离与标签窗口全部冻结。</p>
+          </article>
+          <article class="summary-card summary-card--active p-4">
+            <p class="text-[12px]" style="color: var(--apple-muted-foreground);">NDCG@10</p>
+            <p class="mt-3 text-[30px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">0.684</p>
+            <span class="mt-2 status-pill" data-tone="success">较上轮 +0.034</span>
+            <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">统一排序在高价值候选上的首屏命中继续抬升。</p>
+          </article>
+          <article class="summary-card p-4">
+            <p class="text-[12px]" style="color: var(--apple-muted-foreground);">校准误差</p>
+            <p class="mt-3 text-[30px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">0.08</p>
+            <span class="mt-2 status-pill" data-tone="warning">持续观察</span>
+            <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">误差集中在 0.6–0.7 分段，不扩散到高分头部。</p>
+          </article>
+          <article class="summary-card p-4">
+            <p class="text-[12px]" style="color: var(--apple-muted-foreground);">严重错判</p>
+            <p class="mt-3 text-[30px] font-semibold tracking-[-0.04em]" style="color: var(--apple-foreground);">3 条</p>
+            <span class="mt-2 status-pill" data-tone="danger">待处理</span>
+            <p class="mt-3 text-[12px] leading-6" style="color: var(--apple-muted-foreground);">优先补“前强后弱”和“冷静讲解型”片段样本。</p>
+          </article>
+        </section>
+
+        <section class="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <div class="flex min-w-0 flex-col gap-5 xl:col-span-7">
+            <article class="rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: var(--apple-card); box-shadow: var(--shadow-sm);">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div class="min-w-0">
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">模型对比</p>
+                  <h3 class="mt-1 text-[22px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">把分数变化翻译成生产判断</h3>
+                  <p class="mt-2 max-w-[760px] text-[13px] leading-6" style="color: var(--apple-muted-foreground);">这里不堆完整报表，只保留会影响是否继续放量、是否切换模型的关键差异。</p>
+                </div>
+                <span class="status-pill" data-tone="primary">主模型继续放行</span>
+              </div>
+
+              <div class="mt-5 grid gap-3">
+                <article class="record-card">
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h4 class="text-[16px] font-semibold" style="color: var(--apple-foreground);">Rule-Ranker-v1</h4>
+                        <span class="status-pill" data-tone="neutral">规则基线</span>
+                      </div>
+                      <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">稳定但偏保守，面对高信息密度片段时提升有限，主要作为回放基线保留。</p>
+                    </div>
+                    <span class="status-pill" data-tone="success">稳定在线</span>
+                  </div>
+                  <div class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <div class="metric-cell"><p class="metric-cell__label">NDCG@10</p><p class="metric-cell__value">0.612</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">Top-K 提升</p><p class="metric-cell__value">+0.0%</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">严重错判</p><p class="metric-cell__value">5 条</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">单候选成本</p><p class="metric-cell__value">1.0x</p></div>
+                  </div>
+                </article>
+
+                <article class="record-card record-card--active">
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h4 class="text-[16px] font-semibold" style="color: var(--apple-foreground);">Unified-Ranker-v4</h4>
+                        <span class="status-pill" data-tone="primary">当前生产</span>
+                      </div>
+                      <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">质量、成本与解释链路最均衡。当前不需要因为 shadow 提升而切换生产主权重。</p>
+                    </div>
+                    <span class="status-pill" data-tone="primary">受控放行</span>
+                  </div>
+                  <div class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <div class="metric-cell"><p class="metric-cell__label">NDCG@10</p><p class="metric-cell__value">0.684</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">Top-K 提升</p><p class="metric-cell__value">+11.2%</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">严重错判</p><p class="metric-cell__value">3 条</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">单候选成本</p><p class="metric-cell__value">1.3x</p></div>
+                  </div>
+                </article>
+
+                <article class="record-card">
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h4 class="text-[16px] font-semibold" style="color: var(--apple-foreground);">Qwen-Ranker-v3</h4>
+                        <span class="status-pill" data-tone="warning">shadow</span>
+                      </div>
+                      <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">头部更激进，但成本与校准稳定性仍未达到生产切换门槛，继续 shadow 观察两轮。</p>
+                    </div>
+                    <span class="status-pill" data-tone="warning">持续观察</span>
+                  </div>
+                  <div class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <div class="metric-cell"><p class="metric-cell__label">NDCG@10</p><p class="metric-cell__value">0.691</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">Top-K 提升</p><p class="metric-cell__value">+12.5%</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">严重错判</p><p class="metric-cell__value">4 条</p></div>
+                    <div class="metric-cell"><p class="metric-cell__label">单候选成本</p><p class="metric-cell__value">2.1x</p></div>
+                  </div>
+                </article>
+              </div>
+            </article>
+          </div>
+
+          <aside class="flex min-w-0 flex-col gap-5 xl:col-span-5">
+            <article class="rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: var(--apple-card); box-shadow: var(--shadow-sm);">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">校准偏差</p>
+                  <h3 class="mt-1 text-[22px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">误差集中在中段，不扩散到头部</h3>
+                  <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">先看偏差位置，再决定是局部回拉还是整体重训。当前更适合局部修正。</p>
+                </div>
+                <span class="status-pill" data-tone="warning">持续观察</span>
+              </div>
+
+              <div class="mt-5 rounded-[var(--apple-radius-lg)] border p-4" style="border-color: var(--apple-border); background: color-mix(in srgb, var(--apple-card) 88%, var(--apple-muted) 12%);">
+                <svg viewBox="0 0 360 220" width="100%" height="220" aria-label="校准曲线">
+                  <g stroke="var(--apple-border)" stroke-width="1">
+                    <line x1="36" y1="180" x2="332" y2="180"></line>
+                    <line x1="36" y1="144" x2="332" y2="144"></line>
+                    <line x1="36" y1="108" x2="332" y2="108"></line>
+                    <line x1="36" y1="72" x2="332" y2="72"></line>
+                    <line x1="36" y1="36" x2="332" y2="36"></line>
+                  </g>
+                  <line x1="36" y1="180" x2="332" y2="36" stroke="var(--apple-muted-foreground)" stroke-width="1.5" stroke-dasharray="4 6"></line>
+                  <path d="M36 170 C84 156,118 138,154 120 S230 88,274 82 S318 60,332 54" fill="none" stroke="var(--apple-primary)" stroke-width="4" stroke-linecap="round"></path>
+                  <g fill="var(--apple-primary)">
+                    <circle cx="36" cy="170" r="5"></circle>
+                    <circle cx="96" cy="146" r="5"></circle>
+                    <circle cx="156" cy="120" r="5"></circle>
+                    <circle cx="216" cy="96" r="5"></circle>
+                    <circle cx="276" cy="80" r="5"></circle>
+                    <circle cx="332" cy="54" r="5"></circle>
+                  </g>
+                </svg>
+                <div class="mt-3 grid grid-cols-5 gap-2 text-center text-[11px]" style="color: var(--apple-muted-foreground);">
+                  <span>0.1</span><span>0.3</span><span>0.5</span><span>0.7</span><span>0.9</span>
+                </div>
+              </div>
+
+              <div class="mt-4 grid gap-3">
+                <div class="bias-row">
+                  <span class="bias-row__label">0.0–0.2</span>
+                  <div class="bias-row__track"><div class="bias-row__fill" style="width: 22%; background: color-mix(in srgb, var(--apple-chart-1) 74%, var(--apple-background) 26%);"></div></div>
+                  <span class="bias-row__value is-positive">+0.01</span>
+                </div>
+                <div class="bias-row">
+                  <span class="bias-row__label">0.2–0.4</span>
+                  <div class="bias-row__track"><div class="bias-row__fill" style="width: 34%; background: color-mix(in srgb, var(--apple-chart-1) 78%, var(--apple-background) 22%);"></div></div>
+                  <span class="bias-row__value is-positive">+0.02</span>
+                </div>
+                <div class="bias-row">
+                  <span class="bias-row__label">0.4–0.6</span>
+                  <div class="bias-row__track"><div class="bias-row__fill" style="width: 56%; background: color-mix(in srgb, var(--apple-destructive) 60%, var(--apple-background) 40%);"></div></div>
+                  <span class="bias-row__value is-negative">-0.05</span>
+                </div>
+                <div class="bias-row">
+                  <span class="bias-row__label">0.6–0.8</span>
+                  <div class="bias-row__track"><div class="bias-row__fill" style="width: 72%; background: color-mix(in srgb, var(--apple-destructive) 84%, var(--apple-background) 16%);"></div></div>
+                  <span class="bias-row__value is-negative">-0.08</span>
+                </div>
+                <div class="bias-row">
+                  <span class="bias-row__label">0.8–1.0</span>
+                  <div class="bias-row__track"><div class="bias-row__fill" style="width: 40%; background: color-mix(in srgb, var(--apple-chart-1) 76%, var(--apple-background) 24%);"></div></div>
+                  <span class="bias-row__value is-positive">+0.03</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: var(--apple-card); box-shadow: var(--shadow-sm);">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">严重错判</p>
+                  <h3 class="mt-1 text-[22px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">必须回到样本与解释链路的 3 条案例</h3>
+                  <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">只保留会改变校准动作的案例，帮助复核直接判断下一步。</p>
+                </div>
+                <span class="status-pill" data-tone="danger">待处理</span>
+              </div>
+
+              <div class="mt-5 grid gap-3">
+                <article class="record-card">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h4 class="min-w-0 flex-1 truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">高分低播：前 3 秒情绪强，后半段信息密度骤降</h4>
+                    <span class="status-pill" data-tone="danger">0.84 → 0.31</span>
+                  </div>
+                  <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">模型过度放大开头钩子，忽略节奏塌陷。需要补“前强后弱”结构特征。</p>
+                </article>
+                <article class="record-card">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h4 class="min-w-0 flex-1 truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">低分高播：冷静讲解型片段转发高于预测</h4>
+                    <span class="status-pill" data-tone="warning">0.42 → 0.73</span>
+                  </div>
+                  <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">当前文本先验对“克制表达但高信息密度”不够敏感，需补分享率代理与复播特征。</p>
+                </article>
+                <article class="record-card">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h4 class="min-w-0 flex-1 truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">节目隔离冲突：同源桥段重复计入正例</h4>
+                    <span class="status-pill" data-tone="danger">样本冲突</span>
+                  </div>
+                  <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">本轮已在 manifest 标记冲突，后续仅保留单源正例进入校准集。</p>
+                </article>
+              </div>
+            </article>
+          </aside>
+        </section>
+
+        <section class="rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: var(--apple-card); box-shadow: var(--shadow-sm);">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div class="min-w-0">
+              <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">最近回测任务</p>
+              <h3 class="mt-1 text-[22px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">保留版本、状态与结论，不堆回测明细</h3>
+              <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">每一条记录只保留会影响当前判断的上下文：版本、状态、关键结论和下一步动作。</p>
+            </div>
+            <span class="status-pill" data-tone="success">最近一轮已回写</span>
+          </div>
+
+          <div class="mt-5 flex flex-col gap-3">
+            <article class="record-row">
+              <span class="record-row__icon"><i data-lucide="history" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div class="min-w-0">
+                    <p class="truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">RB-2026-0719-03 · 联合回放</p>
+                    <p class="truncate text-[12px]" style="color: var(--apple-muted-foreground);">G1 / G2 共链路 · ranker-v4 / calibrator-v2 · 09:40</p>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="status-pill" data-tone="success">稳定在线</span>
+                    <span class="status-pill" data-tone="primary">受控放行</span>
+                  </div>
+                </div>
+                <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">NDCG@10 +0.034，校准误差 0.08。解释与偏差诊断已同步回研究中心，用于维持当前生产判断。</p>
+              </div>
+            </article>
+
+            <article class="record-row">
+              <span class="record-row__icon"><i data-lucide="flask-conical" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div class="min-w-0">
+                    <p class="truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">RB-2026-0718-07 · Shadow 对照</p>
+                    <p class="truncate text-[12px]" style="color: var(--apple-muted-foreground);">Qwen-Ranker-v3 · shadow 通道 · 昨晚 22:14</p>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="status-pill" data-tone="warning">持续观察</span>
+                  </div>
+                </div>
+                <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">Top-K 略高，但错判增至 4 条且单候选成本升高，继续 shadow，不直接写生产。</p>
+              </div>
+            </article>
+
+            <article class="record-row">
+              <span class="record-row__icon"><i data-lucide="list-checks" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div class="min-w-0">
+                    <p class="truncate text-[14px] font-semibold" style="color: var(--apple-foreground);">RB-2026-0716-02 · 错判专项复盘</p>
+                    <p class="truncate text-[12px]" style="color: var(--apple-muted-foreground);">review-bucket-c · 07-16 11:03</p>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="status-pill" data-tone="danger">待处理</span>
+                  </div>
+                </div>
+                <p class="mt-1 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">新增 12 条高分低播复核标签，等待合并进入中段校准与样本补齐动作。</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="rounded-[var(--apple-radius-lg)] border p-6" style="border-color: var(--apple-border); background: linear-gradient(180deg, color-mix(in srgb, var(--apple-primary) 4%, var(--apple-card) 96%) 0%, var(--apple-card) 100%); box-shadow: var(--shadow-sm);">
+          <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.02fr)_minmax(340px,0.98fr)]">
+            <div>
+              <p class="text-[11px] font-medium uppercase tracking-[0.12em]" style="color: var(--apple-muted-foreground);">结论建议</p>
+              <h3 class="mt-2 text-[28px] font-semibold tracking-[-0.035em]" style="color: var(--apple-foreground); text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">把 benchmark、偏差和回测收口成三项动作</h3>
+              <p class="mt-3 max-w-[780px] text-[15px] leading-7" style="color: var(--apple-muted-foreground);">本轮结论只回答三个问题：是否继续生产、偏差需要处理到什么程度、shadow 模型能否进入主链路。当前答案是继续生产、局部处理、继续 shadow。</p>
+            </div>
+            <div class="summary-card summary-card--active p-5">
+              <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">统一判断</p>
+              <p class="mt-3 text-[22px] font-semibold tracking-[-0.03em]" style="color: var(--apple-foreground);">维持当前生产排序，只处理中段校准与严重错判，不切换主模型。</p>
+              <div class="mt-4 flex flex-wrap items-center gap-2">
+                <span class="status-pill" data-tone="success">稳定在线</span>
+                <span class="status-pill" data-tone="primary">受控放行</span>
+                <span class="status-pill" data-tone="warning">持续观察</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid grid-cols-1 gap-3 xl:grid-cols-3">
+            <article class="decision-row is-active">
+              <span class="decision-row__icon"><i data-lucide="target" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">建议一</p>
+                <h4 class="mt-2 text-[16px] font-semibold" style="color: var(--apple-foreground);">维持 Unified-Ranker-v4 为生产主排序</h4>
+                <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">当前收益已经覆盖成本与解释稳定性，维持主链路一致性优先于继续切权重。</p>
+              </div>
+            </article>
+            <article class="decision-row">
+              <span class="decision-row__icon"><i data-lucide="badge-alert" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">建议二</p>
+                <h4 class="mt-2 text-[16px] font-semibold" style="color: var(--apple-foreground);">只对 0.6–0.7 分段执行局部校准</h4>
+                <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">采用 isotonic 微调或分段回拉，避免对高分头部排序造成不必要扰动。</p>
+              </div>
+            </article>
+            <article class="decision-row">
+              <span class="decision-row__icon"><i data-lucide="shield-ellipsis" class="h-4 w-4"></i></span>
+              <div class="min-w-0 flex-1">
+                <p class="text-[11px] uppercase tracking-[0.08em]" style="color: var(--apple-muted-foreground);">建议三</p>
+                <h4 class="mt-2 text-[16px] font-semibold" style="color: var(--apple-foreground);">Shadow 模型继续观察，不进入主链路</h4>
+                <p class="mt-2 text-[13px] leading-6" style="color: var(--apple-muted-foreground);">Qwen-Ranker-v3 继续保留在 shadow 两轮，等校准稳定后再决定是否提级。</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <p class="text-[12px] leading-6" style="color: var(--apple-muted-foreground);">评测口径统一指向优质流量、观看质量、转发价值与关注转化；播放缺失时仅展示高互动代理，不将其他计数冒充播放量。</p>
+      </div>
+    </main>
+  </div>
+  <style>
+    .mode-switch{display:flex;min-width:0;align-items:center;justify-content:center;border:1px solid var(--apple-border);border-radius:999px;padding:6px;background:color-mix(in srgb,var(--apple-card) 76%,var(--apple-background) 24%);box-shadow:var(--shadow-xs)}
+    .mode-switch__item{display:inline-flex;min-width:0;flex:1;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:999px;font-size:13px;font-weight:500;color:var(--apple-muted-foreground);white-space:nowrap}
+    .mode-switch__item.is-active{background:var(--apple-foreground);color:var(--apple-background);box-shadow:var(--shadow-sm)}
+    .research-badge{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 12px;border:1px solid var(--apple-border);border-radius:999px;background:color-mix(in srgb,var(--apple-card) 72%,var(--apple-background) 28%);color:var(--apple-muted-foreground);font-size:12px;font-weight:500}
+    .research-subnav{display:flex;min-width:0;align-items:center;gap:8px;flex-wrap:wrap}
+    .research-tab{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--apple-border);border-radius:14px;background:color-mix(in srgb,var(--apple-card) 80%,var(--apple-background) 20%);color:var(--apple-muted-foreground);font-size:13px;font-weight:500;white-space:nowrap}
+    .research-tab.is-active{border-color:color-mix(in srgb,var(--apple-primary) 24%,var(--apple-border) 76%);background:color-mix(in srgb,var(--apple-primary) 8%,var(--apple-background) 92%);color:var(--apple-primary)}
+    .summary-card{border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 76%,var(--apple-card) 24%)}
+    .summary-card--active{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%)}
+    .status-pill{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;height:28px;padding:0 12px;border-radius:999px;border:1px solid var(--apple-border);font-size:12px;color:var(--apple-muted-foreground);background:color-mix(in srgb,var(--apple-background) 74%,var(--apple-card) 26%)}
+    .status-pill[data-tone="primary"]{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .status-pill[data-tone="success"]{border-color:color-mix(in srgb,var(--apple-chart-1) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-chart-1) 10%,var(--apple-background) 90%);color:var(--apple-chart-1)}
+    .status-pill[data-tone="warning"]{border-color:color-mix(in srgb,var(--apple-chart-3) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-chart-3) 12%,var(--apple-background) 88%);color:var(--apple-chart-3)}
+    .status-pill[data-tone="danger"]{border-color:color-mix(in srgb,var(--apple-destructive) 18%,var(--apple-border) 82%);background:color-mix(in srgb,var(--apple-destructive) 10%,var(--apple-background) 90%);color:var(--apple-destructive)}
+    .decision-row,.record-card,.record-row{display:flex;align-items:flex-start;gap:12px;padding:15px 16px;border:1px solid var(--apple-border);border-radius:var(--apple-radius-md);background:color-mix(in srgb,var(--apple-background) 78%,var(--apple-card) 22%)}
+    .decision-row.is-active,.record-card--active{border-color:color-mix(in srgb,var(--apple-primary) 20%,var(--apple-border) 80%);background:color-mix(in srgb,var(--apple-primary) 5%,var(--apple-card) 95%)}
+    .decision-row__icon,.record-row__icon{display:inline-flex;height:36px;width:36px;flex-shrink:0;align-items:center;justify-content:center;border-radius:calc(var(--apple-radius-md) - 2px);border:1px solid var(--apple-border);background:var(--apple-card);color:var(--apple-muted-foreground)}
+    .decision-row.is-active .decision-row__icon{border-color:transparent;background:color-mix(in srgb,var(--apple-primary) 10%,var(--apple-background) 90%);color:var(--apple-primary)}
+    .metric-cell{border-radius:calc(var(--apple-radius-md) - 2px);background:var(--apple-card);padding:12px}
+    .metric-cell__label{font-size:11px;color:var(--apple-muted-foreground)}
+    .metric-cell__value{margin-top:6px;font-size:18px;font-weight:600;color:var(--apple-foreground)}
+    .bias-row{display:grid;grid-template-columns:78px minmax(0,1fr) auto;align-items:center;gap:12px}
+    .bias-row__label{font-size:12px;color:var(--apple-muted-foreground);white-space:nowrap}
+    .bias-row__track{height:10px;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--apple-foreground) 8%,transparent)}
+    .bias-row__fill{height:100%;border-radius:999px}
+    .bias-row__value{font-size:12px;font-weight:600}
+    .bias-row__value.is-positive{color:var(--apple-chart-1)}
+    .bias-row__value.is-negative{color:var(--apple-destructive)}
+  </style>
+  <script>lucide.createIcons();</script>
+</body>
+</html>
