@@ -1,0 +1,136 @@
+{
+  "benchmark_id": "dso-qwen35-omni-complete-short-clip-shadow-20260719-r1",
+  "contract_version": "dso_bailian_qwen35_omni_short_clip_shadow.v1",
+  "created_at": "2026-07-19T12:52:52+00:00",
+  "goal_alignment": [
+    "G1",
+    "G3"
+  ],
+  "parent_manifest_id": "dso-qwen37-full-clip-diagnostic-20260719-r1",
+  "parent_manifest_sha256": "55c57900ef14bbf6d9b8e00a1a0fd2f32b7c9d725c064371e608e904f95dd895",
+  "comparison_benchmark_id": "dso-qwen37-complete-short-clip-shadow-20260719-r1",
+  "lifecycle_status": "research_only",
+  "sample": {
+    "sample_id": "hcap_0e30f296cc774fcb",
+    "source_pair_id": "pair-048",
+    "diagnostic_role": "failure_cloud_wrong_v2_4_correct",
+    "account_id": "raoxianyin",
+    "content_category": "music_variety",
+    "performance_label": "high",
+    "source_duration_seconds": 21.781,
+    "source_size_bytes": 2586940,
+    "source_sha256": "70205c69b6786d81684d9ca42fe10a8bdcc09a45c8a4dcfa2eb81bb5041149d5"
+  },
+  "cloud_input": {
+    "representation": "complete_temporal_h264_proxy_with_aac_audio",
+    "duration_seconds": 21.805,
+    "size_bytes": 2893794,
+    "sha256": "03ff5013c45b1b8b4afe69543fdea754bdd1ea9d917235505f4bc762d80db5e0",
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "audio_sample_rate_hz": 24000,
+    "audio_channels": 1,
+    "audio_seconds": 21.805,
+    "width": 540,
+    "height": 960,
+    "fps_parameter": 1.0,
+    "max_pixels_per_frame": 262144,
+    "estimated_frame_count": 22,
+    "transport": "base64_data_url"
+  },
+  "provider": {
+    "provider_id": "aliyun_bailian",
+    "model_id": "qwen3.5-omni-plus-2026-03-15",
+    "api_version": "bailian-openai-omni-video-stream.v1",
+    "prompt_version": "dso-bailian-qwen35-omni-complete-short-clip.v1",
+    "pricing_version": "cn-beijing-2026-07-19",
+    "request_type": "omni_complete_short_clip_analysis",
+    "upload_level": "full_media",
+    "output_modalities": [
+      "text"
+    ],
+    "max_retries": 0
+  },
+  "pricing_cny_per_million_tokens": {
+    "text_image_video_input": 7,
+    "audio_input": 53,
+    "text_output_with_multimodal_input": 40,
+    "audio_output_requested": false
+  },
+  "preflight": {
+    "status": "passed",
+    "network_request_count": 0,
+    "serialized_request_bytes": 3860151,
+    "estimated_input_tokens": 7345,
+    "estimated_audio_tokens": 153,
+    "reserved_cost_cny": 0.106453
+  },
+  "actual_usage": {
+    "status": "success",
+    "network_request_count": 1,
+    "retry_count": 0,
+    "http_status": 200,
+    "input_tokens": 6019,
+    "inferred_audio_input_tokens_from_frozen_price_equation": 149,
+    "text_video_input_tokens": 5870,
+    "output_text_tokens": 1076,
+    "provider_cached_input_tokens": 0,
+    "request_bytes": 3860151,
+    "response_bytes": 36144,
+    "latency_ms": 24562,
+    "billing_status": "usage_estimated",
+    "text_video_input_cost_cny": 0.04109,
+    "audio_input_cost_cny": 0.007897,
+    "text_output_cost_cny": 0.04304,
+    "usage_estimated_cost_cny": 0.092027,
+    "billed_cost_cny": null,
+    "remote_report_sha256": "56196c523a0119afc89af40ee1e9a5693de4ce61b5baae0fab5bd5a927af4d02"
+  },
+  "provider_output_summary": {
+    "category": "音乐表演/综艺舞台",
+    "traffic_potential_score": 0.68,
+    "confidence": 0.72,
+    "abstain": false,
+    "timeline_item_count": 6,
+    "audio_characteristics": [
+      "快节奏电子舞曲风格",
+      "明亮合成器与鼓点",
+      "女声合唱"
+    ],
+    "reported_audio_evidence": {
+      "opening_instrumental": true,
+      "lyric_segments": 5,
+      "visible_text_and_speech_or_lyrics_returned_separately": true
+    }
+  },
+  "same_sample_comparison_to_qwen37_visual": {
+    "cost_ratio": 5.0266,
+    "latency_ratio": 1.4408,
+    "input_token_ratio": 1.036,
+    "output_token_ratio": 1.2871,
+    "qwen37_usage_estimated_cost_cny": 0.018308,
+    "qwen37_latency_ms": 17048,
+    "notes": [
+      "The two calls used the same source sample and temporal range, but Qwen3.5-Omni received AAC audio and a separately encoded proxy.",
+      "The prompts and output schemas differ, so this is a diagnostic cost/capability comparison rather than a controlled quality ablation."
+    ]
+  },
+  "evaluation_validity": {
+    "proves_direct_audio_video_api_and_cost": true,
+    "proves_streaming_usage_and_modality_pricing": true,
+    "proves_lyric_or_audio_fact_accuracy": false,
+    "proves_ranking_lift": false,
+    "proves_online_traffic_lift": false,
+    "notes": [
+      "Only one previously observed diagnostic sample was used.",
+      "The returned lyric strings matched visible subtitles, so human or independent ASR verification is still required to prove they came from the audio rather than visual text.",
+      "The run was not a blind comparison and did not change any candidate score or production decision."
+    ]
+  },
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  }
+}

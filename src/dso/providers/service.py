@@ -177,9 +177,12 @@ def _bailian_environment() -> dict[str, object]:
         forbidden = parsed_levels - {
             UploadLevel.STRUCTURED_SUMMARY,
             UploadLevel.REPRESENTATIVE_FRAMES,
+            UploadLevel.FULL_MEDIA,
         }
         if forbidden:
-            errors.append("Bailian V1 only permits structured_summary/representative_frames")
+            errors.append(
+                "Bailian only permits structured_summary/representative_frames/full_media"
+            )
         else:
             allowed_upload_levels = parsed_levels
 
@@ -327,6 +330,7 @@ def build_aliyun_bailian_runtime(
     *,
     batch_id: str,
     model_id: str | None = None,
+    request_profile: str | None = None,
 ) -> AliyunBailianRuntime:
     """Build a real runtime only after every environment gate is explicit.
 
@@ -354,9 +358,12 @@ def build_aliyun_bailian_runtime(
         )
 
     provider = settings["provider"]
-    if model_id is not None:
+    if model_id is not None or request_profile is not None:
         provider = AliyunBailianProvider(
-            model_id=str(model_id).strip(),
+            model_id=str(
+                model_id or provider.descriptor.identity.model_id
+            ).strip(),
+            request_profile=str(request_profile or "standard").strip(),
             base_url=settings.get("base_url"),
         )
     budget_limits = settings["budget_limits"]

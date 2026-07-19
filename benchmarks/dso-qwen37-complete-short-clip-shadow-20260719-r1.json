@@ -1,0 +1,104 @@
+{
+  "benchmark_id": "dso-qwen37-complete-short-clip-shadow-20260719-r1",
+  "contract_version": "dso_bailian_complete_short_clip_shadow.v1",
+  "created_at": "2026-07-19T12:27:22.719+00:00",
+  "goal_alignment": [
+    "G1",
+    "G3"
+  ],
+  "parent_manifest_id": "dso-qwen37-full-clip-diagnostic-20260719-r1",
+  "parent_manifest_sha256": "55c57900ef14bbf6d9b8e00a1a0fd2f32b7c9d725c064371e608e904f95dd895",
+  "lifecycle_status": "research_only",
+  "sample": {
+    "sample_id": "hcap_0e30f296cc774fcb",
+    "source_pair_id": "pair-048",
+    "diagnostic_role": "failure_cloud_wrong_v2_4_correct",
+    "account_id": "raoxianyin",
+    "content_category": "music_variety",
+    "performance_label": "high",
+    "source_duration_seconds": 21.78,
+    "source_size_bytes": 2586940,
+    "source_sha256": "70205c69b6786d81684d9ca42fe10a8bdcc09a45c8a4dcfa2eb81bb5041149d5"
+  },
+  "cloud_input": {
+    "representation": "complete_temporal_h264_proxy_without_audio",
+    "duration_seconds": 21.767,
+    "size_bytes": 2995375,
+    "sha256": "8fd46ce88a903911bf3b3a6bd0ebd96500e842535683b6ff66b0e2c0ba92c845",
+    "video_codec": "h264",
+    "audio_seconds": 0,
+    "width": 540,
+    "height": 960,
+    "fps_parameter": 1.0,
+    "max_pixels_per_frame": 262144,
+    "estimated_frame_count": 22,
+    "transport": "base64_data_url"
+  },
+  "provider": {
+    "provider_id": "aliyun_bailian",
+    "model_id": "qwen3.7-plus-2026-05-26",
+    "api_version": "bailian-openai-video-chat.v1",
+    "prompt_version": "dso-bailian-complete-short-clip-analysis.v1",
+    "pricing_version": "cn-beijing-2026-07-19",
+    "request_type": "complete_short_clip_analysis",
+    "upload_level": "full_media",
+    "max_retries": 0
+  },
+  "preflight": {
+    "status": "passed",
+    "network_request_count": 0,
+    "serialized_request_bytes": 3995340,
+    "estimated_input_tokens": 7288,
+    "reserved_cost_cny": 0.024176
+  },
+  "actual_usage": {
+    "status": "success",
+    "network_request_count": 1,
+    "retry_count": 0,
+    "http_status": 200,
+    "input_tokens": 5810,
+    "output_tokens": 836,
+    "provider_cached_input_tokens": 0,
+    "request_bytes": 3995340,
+    "response_bytes": 4032,
+    "latency_ms": 17048,
+    "billing_status": "usage_estimated",
+    "usage_estimated_cost_cny": 0.018308,
+    "billed_cost_cny": null,
+    "remote_report_sha256": "746e237af935a7e8bc784d1b2415f23378611a9c23fdd489010aa11414778b05"
+  },
+  "provider_output_summary": {
+    "category": "音乐表演/综艺舞台",
+    "traffic_potential_score": 0.65,
+    "confidence": 0.9,
+    "abstain": false,
+    "timeline_item_count": 5,
+    "strengths": [
+      "人物和黑白舞台造型辨识度高",
+      "表情与烧录歌词对应手势提供明确视觉叙事",
+      "三人站位和主体构图清晰"
+    ],
+    "weaknesses": [
+      "镜头景别单一，缺少特写与全景层次",
+      "背景视觉元素弱",
+      "右侧人物长期处于边缘或被遮挡"
+    ]
+  },
+  "evaluation_validity": {
+    "proves_direct_video_api_and_cost": true,
+    "proves_temporal_output_schema": true,
+    "proves_ranking_lift": false,
+    "proves_online_traffic_lift": false,
+    "notes": [
+      "Only one previously observed diagnostic sample was used.",
+      "The run was not a blind pairwise comparison against representative frames or v2.4.",
+      "The model cannot analyze the video audio track and still used rhythm-like wording, so audio-related inferences require explicit filtering."
+    ]
+  },
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  }
+}

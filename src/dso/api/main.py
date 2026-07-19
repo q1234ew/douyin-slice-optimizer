@@ -119,6 +119,12 @@ from dso.learning.bailian_vector_chain import (
     run_bailian_vector_chain,
 )
 from dso.learning.bailian_cached_ablation import run_bailian_cached_ablation
+from dso.learning.bailian_failure_attribution import (
+    run_bailian_holdout_failure_attribution,
+)
+from dso.learning.bailian_evidence_quality import (
+    run_bailian_evidence_quality_reconstruction,
+)
 from dso.learning.bailian_holdout_validation import (
     evaluate_bailian_holdout_validation,
     freeze_bailian_holdout_validation,
@@ -1826,6 +1832,39 @@ def post_multimodal_vector_cloud_holdout(
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/cloud/holdout-attribution")
+def post_multimodal_vector_cloud_holdout_attribution(
+    payload: dict = Body(default_factory=dict),
+) -> dict:
+    try:
+        return run_bailian_holdout_failure_attribution(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/cloud/evidence-quality/rebuild")
+def post_multimodal_vector_cloud_evidence_quality(
+    payload: dict = Body(default_factory=dict),
+) -> dict:
+    try:
+        return run_bailian_evidence_quality_reconstruction(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+            scope=payload.get("scope") or "holdout",
+            limit=int(payload.get("limit") or 40),
+            force=bool(payload.get("force", False)),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

@@ -7,14 +7,21 @@ accidentally persisted through a generic metadata field.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+import os
 from pathlib import Path
 import re
 import sqlite3
 from typing import Iterator
 from uuid import uuid4
+
+try:  # POSIX hosts are required for paid-provider execution.
+    import fcntl
+except ImportError:  # pragma: no cover - Windows must fail closed below.
+    fcntl = None  # type: ignore[assignment]
 
 from .budget import Money
 from .contracts import ProviderAttemptMetrics
@@ -253,6 +260,27 @@ class PublicModelLedger:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 10000")
         return connection
+
+    @contextmanager
+    def budget_execution_lock(self) -> Iterator[None]:
+        """Serialize paid-provider execution across processes sharing this ledger.
+
+        The lock spans ledger refresh, reservation, network execution, settlement,
+        and final ledger persistence. Unsupported hosts fail closed rather than
+        silently falling back to a process-local lock that could overspend.
+        """
+
+        if fcntl is None:
+            raise RuntimeError("cross-process public-model budget locking is unavailable")
+        lock_path = self.db_path.with_suffix(f"{self.db_path.suffix}.budget.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            os.chmod(lock_path, 0o600)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _initialize(self) -> None:
         """Create or add compatible columns without rewriting historical calls."""

@@ -179,6 +179,49 @@ def test_budget_settlement_releases_unused_reservation_and_accounts_actual_overr
     assert guard.snapshot().batch_spent.amount == Decimal("0.45")
 
 
+def test_budget_rejects_cross_batch_settlement_without_losing_reservation() -> None:
+    guard = BudgetGuard(
+        _limits(per_request="1", per_batch="2", per_day="3"),
+        batch_id="batch-a",
+    )
+    reservation = guard.reserve(Money(Decimal("0.50"), "CNY"))
+
+    # Defensive corruption simulation: public APIs cannot normally switch a
+    # batch while reservations are active, but settlement must still fail safe.
+    guard._batch_id = "batch-b"  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="different active batch"):
+        guard.settle(reservation, Money(Decimal("0.25"), "CNY"))
+
+    assert guard.snapshot().active_reservation_count == 1
+    guard._batch_id = "batch-a"  # type: ignore[attr-defined]
+    guard.release(reservation)
+    assert guard.snapshot().active_reservation_count == 0
+
+
+def test_budget_refresh_merges_persisted_totals_conservatively() -> None:
+    guard = BudgetGuard(
+        _limits(per_request="1", per_batch="2", per_day="3"),
+        batch_id="shared-batch",
+        initial_batch_spent=Money(Decimal("0.40"), "CNY"),
+        initial_daily_spent=Money(Decimal("0.60"), "CNY"),
+    )
+
+    guard.refresh_persisted_spend(
+        batch_id="shared-batch",
+        batch_spent=Money(Decimal("0.75"), "CNY"),
+        daily_spent=Money(Decimal("1.25"), "CNY"),
+    )
+    guard.refresh_persisted_spend(
+        batch_id="shared-batch",
+        batch_spent=Money(Decimal("0.10"), "CNY"),
+        daily_spent=Money(Decimal("0.10"), "CNY"),
+    )
+
+    snapshot = guard.snapshot()
+    assert snapshot.batch_spent.amount == Decimal("0.75")
+    assert snapshot.daily_spent.amount == Decimal("1.25")
+
+
 def test_daily_budget_rolls_over_but_batch_and_daily_are_reset() -> None:
     days = [date(2026, 7, 18)]
     guard = BudgetGuard(_limits(), today=lambda: days[0])

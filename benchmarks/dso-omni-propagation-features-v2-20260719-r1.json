@@ -1,0 +1,140 @@
+{
+  "benchmark_id": "dso-omni-propagation-features-v2-20260719-r1",
+  "contract_version": "bailian_propagation_feature_batch.v1",
+  "feature_dataset_version": "propagation_feature_outcome_dataset.v1",
+  "created_at": "2026-07-19T14:32:00Z",
+  "goal_alignment": [
+    "G1",
+    "G3"
+  ],
+  "admission_status": "research_only",
+  "evaluation_validity": "feature_schema_pilot_and_outcome_enriched_diagnostic_not_independent_holdout",
+  "source_manifest_id": "dso-visible-engagement-omni-complete-clip-diagnostic-20260719-r1",
+  "source_manifest_sha256": "007012ca81fd78f686798b9118971dcd7d3f9c575251c85150fddcfc4d904961",
+  "input_policy": {
+    "clip_count": 10,
+    "matched_pair_count": 5,
+    "account_count": 5,
+    "representation": "complete_temporal_h264_aac_proxy",
+    "frame_extraction_used": false,
+    "full_duration_required": true,
+    "audio_required": true,
+    "platform_outcomes_excluded_from_provider_request": true,
+    "model_native_traffic_score_requested": false
+  },
+  "provider": {
+    "provider_id": "aliyun_bailian",
+    "model_id": "qwen3.5-omni-plus-2026-03-15",
+    "api_version": "bailian-openai-omni-video-stream.v1",
+    "prompt_version": "dso-bailian-qwen35-omni-propagation-features.v2",
+    "request_profile": "qwen35_omni_propagation_features",
+    "request_type": "omni_propagation_feature_extraction",
+    "upload_level": "full_media",
+    "max_retries": 0
+  },
+  "schema_stabilization": {
+    "v1_initial_successful_count": 2,
+    "v1_initial_schema_valid_rate": 0.2,
+    "diagnosed_failures": [
+      "overlapping audio-video timeline windows were rejected as unordered",
+      "limitations was not consistently returned as an array of at most five strings"
+    ],
+    "v2_changes": [
+      "record validator-authored field diagnostics without provider content",
+      "sort timeline rows by start time while allowing natural overlap",
+      "bound timeline and limitations lists without rewriting semantic values",
+      "wrap a single limitations string as a one-item array",
+      "make the limitations array contract explicit in prompt v2"
+    ],
+    "v2_smoke_successful_count": 3,
+    "v2_smoke_schema_valid_rate": 1.0,
+    "v2_full_successful_count": 10,
+    "v2_full_schema_valid_rate": 1.0
+  },
+  "actual_usage": {
+    "status": "completed",
+    "schema_stabilization_network_request_count": 26,
+    "schema_stabilization_usage_estimated_cost_cny": 2.509202,
+    "full_batch_network_request_count": 7,
+    "full_batch_cache_hit_count": 3,
+    "full_batch_usage_estimated_cost_cny": 0.733441,
+    "successful_latency_median_ms": 19347.5,
+    "successful_latency_p95_ms": 23188.0,
+    "full_batch_report_sha256": "55a5e518d8ecdd178328c93fd199a222c4b06f6da6cd1e356fea4bcb3e7078cc",
+    "cached_analysis_network_request_count": 0,
+    "cached_analysis_usage_estimated_cost_cny": 0,
+    "cached_analysis_report_sha256": "7da16ba6f7a6d6a7cae2632ecd9903044cd93cd1eb2a0591f45cbd52874f2581"
+  },
+  "feature_coverage": {
+    "timeline": 1.0,
+    "audio_evidence": 1.0,
+    "visual_evidence": 1.0,
+    "abstain_count": 0
+  },
+  "outcome_availability": {
+    "visible_engagement_heat_proxy": 1.0,
+    "share_rate": 0.0,
+    "follow_conversion_rate": 0.0,
+    "watch_quality": 0.0,
+    "missing_reason": "The frozen historical rows contain visible likes, comments, favorites and shares but no views denominator, follows, 5-second retention, average watch ratio or completion rate."
+  },
+  "exploratory_associations": {
+    "status": "low_confidence_exploratory_only",
+    "high_sample_count": 5,
+    "low_sample_count": 5,
+    "comparable_pair_count": 5,
+    "largest_observed_high_side_prevalence_differences": [
+      {
+        "feature": "context_dependency",
+        "value": "low",
+        "high_prevalence": 1.0,
+        "low_prevalence": 0.4,
+        "delta": 0.6
+      },
+      {
+        "feature": "text_density",
+        "value": "high",
+        "high_prevalence": 0.6,
+        "low_prevalence": 0.0,
+        "delta": 0.6
+      },
+      {
+        "feature": "cut_density",
+        "value": "medium",
+        "high_prevalence": 0.4,
+        "low_prevalence": 0.0,
+        "delta": 0.4
+      }
+    ],
+    "largest_observed_low_side_prevalence_differences": [
+      {
+        "feature": "context_dependency",
+        "value": "high",
+        "high_prevalence": 0.0,
+        "low_prevalence": 0.4,
+        "delta": -0.4
+      },
+      {
+        "feature": "cut_density",
+        "value": "low",
+        "high_prevalence": 0.6,
+        "low_prevalence": 1.0,
+        "delta": -0.4
+      }
+    ],
+    "causal_claim_allowed": false
+  },
+  "decision": {
+    "status": "research_only",
+    "feature_extraction_action": "retain_qwen35_omni_propagation_features_v2_for_larger_frozen_validation",
+    "ranking_action": "do_not_use_model_native_traffic_score_or_promote_feature_weights",
+    "next_batch": "freeze_30_new_high_low_pairs_across_at_least_8_accounts",
+    "next_outcome_gate": "evaluate_visible_engagement_proxy_now_and_add_share_rate_follow_conversion_watch_quality_only_when_true_denominators_are_available"
+  },
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  }
+}

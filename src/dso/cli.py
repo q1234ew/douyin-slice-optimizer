@@ -60,6 +60,12 @@ from dso.learning.bailian_vector_chain import (
     run_bailian_vector_chain,
 )
 from dso.learning.bailian_cached_ablation import run_bailian_cached_ablation
+from dso.learning.bailian_failure_attribution import (
+    run_bailian_holdout_failure_attribution,
+)
+from dso.learning.bailian_evidence_quality import (
+    run_bailian_evidence_quality_reconstruction,
+)
 from dso.learning.bailian_holdout_validation import (
     evaluate_bailian_holdout_validation,
     freeze_bailian_holdout_validation,
@@ -1019,6 +1025,26 @@ def cmd_bailian_vector_holdout(benchmark_id: str, stage: str) -> dict:
     raise ValueError(f"unsupported D12-B holdout stage: {selected}")
 
 
+def cmd_bailian_vector_attribution(benchmark_id: str) -> dict:
+    init_db()
+    return run_bailian_holdout_failure_attribution(benchmark_id)
+
+
+def cmd_bailian_evidence_quality(
+    benchmark_id: str,
+    scope: str,
+    limit: int,
+    force: bool,
+) -> dict:
+    init_db()
+    return run_bailian_evidence_quality_reconstruction(
+        benchmark_id,
+        scope=scope,
+        limit=limit,
+        force=force,
+    )
+
+
 def cmd_model_scheduler_status() -> dict:
     return {**scheduler_status(), "resource_inventory": scheduler_resources()}
 
@@ -1208,6 +1234,25 @@ def _typer_main(typer_module: Any) -> None:
         stage: str = typer_module.Option("freeze", "--stage"),
     ) -> None:
         _print(cmd_bailian_vector_holdout(benchmark_id, stage))
+
+    @app.command("bailian-vector-attribution")
+    def bailian_vector_attribution_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+    ) -> None:
+        _print(cmd_bailian_vector_attribution(benchmark_id))
+
+    @app.command("bailian-evidence-quality")
+    def bailian_evidence_quality_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+        scope: str = typer_module.Option("holdout", "--scope"),
+        limit: int = typer_module.Option(40, "--limit"),
+        force: bool = typer_module.Option(False, "--force"),
+    ) -> None:
+        _print(cmd_bailian_evidence_quality(benchmark_id, scope, limit, force))
 
     @app.command("model-scheduler-status")
     def model_scheduler_status_command() -> None:
@@ -2040,6 +2085,21 @@ def _argparse_main() -> None:
     bailian_vector_holdout.add_argument(
         "--stage", choices=["freeze", "predict", "evaluate"], default="freeze"
     )
+    bailian_vector_attribution = sub.add_parser("bailian-vector-attribution")
+    bailian_vector_attribution.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_evidence_quality = sub.add_parser("bailian-evidence-quality")
+    bailian_evidence_quality.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_evidence_quality.add_argument(
+        "--scope",
+        choices=["holdout", "holdout_and_references", "all"],
+        default="holdout",
+    )
+    bailian_evidence_quality.add_argument("--limit", type=int, default=40)
+    bailian_evidence_quality.add_argument("--force", action="store_true")
     sub.add_parser("model-scheduler-status")
     model_jobs = sub.add_parser("model-jobs")
     model_jobs.add_argument("--status")
@@ -2479,6 +2539,17 @@ def _argparse_main() -> None:
         _print(cmd_bailian_vector_ablation(args.benchmark_id))
     elif args.command == "bailian-vector-holdout":
         _print(cmd_bailian_vector_holdout(args.benchmark_id, args.stage))
+    elif args.command == "bailian-vector-attribution":
+        _print(cmd_bailian_vector_attribution(args.benchmark_id))
+    elif args.command == "bailian-evidence-quality":
+        _print(
+            cmd_bailian_evidence_quality(
+                args.benchmark_id,
+                args.scope,
+                args.limit,
+                args.force,
+            )
+        )
     elif args.command == "model-scheduler-status":
         _print(cmd_model_scheduler_status())
     elif args.command == "model-scheduler-benchmark":

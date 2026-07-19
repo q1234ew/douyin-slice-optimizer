@@ -75,7 +75,7 @@
             <div>
               <strong>建议通过 SSH 本地端口转发配置</strong>
               <code>{{ tunnelCommand }}</code>
-              <span>保持命令运行，然后打开 <code>http://127.0.0.1:8765/</code>。</span>
+              <span>替换 SSH 用户和主机占位符，保持命令运行，然后打开 <code>http://127.0.0.1:8765/</code>。</span>
             </div>
             <button type="button" @click="copyTunnelCommand"><Icon name="copy" />{{ copied ? "已复制" : "复制命令" }}</button>
           </div>
@@ -144,7 +144,7 @@ const form = reactive({
   per_day_cny: "1.00"
 });
 
-const tunnelCommand = "ssh -i /Users/fuqiang/aliyun/douyin.pem -L 8765:127.0.0.1:8000 root@121.199.170.85";
+const tunnelCommand = "ssh -L 8765:127.0.0.1:8000 <ssh-user>@<ecs-host>";
 const secureSubmission = computed(() => status.value?.secure_submission_allowed === true);
 const securityReason = computed(() => status.value?.secure_submission_reason || "正在检查连接安全性");
 const allowedModels = computed(() => status.value?.allowed_models || [form.model_id]);

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from threading import Lock
 from typing import Callable
@@ -27,6 +27,10 @@ def _currency(value: str) -> str:
     if len(normalized) != 3 or not normalized.isalpha():
         raise ValueError("currency must be a three-letter code such as CNY")
     return normalized
+
+
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +138,7 @@ class BudgetGuard:
         limits: BudgetLimits,
         *,
         batch_id: str = "default",
-        today: Callable[[], date] = date.today,
+        today: Callable[[], date] = _utc_today,
         initial_batch_spent: Money | None = None,
         initial_daily_spent: Money | None = None,
     ) -> None:
@@ -218,9 +222,12 @@ class BudgetGuard:
         self._check_currency(actual_cost)
         with self._lock:
             self._roll_day()
-            active = self._reservations.pop(reservation.reservation_id, None)
+            active = self._reservations.get(reservation.reservation_id)
             if active != reservation:
                 raise ValueError("budget reservation is unknown, stale, or already settled")
+            if reservation.batch_id != self._batch_id:
+                raise ValueError("budget reservation belongs to a different active batch")
+            self._reservations.pop(reservation.reservation_id)
 
             if reservation.day == self._day:
                 self._daily_spent = max(
@@ -309,6 +316,34 @@ class BudgetGuard:
                 raise RuntimeError("cannot begin a new batch with active budget reservations")
             self._batch_id = batch_id
             self._batch_spent = Decimal("0")
+
+    def refresh_persisted_spend(
+        self,
+        *,
+        batch_id: str,
+        batch_spent: Money,
+        daily_spent: Money,
+    ) -> None:
+        """Merge ledger totals before a cross-process serialized reservation.
+
+        The caller must hold the shared ledger execution lock.  ``max`` keeps
+        this guard conservative if a prior local settlement could not yet be
+        reconstructed from the ledger; persisted totals can raise, but never
+        lower, an in-memory counter.
+        """
+
+        self._check_currency(batch_spent)
+        self._check_currency(daily_spent)
+        if not batch_id.strip():
+            raise ValueError("batch_id is required")
+        with self._lock:
+            self._roll_day()
+            if self._reservations:
+                raise RuntimeError("cannot refresh persisted spend with active reservations")
+            if batch_id != self._batch_id:
+                raise ValueError("persisted spend batch does not match the active budget batch")
+            self._batch_spent = max(self._batch_spent, batch_spent.amount)
+            self._daily_spent = max(self._daily_spent, daily_spent.amount)
 
     def snapshot(self) -> BudgetSnapshot:
         """Return counters under the same lock used by reserve and settle."""

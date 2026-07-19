@@ -92,6 +92,51 @@ class PublicModelRunner:
         batch_id: str,
         local_baseline: Mapping[str, Any],
     ) -> RunnerOutcome:
+        """Serialize public-provider runs against the shared budget ledger."""
+
+        provider = self.registry.resolve(request.target.provider_id)
+        if provider.descriptor.uses_public_network:
+            try:
+                with self.ledger.budget_execution_lock():
+                    return self._execute_serialized(
+                        request,
+                        estimated_cost=estimated_cost,
+                        upload_level=upload_level,
+                        batch_id=batch_id,
+                        local_baseline=local_baseline,
+                    )
+            except Exception as exc:
+                zero = Money(Decimal("0"), estimated_cost.currency)
+                return self._fallback(
+                    request,
+                    preflight_reserved_cost=zero,
+                    usage_estimated_cost=zero,
+                    effective_cost=zero,
+                    billing_status=ProviderBillingStatus.NOT_BILLABLE,
+                    upload_level=upload_level,
+                    batch_id=batch_id,
+                    local_baseline=local_baseline,
+                    ledger_status="budget_rejected",
+                    policy_code="budget_execution_lock_failed",
+                    error_summary=f"public-model budget execution lock failed: {exc}",
+                )
+        return self._execute_serialized(
+            request,
+            estimated_cost=estimated_cost,
+            upload_level=upload_level,
+            batch_id=batch_id,
+            local_baseline=local_baseline,
+        )
+
+    def _execute_serialized(
+        self,
+        request: ProviderRequest,
+        *,
+        estimated_cost: Money,
+        upload_level: UploadLevel,
+        batch_id: str,
+        local_baseline: Mapping[str, Any],
+    ) -> RunnerOutcome:
         """Run one shadow request while preserving the supplied local decision.
 
         Ordering is security-sensitive: validate identity and export permission,
@@ -192,7 +237,22 @@ class PublicModelRunner:
                     policy_code="budget_guard_not_configured",
                     error_summary="public provider requires a configured budget guard",
                 )
+            if self.budget_guard.snapshot().batch_id != batch_id:
+                return self._fallback(
+                    request,
+                    preflight_reserved_cost=zero,
+                    usage_estimated_cost=zero,
+                    effective_cost=zero,
+                    billing_status=ProviderBillingStatus.NOT_BILLABLE,
+                    upload_level=upload_level,
+                    batch_id=batch_id,
+                    local_baseline=local_baseline,
+                    ledger_status="budget_rejected",
+                    policy_code="budget_batch_mismatch",
+                    error_summary="budget guard batch does not match runner batch",
+                )
             try:
+                self._refresh_budget_from_ledger(batch_id)
                 reservation = self.budget_guard.reserve(estimated_cost)
             except BudgetExceeded as exc:
                 return self._fallback(
@@ -207,6 +267,20 @@ class PublicModelRunner:
                     ledger_status="budget_rejected",
                     policy_code=f"budget_{exc.scope}_exhausted",
                     error_summary=str(exc),
+                )
+            except Exception as exc:
+                return self._fallback(
+                    request,
+                    preflight_reserved_cost=zero,
+                    usage_estimated_cost=zero,
+                    effective_cost=zero,
+                    billing_status=ProviderBillingStatus.NOT_BILLABLE,
+                    upload_level=upload_level,
+                    batch_id=batch_id,
+                    local_baseline=local_baseline,
+                    ledger_status="budget_rejected",
+                    policy_code="budget_guard_error",
+                    error_summary=f"budget refresh or reservation failed: {exc}",
                 )
             if reservation.batch_id != batch_id:
                 self.budget_guard.release(reservation)
@@ -324,27 +398,37 @@ class PublicModelRunner:
             )
         except Exception as exc:
             metrics = result.metrics if result is not None else None
+            budget_recovery_error = ""
             if reservation is not None and not reservation_finalized:
                 # Once a network-capable provider may have started, absence of
                 # usage is not evidence of zero cost. Keep the full reservation.
-                if metrics is None:
-                    self.budget_guard.settle_unknown(reservation)  # type: ignore[union-attr]
-                    effective_cost = reservation.amount
-                    billing_status = ProviderBillingStatus.UNKNOWN
-                else:
-                    try:
+                try:
+                    if metrics is None:
+                        self.budget_guard.settle_unknown(reservation)  # type: ignore[union-attr]
+                        effective_cost = reservation.amount
+                        billing_status = ProviderBillingStatus.UNKNOWN
+                    else:
                         effective_cost, usage_cost, _ = self._finalize_budget(
                             reservation,
                             metrics,
                         )
                         billing_status = metrics.billing_status
-                    except Exception:
-                        try:
-                            self.budget_guard.settle_unknown(reservation)  # type: ignore[union-attr]
-                        except Exception:
-                            pass
-                        effective_cost = reservation.amount
-                        billing_status = ProviderBillingStatus.UNKNOWN
+                except Exception as budget_exc:
+                    budget_recovery_error = (
+                        f"budget finalization failed: {type(budget_exc).__name__}: {budget_exc}"
+                    )
+                    try:
+                        self.budget_guard.settle_unknown(reservation)  # type: ignore[union-attr]
+                    except Exception as unknown_exc:
+                        budget_recovery_error += (
+                            "; conservative settlement failed: "
+                            f"{type(unknown_exc).__name__}: {unknown_exc}"
+                        )
+                    effective_cost = reservation.amount
+                    billing_status = ProviderBillingStatus.UNKNOWN
+            error_summary = str(exc)
+            if budget_recovery_error:
+                error_summary = f"{error_summary}; {budget_recovery_error}"
             return self._fallback(
                 request,
                 preflight_reserved_cost=(reservation.amount if reservation else zero),
@@ -356,9 +440,25 @@ class PublicModelRunner:
                 local_baseline=local_baseline,
                 ledger_status="error",
                 policy_code="provider_error",
-                error_summary=str(exc),
+                error_summary=error_summary,
                 metrics=metrics,
             )
+
+    def _refresh_budget_from_ledger(self, batch_id: str) -> None:
+        """Refresh conservative totals while the ledger execution lock is held."""
+
+        if self.budget_guard is None:  # pragma: no cover - guarded by caller
+            raise RuntimeError("public provider requires a configured budget guard")
+        currency = self.budget_guard.limits.currency
+        recorded_date = self.budget_guard.snapshot().day.isoformat()
+        self.budget_guard.refresh_persisted_spend(
+            batch_id=batch_id,
+            batch_spent=self.ledger.total_spend(currency=currency, batch_id=batch_id),
+            daily_spent=self.ledger.total_spend(
+                currency=currency,
+                recorded_date=recorded_date,
+            ),
+        )
 
     def _finalize_budget(
         self,

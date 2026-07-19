@@ -4,19 +4,29 @@ import base64
 from decimal import Decimal
 import gzip
 import json
+from unittest.mock import patch
 
 import httpx
 import pytest
 
 from dso.providers.aliyun_bailian import (
+    BAILIAN_COMPLETE_SHORT_CLIP_PROFILE,
     BAILIAN_EMBEDDING_MODEL,
     BAILIAN_PRIMARY_JUDGE_MODEL,
+    BAILIAN_QWEN35_OMNI_MODEL,
+    BAILIAN_QWEN35_OMNI_FEATURE_PROFILE,
+    BAILIAN_QWEN35_OMNI_SHORT_CLIP_PROFILE,
     BAILIAN_RERANK_MODEL,
     AliyunBailianProvider,
     BailianConfigurationError,
+    BailianResponseError,
     estimate_bailian_cost,
+    estimate_bailian_qwen35_omni_cost,
     estimate_bailian_research_cost,
     validate_bailian_base_url,
+    _normalize_qwen35_omni_propagation_feature_output,
+    _safe_schema_error_summary,
+    _validate_qwen35_omni_propagation_feature_output,
 )
 from dso.providers.budget import BudgetGuard, BudgetLimits, Money
 from dso.providers.cache import FileResponseCache
@@ -388,6 +398,40 @@ def test_bailian_success_without_usage_fails_closed(monkeypatch: pytest.MonkeyPa
     assert result.status == ProviderCallStatus.FAILED
     assert result.metrics.billing_status == ProviderBillingStatus.UNKNOWN
     assert result.metrics.error_code == "invalid_provider_response"
+    assert "non-zero usage" in result.metrics.error_message
+
+
+def test_schema_error_summary_rejects_unbounded_or_multiline_details() -> None:
+    assert _safe_schema_error_summary(BailianResponseError("audio.energy is invalid")) == (
+        "audio.energy is invalid"
+    )
+    assert _safe_schema_error_summary(BailianResponseError("unsafe\nprovider output")) == (
+        "invalid_response_shape"
+    )
+    assert _safe_schema_error_summary(BailianResponseError("x" * 241)) == (
+        "invalid_response_shape"
+    )
+
+
+def test_propagation_feature_normalization_only_bounds_and_orders_lists() -> None:
+    normalized = _normalize_qwen35_omni_propagation_feature_output(
+        {
+            "limitations": [f"limitation-{index}" for index in range(7)],
+            "timeline": [
+                {"start_seconds": 5, "end_seconds": 8, "visual_event": "b"},
+                {"start_seconds": 0, "end_seconds": 6, "visual_event": "a"},
+            ],
+            "content_form": "performance",
+        }
+    )
+
+    assert normalized["limitations"] == [f"limitation-{index}" for index in range(5)]
+    assert [item["start_seconds"] for item in normalized["timeline"]] == [0, 5]
+    assert normalized["timeline"][0]["end_seconds"] == 6
+    assert normalized["content_form"] == "performance"
+    assert _normalize_qwen35_omni_propagation_feature_output(
+        {"limitations": "无法确认字幕来源"}
+    )["limitations"] == ["无法确认字幕来源"]
 
 
 def test_bailian_response_body_is_bounded_before_json_parsing(
@@ -696,6 +740,437 @@ def test_bailian_pairwise_judge_has_frozen_schema(
     assert result.target.prompt_version == "dso-cloud-pairwise-judge.v1"
 
 
+def test_bailian_complete_short_clip_profile_sends_bounded_base64_video(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    video = b"\x00\x00\x00\x18ftypisom" + b"synthetic-video-fixture"
+    video_sha256 = __import__("hashlib").sha256(video).hexdigest()
+    output = {
+        "summary": "舞台上的多人表演画面。",
+        "category": "music_variety",
+        "hook": "开头立即出现多人同框。",
+        "timeline": [
+            {"start_seconds": 0, "end_seconds": 4, "event": "多人同框"},
+            {"start_seconds": 4, "end_seconds": 8, "event": "镜头切换"},
+        ],
+        "strengths": ["主体明确"],
+        "weaknesses": ["画面变化有限"],
+        "limitations": ["未分析音轨"],
+        "traffic_potential_score": 0.61,
+        "confidence": 0.76,
+        "abstain": False,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json=_response_payload(model=BAILIAN_PRIMARY_JUDGE_MODEL, content=output),
+            headers={"x-request-id": "req-video-safe-1"},
+        )
+
+    monkeypatch.setenv("DSO_BAILIAN_API_KEY", SECRET)
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = AliyunBailianProvider(
+        model_id=BAILIAN_PRIMARY_JUDGE_MODEL,
+        request_profile=BAILIAN_COMPLETE_SHORT_CLIP_PROFILE,
+        base_url=BASE_URL,
+        client=client,
+    )
+    request = ProviderRequest(
+        request_id="complete-short-clip-test",
+        request_type="complete_short_clip_analysis",
+        target=provider.descriptor.identity,
+        content_sha256=stable_json_sha256(
+            {"video_sha256": video_sha256, "summary": "synthetic"}
+        ),
+        input_size=ProviderInputSize(
+            video_seconds=8,
+            frame_count=8,
+            text_characters=32,
+            input_tokens=3_000,
+            request_bytes=len(video),
+        ),
+        data_permission=_permission_record(),
+        execution_policy=ProviderExecutionPolicy(
+            public_api_enabled=True,
+            budget_authorized=True,
+            timeout_seconds=5,
+            max_retries=0,
+        ),
+        payload={
+            "summary": "完全合成的上下文",
+            "video_base64": base64.b64encode(video).decode("ascii"),
+            "video_mime_type": "video/mp4",
+            "video_sha256": video_sha256,
+        },
+        parameters={
+            "estimated_output_tokens": 600,
+            "fps": 1.0,
+            "max_pixels": 262_144,
+        },
+    )
+    try:
+        preflight = provider.preflight_request(request)
+        result = provider.invoke(request)
+    finally:
+        client.close()
+
+    assert provider.descriptor.request_types == ("complete_short_clip_analysis",)
+    assert provider.descriptor.identity.api_version == "bailian-openai-video-chat.v1"
+    assert provider.descriptor.identity.prompt_version.endswith(
+        "complete-short-clip-analysis.v1"
+    )
+    assert preflight["network_request_count"] == 0
+    assert preflight["request_profile"] == BAILIAN_COMPLETE_SHORT_CLIP_PROFILE
+    assert result.status == ProviderCallStatus.SUCCEEDED
+    assert result.output == output
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["max_tokens"] == 600
+    video_item = body["messages"][1]["content"][0]
+    assert video_item["type"] == "video_url"
+    assert video_item["video_url"]["fps"] == 1.0
+    assert video_item["video_url"]["url"].startswith("data:video/mp4;base64,")
+    assert video_item["max_pixels"] == 262_144
+    assert "http://" not in json.dumps(body)
+
+
+def test_bailian_complete_short_clip_rejects_mismatched_media_hash() -> None:
+    video = b"\x00\x00\x00\x18ftypisom" + b"synthetic-video-fixture"
+    provider = AliyunBailianProvider(
+        model_id=BAILIAN_PRIMARY_JUDGE_MODEL,
+        request_profile=BAILIAN_COMPLETE_SHORT_CLIP_PROFILE,
+        base_url=BASE_URL,
+    )
+    request = ProviderRequest(
+        request_id="complete-short-clip-invalid-hash",
+        request_type="complete_short_clip_analysis",
+        target=provider.descriptor.identity,
+        content_sha256=stable_json_sha256({"fixture": "invalid-hash"}),
+        input_size=ProviderInputSize(
+            video_seconds=8,
+            frame_count=8,
+            text_characters=10,
+            input_tokens=3_000,
+            request_bytes=len(video),
+        ),
+        data_permission=_permission_record(),
+        execution_policy=ProviderExecutionPolicy(
+            public_api_enabled=True,
+            budget_authorized=True,
+        ),
+        payload={
+            "summary": "合成上下文",
+            "video_base64": base64.b64encode(video).decode("ascii"),
+            "video_mime_type": "video/mp4",
+            "video_sha256": "0" * 64,
+        },
+        parameters={"estimated_output_tokens": 600, "fps": 1.0, "max_pixels": 262_144},
+    )
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        provider.preflight_request(request)
+
+
+def test_bailian_qwen35_omni_short_clip_streams_text_and_prices_audio_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    video = b"\x00\x00\x00\x18ftypisom" + b"synthetic-omni-video-with-audio"
+    video_sha256 = __import__("hashlib").sha256(video).hexdigest()
+    output = {
+        "summary": "一段带演唱和字幕的舞台短视频。",
+        "category": "music_variety",
+        "hook": "开头的人声起句与人物近景同时出现。",
+        "timeline": [
+            {
+                "start_seconds": 0,
+                "end_seconds": 4,
+                "visual_event": "人物近景并出现字幕。",
+                "audio_event": "有清晰人声和伴奏。",
+                "speech_or_lyrics": "合成歌词片段",
+                "visible_text": "合成字幕",
+            },
+            {
+                "start_seconds": 4,
+                "end_seconds": 8,
+                "visual_event": "镜头切到舞台全景。",
+                "audio_event": "伴奏继续。",
+                "speech_or_lyrics": "",
+                "visible_text": "",
+            },
+        ],
+        "audio_characteristics": ["人声清晰", "带音乐伴奏"],
+        "strengths": ["音画钩子同步"],
+        "weaknesses": ["中段变化有限"],
+        "limitations": ["仅为合成测试"],
+        "traffic_potential_score": 0.66,
+        "confidence": 0.82,
+        "abstain": False,
+    }
+    content = json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+    midpoint = len(content) // 2
+    chunks = [
+        {
+            "id": "omni-safe-1",
+            "model": BAILIAN_QWEN35_OMNI_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": content[:midpoint]},
+                    "finish_reason": None,
+                }
+            ],
+            "usage": None,
+        },
+        {
+            "id": "omni-safe-1",
+            "model": BAILIAN_QWEN35_OMNI_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": content[midpoint:]},
+                    "finish_reason": None,
+                }
+            ],
+            "usage": None,
+        },
+        {
+            "id": "omni-safe-1",
+            "model": BAILIAN_QWEN35_OMNI_MODEL,
+            "choices": [
+                {"index": 0, "delta": {"content": ""}, "finish_reason": "stop"}
+            ],
+            "usage": None,
+        },
+        {
+            "id": "omni-safe-1",
+            "model": BAILIAN_QWEN35_OMNI_MODEL,
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 2600,
+                "completion_tokens": 300,
+                "total_tokens": 2900,
+                "prompt_tokens_details": {
+                    "text_tokens": 144,
+                    "video_tokens": 2400,
+                    "audio_tokens": 56,
+                },
+                "completion_tokens_details": {"text_tokens": 300},
+            },
+        },
+    ]
+    stream = "".join(
+        f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks
+    ) + "data: [DONE]\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["accept"] = request.headers.get("accept")
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            content=stream.encode("utf-8"),
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+        )
+
+    monkeypatch.setenv("DSO_BAILIAN_API_KEY", SECRET)
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = AliyunBailianProvider(
+        model_id=BAILIAN_QWEN35_OMNI_MODEL,
+        request_profile=BAILIAN_QWEN35_OMNI_SHORT_CLIP_PROFILE,
+        base_url=BASE_URL,
+        client=client,
+    )
+    request = ProviderRequest(
+        request_id="qwen35-omni-short-clip-test",
+        request_type="omni_complete_short_clip_analysis",
+        target=provider.descriptor.identity,
+        content_sha256=stable_json_sha256(
+            {"video_sha256": video_sha256, "summary": "synthetic-omni"}
+        ),
+        input_size=ProviderInputSize(
+            video_seconds=8,
+            audio_seconds=8,
+            frame_count=8,
+            text_characters=32,
+            input_tokens=3_000,
+            request_bytes=len(video),
+        ),
+        data_permission=_permission_record(),
+        execution_policy=ProviderExecutionPolicy(
+            public_api_enabled=True,
+            budget_authorized=True,
+            timeout_seconds=5,
+            max_retries=0,
+        ),
+        payload={
+            "summary": "完全合成的音画上下文",
+            "video_base64": base64.b64encode(video).decode("ascii"),
+            "video_mime_type": "video/mp4",
+            "video_sha256": video_sha256,
+        },
+        parameters={
+            "estimated_output_tokens": 600,
+            "estimated_audio_tokens": 56,
+            "fps": 1.0,
+            "max_pixels": 262_144,
+        },
+    )
+    try:
+        preflight = provider.preflight_request(request)
+        assert captured == {}
+        result = provider.invoke(request)
+    finally:
+        client.close()
+
+    assert preflight["audio_seconds"] == 8
+    assert preflight["request_profile"] == BAILIAN_QWEN35_OMNI_SHORT_CLIP_PROFILE
+    assert result.status == ProviderCallStatus.SUCCEEDED
+    assert result.output == output
+    assert result.metrics.input_size.input_tokens == 2600
+    assert result.metrics.output_tokens == 300
+    assert result.metrics.estimated_cost == Decimal("0.032776")
+    assert result.metrics.provider_request_id == "omni-safe-1"
+    assert captured["accept"] == "text/event-stream"
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+    assert body["modalities"] == ["text"]
+    assert "audio" not in body
+    assert "response_format" not in body
+    assert "enable_thinking" not in body
+    video_item = body["messages"][1]["content"][0]
+    assert video_item["video_url"]["url"].startswith("data:;base64,")
+    assert video_item["video_url"]["fps"] == 1.0
+
+
+def test_bailian_qwen35_omni_cost_uses_modality_specific_rates() -> None:
+    cost = estimate_bailian_qwen35_omni_cost(
+        input_tokens=2600,
+        audio_input_tokens=56,
+        output_text_tokens=300,
+    )
+    assert cost.amount == Decimal("0.032776")
+
+
+def test_bailian_qwen35_omni_propagation_feature_profile_has_no_traffic_score() -> None:
+    output = {
+        "content_form": "performance",
+        "hook": {
+            "onset_seconds": 0.4,
+            "modality": "audio_visual",
+            "strength": "high",
+            "evidence": "近景和演唱同时开始。",
+        },
+        "audio": {
+            "music": True,
+            "singing": True,
+            "speech": False,
+            "audience_reaction": True,
+            "energy": "high",
+            "energy_change": "rising",
+            "vocal_clarity": "high",
+            "evidence": "人声清晰，结尾出现欢呼。",
+        },
+        "visual": {
+            "primary_scene": "stage",
+            "face_prominence": "high",
+            "motion": "medium",
+            "cut_density": "medium",
+            "text_density": "low",
+            "evidence": "以人物近景和舞台全景交替呈现。",
+        },
+        "narrative": {
+            "arc": "build",
+            "context_dependency": "low",
+            "novelty": "medium",
+            "emotional_intensity": "high",
+            "payoff_present": True,
+            "payoff_seconds": 7.2,
+            "evidence": "演唱能量持续上升并在结尾释放。",
+        },
+        "timeline": [
+            {
+                "start_seconds": 0,
+                "end_seconds": 4,
+                "visual_event": "人物近景。",
+                "audio_event": "演唱开始。",
+            },
+            {
+                "start_seconds": 3.5,
+                "end_seconds": 8,
+                "visual_event": "切到舞台全景。",
+                "audio_event": "能量上升并出现欢呼。",
+            },
+        ],
+        "limitations": [],
+        "confidence": 0.86,
+        "abstain": False,
+    }
+
+    _validate_qwen35_omni_propagation_feature_output(output, video_seconds=8)
+    self_reported_score = dict(output, traffic_potential_score=0.9)
+    with pytest.raises(BailianConfigurationError, match="fixed Plus snapshot"):
+        AliyunBailianProvider(
+            model_id=BAILIAN_PRIMARY_JUDGE_MODEL,
+            request_profile=BAILIAN_QWEN35_OMNI_FEATURE_PROFILE,
+        )
+    with pytest.raises(BailianResponseError, match="frozen schema"):
+        _validate_qwen35_omni_propagation_feature_output(
+            self_reported_score,
+            video_seconds=8,
+        )
+
+    provider = AliyunBailianProvider(
+        model_id=BAILIAN_QWEN35_OMNI_MODEL,
+        request_profile=BAILIAN_QWEN35_OMNI_FEATURE_PROFILE,
+        base_url=BASE_URL,
+    )
+    video = b"\x00\x00\x00\x18ftypisom" + b"synthetic-feature-video-with-audio"
+    video_sha256 = __import__("hashlib").sha256(video).hexdigest()
+    request = ProviderRequest(
+        request_id="qwen35-omni-propagation-feature-test",
+        request_type="omni_propagation_feature_extraction",
+        target=provider.descriptor.identity,
+        content_sha256=stable_json_sha256({"video_sha256": video_sha256}),
+        input_size=ProviderInputSize(
+            video_seconds=8,
+            audio_seconds=8,
+            frame_count=8,
+            text_characters=32,
+            input_tokens=3_000,
+            request_bytes=len(video),
+        ),
+        data_permission=_permission_record(),
+        execution_policy=ProviderExecutionPolicy(
+            public_api_enabled=True,
+            budget_authorized=True,
+            timeout_seconds=5,
+            max_retries=0,
+        ),
+        payload={
+            "summary": "完全合成的结构化特征测试",
+            "video_base64": base64.b64encode(video).decode("ascii"),
+            "video_mime_type": "video/mp4",
+            "video_sha256": video_sha256,
+        },
+        parameters={
+            "estimated_output_tokens": 900,
+            "estimated_audio_tokens": 56,
+            "fps": 1.0,
+            "max_pixels": 262_144,
+        },
+    )
+
+    preflight = provider.preflight_request(request)
+    assert preflight["request_profile"] == BAILIAN_QWEN35_OMNI_FEATURE_PROFILE
+    assert provider.descriptor.request_types == ("omni_propagation_feature_extraction",)
+    assert provider.descriptor.identity.prompt_version.endswith("propagation-features.v2")
+
+
 def test_bailian_research_cost_is_input_only_and_modality_aware() -> None:
     cost = estimate_bailian_research_cost(
         request_type="multimodal_embedding",
@@ -776,6 +1251,128 @@ def test_runner_caches_before_budget_and_persists_actual_usage_and_attempts(
     persisted = (tmp_path / "ledger.sqlite3").read_bytes()
     assert SECRET.encode() not in persisted
     assert "完全合成的候选摘要".encode() not in persisted
+
+
+def test_runner_refreshes_shared_ledger_before_a_second_process_reserves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    network_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    provider, client = _provider_with_handler(monkeypatch, handler)
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger_path = tmp_path / "shared-ledger.sqlite3"
+    limits = BudgetLimits(
+        per_request=Money(Decimal("0.0005"), "CNY"),
+        per_batch=Money(Decimal("0.0007"), "CNY"),
+        per_day=Money(Decimal("0.0010"), "CNY"),
+    )
+    # Construct both guards before the first call to reproduce stale process
+    # bootstrap totals; the shared ledger lock + refresh must close that race.
+    first_runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "cache-first"),
+        ledger=PublicModelLedger(ledger_path),
+        policy=_policy(),
+        budget_guard=BudgetGuard(limits, batch_id="shared-batch"),
+    )
+    second_runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "cache-second"),
+        ledger=PublicModelLedger(ledger_path),
+        policy=_policy(),
+        budget_guard=BudgetGuard(limits, batch_id="shared-batch"),
+    )
+
+    try:
+        first = first_runner.execute(
+            _request(provider, request_id="shared-budget-first"),
+            estimated_cost=Money(Decimal("0.0005"), "CNY"),
+            upload_level=UploadLevel.STRUCTURED_SUMMARY,
+            batch_id="shared-batch",
+            local_baseline={"score": 0.4},
+        )
+        second = second_runner.execute(
+            _request(
+                provider,
+                request_id="shared-budget-second",
+                payload={"summary": "第二条完全合成且不同的摘要。"},
+            ),
+            estimated_cost=Money(Decimal("0.0005"), "CNY"),
+            upload_level=UploadLevel.STRUCTURED_SUMMARY,
+            batch_id="shared-batch",
+            local_baseline={"score": 0.4},
+        )
+    finally:
+        client.close()
+
+    assert first.status == "shadow_succeeded"
+    assert second.status == "fallback_local"
+    assert second.policy_code == "budget_per_batch_exhausted"
+    assert network_calls == 1
+
+
+def test_runner_records_budget_recovery_failure_instead_of_swallowing_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    provider, client = _provider_with_handler(monkeypatch, handler)
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger = PublicModelLedger(tmp_path / "recovery-ledger.sqlite3")
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "recovery-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=BudgetGuard(
+            BudgetLimits(
+                per_request=Money(Decimal("0.10"), "CNY"),
+                per_batch=Money(Decimal("1"), "CNY"),
+                per_day=Money(Decimal("2"), "CNY"),
+            ),
+            batch_id="recovery-batch",
+        ),
+    )
+
+    try:
+        with patch.object(
+            runner,
+            "_finalize_budget",
+            side_effect=[
+                RuntimeError("initial-finalization-error"),
+                RuntimeError("recovery-finalization-error"),
+            ],
+        ):
+            outcome = runner.execute(
+                _request(provider, request_id="budget-recovery-test"),
+                estimated_cost=Money(Decimal("0.01"), "CNY"),
+                upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                batch_id="recovery-batch",
+                local_baseline={"score": 0.4},
+            )
+    finally:
+        client.close()
+
+    row = next(ledger.iter_entries())
+    assert outcome.status == "fallback_local"
+    assert "initial-finalization-error" in str(row["error_summary"])
+    assert "recovery-finalization-error" in str(row["error_summary"])
 
 
 def test_runner_falls_back_when_actual_usage_exceeds_reservation(
@@ -947,3 +1544,37 @@ def test_environment_runtime_accepts_referenced_non_fixed_retention_policy(
     assert "bounded research-only shadow batch" in status["next_action"]
     assert runtime.data_permission.retention_days is None
     assert "terms.alicdn.com" in runtime.data_permission.retention_policy_reference
+
+
+def test_environment_runtime_allows_explicit_full_media_for_video_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    configured = {
+        "DSO_ROOT": str(tmp_path),
+        "DSO_PUBLIC_MODEL_API_ENABLED": "1",
+        "DSO_PUBLIC_MODEL_PROVIDER": "aliyun_bailian",
+        "DSO_BAILIAN_MODEL_ID": BAILIAN_PRIMARY_JUDGE_MODEL,
+        "DSO_BAILIAN_BASE_URL": BASE_URL,
+        "DSO_BAILIAN_API_KEY": SECRET,
+        "DSO_PUBLIC_MODEL_BUDGET_PER_REQUEST_CNY": "0.10",
+        "DSO_PUBLIC_MODEL_BUDGET_PER_BATCH_CNY": "1.00",
+        "DSO_PUBLIC_MODEL_BUDGET_PER_DAY_CNY": "2.00",
+        "DSO_BAILIAN_DATA_ALLOWED": "1",
+        "DSO_BAILIAN_AUTHORIZATION_BASIS": "owner_authorized_single_video_shadow",
+        "DSO_BAILIAN_REDACTION_STRATEGY": "complete_short_clip_without_audio",
+        "DSO_BAILIAN_RETENTION_DAYS": "provider_minimum_necessary",
+        "DSO_BAILIAN_RETENTION_POLICY_REFERENCE": "https://example.test/retention",
+        "DSO_BAILIAN_ALLOWED_UPLOAD_LEVELS": "full_media",
+    }
+    for name, value in configured.items():
+        monkeypatch.setenv(name, value)
+
+    runtime = build_aliyun_bailian_runtime(
+        batch_id="complete-short-clip-runtime",
+        model_id=BAILIAN_PRIMARY_JUDGE_MODEL,
+        request_profile=BAILIAN_COMPLETE_SHORT_CLIP_PROFILE,
+    )
+
+    assert runtime.allowed_upload_levels == frozenset({UploadLevel.FULL_MEDIA})
+    assert runtime.provider.descriptor.request_types == ("complete_short_clip_analysis",)

@@ -1,0 +1,72 @@
+{
+  "contract_version": "propagation_feature_recovery_manifest.v1",
+  "manifest_id": "dso-omni-propagation-account-holdout-20260720-r1-recovery1800-r1",
+  "parent_manifest_id": "dso-omni-propagation-account-holdout-20260720-r1",
+  "parent_manifest_file_sha256": "8eeb114bda5f7343e0f038c1cd8c066f52af83e8cb3581a0fcceb87f166ca2a1",
+  "admission_status": "research_only",
+  "recovery_policy": {
+    "reason": "finish_reason_length_at_1200_tokens",
+    "output_token_limit": 1800,
+    "only_failed_samples": true,
+    "sample_count": 1
+  },
+  "pairs": [
+    {
+      "pair_id": "propagation-validation-004",
+      "account_id": "taotao_daxiaojie",
+      "left_sample_id": "hcap_6f7c977746b6466a",
+      "right_sample_id": "hcap_a7bcd1a5d47744a3",
+      "duration_delta_seconds": 0.7669,
+      "normalized_reward_gap": 79.0874,
+      "reward_proxy_ratio": 3.3518
+    }
+  ],
+  "clips": [
+    {
+      "sample_id": "hcap_a7bcd1a5d47744a3",
+      "source_pair_id": "propagation-validation-004",
+      "side": "right",
+      "diagnostic_role": "account_isolated_propagation_feature_pair",
+      "account_id": "taotao_daxiaojie",
+      "dataset_id": "taotao_daxiaojie_20260630_appleevents_api",
+      "platform_item_id": "7637744469173147045",
+      "performance_label": "high",
+      "normalized_reward": 97.9087,
+      "reward_proxy": 49.134017,
+      "visible_engagement": {
+        "likes": 56233,
+        "comments": 692,
+        "favorites": 2644,
+        "shares": 5839
+      },
+      "views": null,
+      "follows": null,
+      "five_second_retention": null,
+      "average_watch_ratio": null,
+      "completion_rate": null,
+      "publication_age_bucket": "age_31_90d",
+      "duration_bucket": "31-60s",
+      "content_category": "performance_clip",
+      "program_name": "",
+      "published_at": "2026-05-09T04:29:21+00:00",
+      "title_sha256": "e4334dfd2d239d9926acd632b81db1d24b8570c3f346b8075b02432f8de03a9f",
+      "stable_title_key_sha256": "c1a519de96308b2d448f2e406525a3c05a51c9562c532e2d3d8775d622e7efd5",
+      "local_path": "data/douyin_media_assets/taotao_daxiaojie/beta_d4_to50_taotao_daxiaojie_20260706_234738/videos/7637744469173147045.mp4",
+      "remote_filename": "taotao_daxiaojie/beta_d4_to50_taotao_daxiaojie_20260706_234738/videos/7637744469173147045.mp4",
+      "sha256": "62120755bb027cd7a2f4be319895f24c16adc03afd1ec438a786df9097b68cbf",
+      "size_bytes": 5050894,
+      "duration_seconds": 58.328,
+      "video_codec": "hevc",
+      "audio_codec": "aac",
+      "width": 720,
+      "height": 1280
+    }
+  ],
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  },
+  "manifest_sha256": "e63c84809833260ce77439314c56286f344cf48f30ebbc4ba9efa51620960cb1"
+}

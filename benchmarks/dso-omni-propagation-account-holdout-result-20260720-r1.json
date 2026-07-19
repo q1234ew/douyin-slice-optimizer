@@ -1,0 +1,1114 @@
+{
+  "contract_version": "propagation_feature_account_holdout.v1",
+  "created_at": "2026-07-19T18:24:42+00:00",
+  "status": "completed",
+  "admission_status": "research_only",
+  "goal_alignment": [
+    "G1",
+    "G3"
+  ],
+  "manifest_id": "dso-omni-propagation-account-holdout-20260720-r1",
+  "manifest_file_sha256": "8eeb114bda5f7343e0f038c1cd8c066f52af83e8cb3581a0fcceb87f166ca2a1",
+  "feature_report_sha256": "f28b844e6d6a7fba58db6b4b151bbd60b4143deb5549d270f401072f9fa8530c",
+  "split_policy": {
+    "name": "leave_one_account_out",
+    "account_count": 8,
+    "sample_count": 60,
+    "pair_count": 30,
+    "folds": [
+      {
+        "held_account": "beidou_live",
+        "training_account_count": 7,
+        "training_sample_count": 58,
+        "evaluation_sample_count": 2,
+        "feature_value_count": 48
+      },
+      {
+        "held_account": "duanduanzhengzheng",
+        "training_account_count": 7,
+        "training_sample_count": 46,
+        "evaluation_sample_count": 14,
+        "feature_value_count": 45
+      },
+      {
+        "held_account": "raoxianyin",
+        "training_account_count": 7,
+        "training_sample_count": 46,
+        "evaluation_sample_count": 14,
+        "feature_value_count": 47
+      },
+      {
+        "held_account": "sixuweilive",
+        "training_account_count": 7,
+        "training_sample_count": 58,
+        "evaluation_sample_count": 2,
+        "feature_value_count": 48
+      },
+      {
+        "held_account": "taotao_daxiaojie",
+        "training_account_count": 7,
+        "training_sample_count": 52,
+        "evaluation_sample_count": 8,
+        "feature_value_count": 47
+      },
+      {
+        "held_account": "tianci",
+        "training_account_count": 7,
+        "training_sample_count": 46,
+        "evaluation_sample_count": 14,
+        "feature_value_count": 46
+      },
+      {
+        "held_account": "yuhuan",
+        "training_account_count": 7,
+        "training_sample_count": 56,
+        "evaluation_sample_count": 4,
+        "feature_value_count": 48
+      },
+      {
+        "held_account": "yule_xiaoe_yu",
+        "training_account_count": 7,
+        "training_sample_count": 58,
+        "evaluation_sample_count": 2,
+        "feature_value_count": 46
+      }
+    ],
+    "platform_item_overlap_between_train_and_eval": 0,
+    "feature_outcomes_used_only_from_other_accounts": true
+  },
+  "fixed_configuration": {
+    "baseline": "research_ranker_v2_4_account_isolated",
+    "feature_strategy": "categorical_laplace_log_odds",
+    "omni_weight": 0.15,
+    "v2_4_weight": 0.85,
+    "top_k": 15,
+    "weight_search_performed": false
+  },
+  "feature_coverage": {
+    "successful_count": 60,
+    "sample_count": 60,
+    "coverage": 1.0
+  },
+  "pair_metrics": {
+    "research_ranker_v2_4_account_isolated": {
+      "pair_count": 30,
+      "correct_credit": 20.0,
+      "tie_count": 0,
+      "pair_accuracy": 0.666667,
+      "pairs": [
+        {
+          "pair_id": "propagation-validation-001",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_a96fc6f9c5784460",
+          "selected_sample_id": "hcap_a96fc6f9c5784460",
+          "left_score": 51.5978,
+          "right_score": 50.2295,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-002",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_0bf66216662f45b8",
+          "selected_sample_id": "hcap_400ac722a1a84e62",
+          "left_score": 46.6139,
+          "right_score": 46.5836,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-003",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_e95c417ba7d14a99",
+          "selected_sample_id": "hcap_e95c417ba7d14a99",
+          "left_score": 47.0307,
+          "right_score": 50.1699,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-004",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_a7bcd1a5d47744a3",
+          "selected_sample_id": "hcap_6f7c977746b6466a",
+          "left_score": 45.7453,
+          "right_score": 45.0721,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-005",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_7b8ccfd969864ee0",
+          "selected_sample_id": "hcap_7b8ccfd969864ee0",
+          "left_score": 52.4138,
+          "right_score": 50.1903,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-006",
+          "account_id": "beidou_live",
+          "expected_sample_id": "hcap_fc99dd6ba82144df",
+          "selected_sample_id": "hcap_fc99dd6ba82144df",
+          "left_score": 52.5019,
+          "right_score": 51.4853,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-007",
+          "account_id": "sixuweilive",
+          "expected_sample_id": "hcap_1d9f585e7c4a4b0c",
+          "selected_sample_id": "hcap_1d9f585e7c4a4b0c",
+          "left_score": 49.9092,
+          "right_score": 54.361,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-008",
+          "account_id": "yule_xiaoe_yu",
+          "expected_sample_id": "hcap_8a0f1b8771d94bbc",
+          "selected_sample_id": "hcap_8a0f1b8771d94bbc",
+          "left_score": 51.6333,
+          "right_score": 49.1734,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-009",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_71c0f29a3acf4060",
+          "selected_sample_id": "hcap_71c0f29a3acf4060",
+          "left_score": 52.1938,
+          "right_score": 60.1029,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-010",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_37f54624ac934af2",
+          "selected_sample_id": "hcap_37f54624ac934af2",
+          "left_score": 46.6102,
+          "right_score": 54.1303,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-011",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_91a50cd194ff49fc",
+          "selected_sample_id": "hcap_b55651e1612546c7",
+          "left_score": 50.4536,
+          "right_score": 48.7033,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-012",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_01b455bc48dd4862",
+          "selected_sample_id": "hcap_292a7fbd091b4ec5",
+          "left_score": 47.7386,
+          "right_score": 45.2598,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-013",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_c98f0dd6071f4581",
+          "selected_sample_id": "hcap_c98f0dd6071f4581",
+          "left_score": 60.075,
+          "right_score": 52.6572,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-014",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_572431d0d53a43bc",
+          "selected_sample_id": "hcap_572431d0d53a43bc",
+          "left_score": 52.0088,
+          "right_score": 56.0308,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-015",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_f709297c49d743e8",
+          "selected_sample_id": "hcap_f709297c49d743e8",
+          "left_score": 46.6979,
+          "right_score": 48.5628,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-016",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_fa9600a86a944291",
+          "selected_sample_id": "hcap_51d6cce6072a41ae",
+          "left_score": 49.381,
+          "right_score": 51.2823,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-017",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_b542d49dea8247c0",
+          "selected_sample_id": "hcap_cd91919c0378483e",
+          "left_score": 49.718,
+          "right_score": 51.7834,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-018",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_b638d0143dc94952",
+          "selected_sample_id": "hcap_b638d0143dc94952",
+          "left_score": 46.5833,
+          "right_score": 46.1489,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-019",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "selected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "left_score": 46.6255,
+          "right_score": 46.7024,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-020",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_8a6d16b1cf874d94",
+          "selected_sample_id": "hcap_a2ddf3648c7545ae",
+          "left_score": 55.0139,
+          "right_score": 52.0144,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-021",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_573d690dc2ae48bd",
+          "selected_sample_id": "hcap_c3dd87b941e04a69",
+          "left_score": 44.1915,
+          "right_score": 43.2525,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-022",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_d8fd439eacb848f0",
+          "selected_sample_id": "hcap_d8fd439eacb848f0",
+          "left_score": 44.418,
+          "right_score": 48.3964,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-023",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_ba2a3f232d684c48",
+          "selected_sample_id": "hcap_ac92149c48a64808",
+          "left_score": 46.6056,
+          "right_score": 46.6832,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-024",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_46808fbf06de45e4",
+          "selected_sample_id": "hcap_46808fbf06de45e4",
+          "left_score": 43.7489,
+          "right_score": 55.2095,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-025",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_78f28231736e4b9b",
+          "selected_sample_id": "hcap_78f28231736e4b9b",
+          "left_score": 55.929,
+          "right_score": 59.7099,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-026",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "selected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "left_score": 46.3682,
+          "right_score": 50.4955,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-027",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_3dac76f7ce96457b",
+          "selected_sample_id": "hcap_3dac76f7ce96457b",
+          "left_score": 51.1381,
+          "right_score": 52.632,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-028",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_62319b63435c4300",
+          "selected_sample_id": "hcap_62319b63435c4300",
+          "left_score": 46.4717,
+          "right_score": 44.8918,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-029",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5604376ffb04486a",
+          "selected_sample_id": "hcap_649beed65f394540",
+          "left_score": 46.6371,
+          "right_score": 46.551,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-030",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_386b1c2f75524b00",
+          "selected_sample_id": "hcap_386b1c2f75524b00",
+          "left_score": 48.2423,
+          "right_score": 57.8926,
+          "correct": true
+        }
+      ]
+    },
+    "omni_factual_features_account_isolated": {
+      "pair_count": 30,
+      "correct_credit": 19.0,
+      "tie_count": 0,
+      "pair_accuracy": 0.633333,
+      "pairs": [
+        {
+          "pair_id": "propagation-validation-001",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_a96fc6f9c5784460",
+          "selected_sample_id": "hcap_a96fc6f9c5784460",
+          "left_score": 52.674506,
+          "right_score": 50.415613,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-002",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_0bf66216662f45b8",
+          "selected_sample_id": "hcap_0bf66216662f45b8",
+          "left_score": 48.686354,
+          "right_score": 50.853748,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-003",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_e95c417ba7d14a99",
+          "selected_sample_id": "hcap_79158dbdaa034dc5",
+          "left_score": 47.852206,
+          "right_score": 46.258794,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-004",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_a7bcd1a5d47744a3",
+          "selected_sample_id": "hcap_a7bcd1a5d47744a3",
+          "left_score": 49.86341,
+          "right_score": 50.261839,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-005",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_7b8ccfd969864ee0",
+          "selected_sample_id": "hcap_4792967387214bfa",
+          "left_score": 48.370403,
+          "right_score": 49.975959,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-006",
+          "account_id": "beidou_live",
+          "expected_sample_id": "hcap_fc99dd6ba82144df",
+          "selected_sample_id": "hcap_fc99dd6ba82144df",
+          "left_score": 47.542914,
+          "right_score": 47.220676,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-007",
+          "account_id": "sixuweilive",
+          "expected_sample_id": "hcap_1d9f585e7c4a4b0c",
+          "selected_sample_id": "hcap_d16e0997eb8b4567",
+          "left_score": 51.767891,
+          "right_score": 46.926004,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-008",
+          "account_id": "yule_xiaoe_yu",
+          "expected_sample_id": "hcap_8a0f1b8771d94bbc",
+          "selected_sample_id": "hcap_923be865463a4d28",
+          "left_score": 53.48481,
+          "right_score": 53.560607,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-009",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_71c0f29a3acf4060",
+          "selected_sample_id": "hcap_f266762050f04856",
+          "left_score": 52.584423,
+          "right_score": 48.078001,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-010",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_37f54624ac934af2",
+          "selected_sample_id": "hcap_37f54624ac934af2",
+          "left_score": 46.069991,
+          "right_score": 52.909074,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-011",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_91a50cd194ff49fc",
+          "selected_sample_id": "hcap_91a50cd194ff49fc",
+          "left_score": 49.798871,
+          "right_score": 49.872757,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-012",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_01b455bc48dd4862",
+          "selected_sample_id": "hcap_01b455bc48dd4862",
+          "left_score": 49.950355,
+          "right_score": 50.142792,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-013",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_c98f0dd6071f4581",
+          "selected_sample_id": "hcap_c98f0dd6071f4581",
+          "left_score": 50.618291,
+          "right_score": 47.411062,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-014",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_572431d0d53a43bc",
+          "selected_sample_id": "hcap_2933b60ab0e14649",
+          "left_score": 51.39617,
+          "right_score": 49.676224,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-015",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_f709297c49d743e8",
+          "selected_sample_id": "hcap_f709297c49d743e8",
+          "left_score": 48.559312,
+          "right_score": 52.632869,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-016",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_fa9600a86a944291",
+          "selected_sample_id": "hcap_51d6cce6072a41ae",
+          "left_score": 46.670943,
+          "right_score": 47.852206,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-017",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_b542d49dea8247c0",
+          "selected_sample_id": "hcap_cd91919c0378483e",
+          "left_score": 46.691199,
+          "right_score": 46.712495,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-018",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_b638d0143dc94952",
+          "selected_sample_id": "hcap_6a8a2c89090045f5",
+          "left_score": 49.676224,
+          "right_score": 52.074555,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-019",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "selected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "left_score": 49.583351,
+          "right_score": 51.426666,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-020",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_8a6d16b1cf874d94",
+          "selected_sample_id": "hcap_8a6d16b1cf874d94",
+          "left_score": 49.872757,
+          "right_score": 51.259156,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-021",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_573d690dc2ae48bd",
+          "selected_sample_id": "hcap_c3dd87b941e04a69",
+          "left_score": 52.428729,
+          "right_score": 49.330144,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-022",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_d8fd439eacb848f0",
+          "selected_sample_id": "hcap_d8fd439eacb848f0",
+          "left_score": 47.058309,
+          "right_score": 57.291997,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-023",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_ba2a3f232d684c48",
+          "selected_sample_id": "hcap_ba2a3f232d684c48",
+          "left_score": 51.07849,
+          "right_score": 50.933497,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-024",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_46808fbf06de45e4",
+          "selected_sample_id": "hcap_46808fbf06de45e4",
+          "left_score": 46.344326,
+          "right_score": 50.799275,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-025",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_78f28231736e4b9b",
+          "selected_sample_id": "hcap_a785683fe3234420",
+          "left_score": 45.689438,
+          "right_score": 45.040301,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-026",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "selected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "left_score": 49.585342,
+          "right_score": 51.995254,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-027",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_3dac76f7ce96457b",
+          "selected_sample_id": "hcap_3dac76f7ce96457b",
+          "left_score": 46.438265,
+          "right_score": 51.263629,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-028",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_62319b63435c4300",
+          "selected_sample_id": "hcap_62319b63435c4300",
+          "left_score": 50.253033,
+          "right_score": 49.248577,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-029",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5604376ffb04486a",
+          "selected_sample_id": "hcap_5604376ffb04486a",
+          "left_score": 49.670373,
+          "right_score": 54.810805,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-030",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_386b1c2f75524b00",
+          "selected_sample_id": "hcap_386b1c2f75524b00",
+          "left_score": 46.01509,
+          "right_score": 48.50917,
+          "correct": true
+        }
+      ]
+    },
+    "v2_4_plus_omni_factual_fixed_15": {
+      "pair_count": 30,
+      "correct_credit": 22.0,
+      "tie_count": 0,
+      "pair_accuracy": 0.733333,
+      "pairs": [
+        {
+          "pair_id": "propagation-validation-001",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_a96fc6f9c5784460",
+          "selected_sample_id": "hcap_a96fc6f9c5784460",
+          "left_score": 51.759306,
+          "right_score": 50.257417,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-002",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_0bf66216662f45b8",
+          "selected_sample_id": "hcap_0bf66216662f45b8",
+          "left_score": 46.924768,
+          "right_score": 47.224122,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-003",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_e95c417ba7d14a99",
+          "selected_sample_id": "hcap_e95c417ba7d14a99",
+          "left_score": 47.153926,
+          "right_score": 49.583234,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-004",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_a7bcd1a5d47744a3",
+          "selected_sample_id": "hcap_6f7c977746b6466a",
+          "left_score": 46.363017,
+          "right_score": 45.850561,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-005",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_7b8ccfd969864ee0",
+          "selected_sample_id": "hcap_7b8ccfd969864ee0",
+          "left_score": 51.80729,
+          "right_score": 50.158149,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-006",
+          "account_id": "beidou_live",
+          "expected_sample_id": "hcap_fc99dd6ba82144df",
+          "selected_sample_id": "hcap_fc99dd6ba82144df",
+          "left_score": 51.758052,
+          "right_score": 50.845606,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-007",
+          "account_id": "sixuweilive",
+          "expected_sample_id": "hcap_1d9f585e7c4a4b0c",
+          "selected_sample_id": "hcap_1d9f585e7c4a4b0c",
+          "left_score": 50.188004,
+          "right_score": 53.245751,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-008",
+          "account_id": "yule_xiaoe_yu",
+          "expected_sample_id": "hcap_8a0f1b8771d94bbc",
+          "selected_sample_id": "hcap_8a0f1b8771d94bbc",
+          "left_score": 51.911026,
+          "right_score": 49.831481,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-009",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_71c0f29a3acf4060",
+          "selected_sample_id": "hcap_71c0f29a3acf4060",
+          "left_score": 52.252393,
+          "right_score": 58.299165,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-010",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_37f54624ac934af2",
+          "selected_sample_id": "hcap_37f54624ac934af2",
+          "left_score": 46.529169,
+          "right_score": 53.947116,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-011",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_91a50cd194ff49fc",
+          "selected_sample_id": "hcap_b55651e1612546c7",
+          "left_score": 50.355391,
+          "right_score": 48.878719,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-012",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_01b455bc48dd4862",
+          "selected_sample_id": "hcap_292a7fbd091b4ec5",
+          "left_score": 48.070363,
+          "right_score": 45.992249,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-013",
+          "account_id": "yuhuan",
+          "expected_sample_id": "hcap_c98f0dd6071f4581",
+          "selected_sample_id": "hcap_c98f0dd6071f4581",
+          "left_score": 58.656494,
+          "right_score": 51.870279,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-014",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_572431d0d53a43bc",
+          "selected_sample_id": "hcap_572431d0d53a43bc",
+          "left_score": 51.916905,
+          "right_score": 55.077614,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-015",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_f709297c49d743e8",
+          "selected_sample_id": "hcap_f709297c49d743e8",
+          "left_score": 46.977112,
+          "right_score": 49.17331,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-016",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_fa9600a86a944291",
+          "selected_sample_id": "hcap_51d6cce6072a41ae",
+          "left_score": 48.974491,
+          "right_score": 50.767786,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-017",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_b542d49dea8247c0",
+          "selected_sample_id": "hcap_cd91919c0378483e",
+          "left_score": 49.26398,
+          "right_score": 51.022764,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-018",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_b638d0143dc94952",
+          "selected_sample_id": "hcap_b638d0143dc94952",
+          "left_score": 47.047239,
+          "right_score": 47.037748,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-019",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "selected_sample_id": "hcap_5a32ee96f77e4fbe",
+          "left_score": 47.069178,
+          "right_score": 47.41104,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-020",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_8a6d16b1cf874d94",
+          "selected_sample_id": "hcap_a2ddf3648c7545ae",
+          "left_score": 54.242729,
+          "right_score": 51.901113,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-021",
+          "account_id": "taotao_daxiaojie",
+          "expected_sample_id": "hcap_573d690dc2ae48bd",
+          "selected_sample_id": "hcap_c3dd87b941e04a69",
+          "left_score": 45.427084,
+          "right_score": 44.164147,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-022",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_d8fd439eacb848f0",
+          "selected_sample_id": "hcap_d8fd439eacb848f0",
+          "left_score": 44.814046,
+          "right_score": 49.73074,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-023",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_ba2a3f232d684c48",
+          "selected_sample_id": "hcap_ac92149c48a64808",
+          "left_score": 47.276534,
+          "right_score": 47.320745,
+          "correct": false
+        },
+        {
+          "pair_id": "propagation-validation-024",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_46808fbf06de45e4",
+          "selected_sample_id": "hcap_46808fbf06de45e4",
+          "left_score": 44.138214,
+          "right_score": 54.547966,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-025",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_78f28231736e4b9b",
+          "selected_sample_id": "hcap_78f28231736e4b9b",
+          "left_score": 54.393066,
+          "right_score": 57.50946,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-026",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "selected_sample_id": "hcap_e86ed4eb1ec44dea",
+          "left_score": 46.850771,
+          "right_score": 50.720463,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-027",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_3dac76f7ce96457b",
+          "selected_sample_id": "hcap_3dac76f7ce96457b",
+          "left_score": 50.433125,
+          "right_score": 52.426744,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-028",
+          "account_id": "raoxianyin",
+          "expected_sample_id": "hcap_62319b63435c4300",
+          "selected_sample_id": "hcap_62319b63435c4300",
+          "left_score": 47.0389,
+          "right_score": 45.545317,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-029",
+          "account_id": "duanduanzhengzheng",
+          "expected_sample_id": "hcap_5604376ffb04486a",
+          "selected_sample_id": "hcap_5604376ffb04486a",
+          "left_score": 47.092091,
+          "right_score": 47.789971,
+          "correct": true
+        },
+        {
+          "pair_id": "propagation-validation-030",
+          "account_id": "tianci",
+          "expected_sample_id": "hcap_386b1c2f75524b00",
+          "selected_sample_id": "hcap_386b1c2f75524b00",
+          "left_score": 47.908219,
+          "right_score": 56.485086,
+          "correct": true
+        }
+      ]
+    }
+  },
+  "ranking_metrics": {
+    "research_ranker_v2_4_account_isolated": {
+      "sample_count": 60,
+      "k": 15,
+      "high_interaction_hit_rate": 0.733333,
+      "topk_lift_vs_balanced_random": 1.466667,
+      "ndcg_at_k": 0.795164
+    },
+    "omni_factual_features_account_isolated": {
+      "sample_count": 60,
+      "k": 15,
+      "high_interaction_hit_rate": 0.6,
+      "topk_lift_vs_balanced_random": 1.2,
+      "ndcg_at_k": 0.670425
+    },
+    "v2_4_plus_omni_factual_fixed_15": {
+      "sample_count": 60,
+      "k": 15,
+      "high_interaction_hit_rate": 0.733333,
+      "topk_lift_vs_balanced_random": 1.466667,
+      "ndcg_at_k": 0.798393
+    }
+  },
+  "per_account_metrics": [
+    {
+      "account_id": "beidou_live",
+      "pair_count": 1,
+      "research_ranker_v2_4_account_isolated": 1.0,
+      "omni_factual_features_account_isolated": 1.0,
+      "v2_4_plus_omni_factual_fixed_15": 1.0
+    },
+    {
+      "account_id": "duanduanzhengzheng",
+      "pair_count": 7,
+      "research_ranker_v2_4_account_isolated": 0.571429,
+      "omni_factual_features_account_isolated": 1.0,
+      "v2_4_plus_omni_factual_fixed_15": 0.857143
+    },
+    {
+      "account_id": "raoxianyin",
+      "pair_count": 7,
+      "research_ranker_v2_4_account_isolated": 1.0,
+      "omni_factual_features_account_isolated": 0.428571,
+      "v2_4_plus_omni_factual_fixed_15": 1.0
+    },
+    {
+      "account_id": "sixuweilive",
+      "pair_count": 1,
+      "research_ranker_v2_4_account_isolated": 1.0,
+      "omni_factual_features_account_isolated": 0.0,
+      "v2_4_plus_omni_factual_fixed_15": 1.0
+    },
+    {
+      "account_id": "taotao_daxiaojie",
+      "pair_count": 4,
+      "research_ranker_v2_4_account_isolated": 0.0,
+      "omni_factual_features_account_isolated": 0.5,
+      "v2_4_plus_omni_factual_fixed_15": 0.0
+    },
+    {
+      "account_id": "tianci",
+      "pair_count": 7,
+      "research_ranker_v2_4_account_isolated": 0.571429,
+      "omni_factual_features_account_isolated": 0.714286,
+      "v2_4_plus_omni_factual_fixed_15": 0.571429
+    },
+    {
+      "account_id": "yuhuan",
+      "pair_count": 2,
+      "research_ranker_v2_4_account_isolated": 1.0,
+      "omni_factual_features_account_isolated": 0.5,
+      "v2_4_plus_omni_factual_fixed_15": 1.0
+    },
+    {
+      "account_id": "yule_xiaoe_yu",
+      "pair_count": 1,
+      "research_ranker_v2_4_account_isolated": 1.0,
+      "omni_factual_features_account_isolated": 0.0,
+      "v2_4_plus_omni_factual_fixed_15": 1.0
+    }
+  ],
+  "comparison_diagnostics": {
+    "decision_change_count": 2,
+    "corrected_pair_count": 2,
+    "harmed_pair_count": 0,
+    "unchanged_pair_count": 28,
+    "discordant_pair_count": 2,
+    "two_sided_exact_sign_test_p_value": 0.5,
+    "account_cluster_bootstrap_iterations": 2000,
+    "account_cluster_bootstrap_95_ci": [
+      0.0,
+      0.181818
+    ],
+    "changed_pairs": [
+      {
+        "pair_id": "propagation-validation-002",
+        "account_id": "duanduanzhengzheng",
+        "baseline_correct_credit": 0.0,
+        "combined_correct_credit": 1.0,
+        "baseline_selected_sample_id": "hcap_400ac722a1a84e62",
+        "combined_selected_sample_id": "hcap_0bf66216662f45b8"
+      },
+      {
+        "pair_id": "propagation-validation-029",
+        "account_id": "duanduanzhengzheng",
+        "baseline_correct_credit": 0.0,
+        "combined_correct_credit": 1.0,
+        "baseline_selected_sample_id": "hcap_649beed65f394540",
+        "combined_selected_sample_id": "hcap_5604376ffb04486a"
+      }
+    ]
+  },
+  "promotion_gate": {
+    "passed": false,
+    "status": "keep_v2_4",
+    "required_pair_accuracy_delta": 0.05,
+    "actual_pair_accuracy_delta": 0.066666,
+    "ready_account_count": 4,
+    "required_ready_account_macro_delta": 0.05,
+    "baseline_ready_account_macro_accuracy": 0.535714,
+    "combined_ready_account_macro_accuracy": 0.607143,
+    "actual_ready_account_macro_delta": 0.071429,
+    "ready_account_wins": 1,
+    "ready_account_regressions": 0,
+    "production_promotion_allowed": false,
+    "reason": "Passing only allows a new frozen proxy holdout. True platform share, follow and watch-quality outcomes remain unavailable."
+  },
+  "outcome_availability": {
+    "visible_engagement_heat": {
+      "available_count": 60,
+      "coverage": 1.0,
+      "statuses": {
+        "available_proxy": 60
+      }
+    },
+    "share_rate": {
+      "available_count": 0,
+      "coverage": 0.0,
+      "statuses": {
+        "unavailable_missing_views": 60
+      }
+    },
+    "follow_conversion_rate": {
+      "available_count": 0,
+      "coverage": 0.0,
+      "statuses": {
+        "unavailable_missing_views_or_follows": 60
+      }
+    },
+    "watch_quality": {
+      "available_count": 0,
+      "coverage": 0.0,
+      "statuses": {
+        "unavailable_missing_watch_metrics": 60
+      }
+    }
+  },
+  "usage": {
+    "network_request_count": 61,
+    "usage_estimated_cost_cny": "6.654878",
+    "latency_ms": {
+      "median": 23296.0,
+      "p95": 29060.8
+    }
+  },
+  "interpretation": {
+    "outcome": "visible_engagement_proxy_not_views",
+    "causal_claim_allowed": false,
+    "selection_is_outcome_enriched": true,
+    "prior_non_full_media_benchmark_overlap": {
+      "platform_item_count": 26,
+      "benchmark_ids": [
+        "dso-multimodal-vector-value-20260719-r1"
+      ],
+      "counts_by_benchmark": {
+        "dso-multimodal-vector-value-20260719-r1": 26
+      }
+    }
+  },
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  },
+  "report_sha256": "aecc5d58b0da07153dfc7f121a88d56343f8a294dea0ae65fb941c01ded35432"
+}

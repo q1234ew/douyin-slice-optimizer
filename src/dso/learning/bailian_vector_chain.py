@@ -85,11 +85,15 @@ def bailian_vector_chain_status(
             "holdout-config",
             "holdout-predictions",
             "holdout-evaluation",
+            "holdout-failure-attribution",
+            "evidence-quality-reconstruction",
         )
     }
     rerank_report = _load_stage_report(str(manifest["benchmark_id"]), "rerank") or {}
     ablation_report = _load_stage_report(str(manifest["benchmark_id"]), "ablation") or {}
     from dso.learning.bailian_cached_ablation import cached_ablation_public_summary
+    from dso.learning.bailian_evidence_quality import bailian_evidence_quality_status
+    from dso.learning.bailian_failure_attribution import bailian_failure_attribution_status
     from dso.learning.bailian_holdout_validation import bailian_holdout_validation_status
 
     runtime = public_model_status()
@@ -110,6 +114,12 @@ def bailian_vector_chain_status(
         "outcome_proxy_comparison": rerank_report.get("outcome_proxy_comparison") or {},
         "cached_ablation": cached_ablation_public_summary(ablation_report),
         "holdout_validation": bailian_holdout_validation_status(
+            str(manifest["benchmark_id"])
+        ),
+        "failure_attribution": bailian_failure_attribution_status(
+            str(manifest["benchmark_id"])
+        ),
+        "evidence_quality": bailian_evidence_quality_status(
             str(manifest["benchmark_id"])
         ),
         "execution_plan": _execution_plan(manifest),

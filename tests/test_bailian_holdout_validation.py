@@ -9,6 +9,16 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from dso.api.main import app
+from dso.learning.bailian_failure_attribution import (
+    run_bailian_holdout_failure_attribution,
+)
+from dso.learning.bailian_evidence_quality import (
+    _build_or_reuse_evidence_pack,
+    _reference_coverage_plan,
+    _stratified_retrieval_profiles,
+    _window_plan,
+    run_bailian_evidence_quality_reconstruction,
+)
 from dso.learning.bailian_holdout_validation import (
     HARD_BATCH_CAP_CNY,
     _assert_blind_payload,
@@ -180,6 +190,250 @@ class BailianHoldoutValidationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "frozen")
 
+    def test_cache_only_failure_attribution_is_reproducible(self) -> None:
+        config, prediction, evaluation = self._evaluated_artifacts()
+        persisted = {}
+
+        def load_stage(_benchmark_id: str, stage: str):
+            return {
+                "holdout-config": config,
+                "holdout-predictions": prediction,
+                "holdout-evaluation": evaluation,
+                "holdout-rerank": self.rerank,
+            }.get(stage)
+
+        with (
+            patch(
+                "dso.learning.bailian_failure_attribution.load_multimodal_vector_manifest",
+                return_value=self.manifest,
+            ),
+            patch(
+                "dso.learning.bailian_failure_attribution._load_stage_report",
+                side_effect=load_stage,
+            ),
+            patch(
+                "dso.learning.bailian_failure_attribution._cloud_records",
+                return_value={},
+            ),
+            patch(
+                "dso.learning.bailian_failure_attribution._vectors_for_modality",
+                return_value=self.vectors,
+            ),
+            patch(
+                "dso.learning.bailian_failure_attribution._persist_stage_report",
+                side_effect=lambda _manifest, stage, report: persisted.setdefault(stage, report),
+            ),
+        ):
+            report = run_bailian_holdout_failure_attribution("holdout-test-r1")
+
+        self.assertEqual(report["analysis_scope"]["pair_count"], 20)
+        self.assertEqual(report["network_request_count"], 0)
+        self.assertEqual(report["effective_cost_cny"], "0")
+        self.assertTrue(report["cache_only"])
+        self.assertEqual(report["component_comparison"]["fusion_embedding"]["pair_count"], 20)
+        self.assertIn("holdout-failure-attribution", persisted)
+        self.assertTrue(report["source_artifacts"]["blind_prediction_verified"])
+
+    def test_failure_attribution_rejects_tampered_prediction(self) -> None:
+        config, prediction, evaluation = self._evaluated_artifacts()
+        prediction = {**prediction, "prediction_sha256": "tampered"}
+
+        def load_stage(_benchmark_id: str, stage: str):
+            return {
+                "holdout-config": config,
+                "holdout-predictions": prediction,
+                "holdout-evaluation": evaluation,
+                "holdout-rerank": self.rerank,
+            }.get(stage)
+
+        with (
+            patch(
+                "dso.learning.bailian_failure_attribution.load_multimodal_vector_manifest",
+                return_value=self.manifest,
+            ),
+            patch(
+                "dso.learning.bailian_failure_attribution._load_stage_report",
+                side_effect=load_stage,
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "prediction checksum mismatch"):
+                run_bailian_holdout_failure_attribution("holdout-test-r1")
+
+    def test_web_route_runs_cache_only_failure_attribution(self) -> None:
+        client = TestClient(app)
+        with patch(
+            "dso.api.main.run_bailian_holdout_failure_attribution",
+            return_value={"status": "ready", "network_request_count": 0},
+        ):
+            response = client.post(
+                "/learning/multimodal-vector-experiment/cloud/holdout-attribution",
+                json={"benchmark_id": "holdout-test-r1"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["network_request_count"], 0)
+
+    def test_evidence_quality_builds_three_distinct_windows_and_reuses_pack(self) -> None:
+        root = Path(self.tmp.name)
+        video_path = root / "data" / "douyin_media_assets" / "test" / "video.mp4"
+        video_path.parent.mkdir(parents=True)
+        video_path.write_bytes(b"video")
+        manifest = {
+            "benchmark_id": "holdout-test-r1",
+            "manifest_sha256": "a" * 64,
+        }
+        sample = {
+            "sample_id": "sample-window-test",
+            "account_id": "test",
+            "duration_seconds": 60.0,
+            "title": "test",
+            "media": {
+                "video": {
+                    "path": str(video_path.relative_to(root)),
+                    "sha256": "video-sha",
+                }
+            },
+        }
+
+        def fake_extract(_video_path: Path, output_path: Path, _timestamp: float) -> bool:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"jpeg")
+            return True
+
+        with (
+            patch(
+                "dso.learning.bailian_evidence_quality._extract_frame",
+                side_effect=fake_extract,
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality.jpeg_dimensions",
+                return_value=(640, 360),
+            ),
+        ):
+            first = _build_or_reuse_evidence_pack(manifest, sample, force=False)
+            second = _build_or_reuse_evidence_pack(manifest, sample, force=False)
+
+        self.assertEqual(first["status"], "ready")
+        self.assertEqual([item["role"] for item in first["windows"]], ["hook", "middle", "payoff"])
+        self.assertEqual(len({item["frame_seconds"] for item in first["windows"]}), 3)
+        self.assertTrue(second["cache_hit"])
+        self.assertEqual(len(_window_plan(60.0, 15.0)), 3)
+
+    def test_stratified_retrieval_prefers_same_account_for_each_label(self) -> None:
+        samples = {
+            "query": {"account_id": "a", "performance_label": "high", "semantic": {"content_category": "performance_clip"}},
+            "high-a": {"account_id": "a", "performance_label": "high", "semantic": {"content_category": "performance_clip"}},
+            "low-a": {"account_id": "a", "performance_label": "low", "semantic": {"content_category": "performance_clip"}},
+            "high-global": {"account_id": "b", "performance_label": "high", "semantic": {"content_category": "performance_clip"}},
+            "low-global": {"account_id": "b", "performance_label": "low", "semantic": {"content_category": "performance_clip"}},
+        }
+        vectors = {
+            "query": [1.0, 0.0],
+            "high-a": [0.8, 0.2],
+            "low-a": [0.2, 0.8],
+            "high-global": [1.0, 0.0],
+            "low-global": [0.0, 1.0],
+        }
+        profiles = _stratified_retrieval_profiles(
+            ["query"],
+            ["high-a", "low-a", "high-global", "low-global"],
+            samples,
+            vectors,
+            neighbors_per_label=1,
+        )
+        selected = profiles["query"]["top_matches"]
+        self.assertEqual({item["sample_id"] for item in selected}, {"high-a", "low-a"})
+        self.assertTrue(profiles["query"]["balanced_same_account_available"])
+
+    def test_reference_plan_reports_manifest_coverage_ceiling(self) -> None:
+        samples = {
+            "q-a": {"account_id": "a"},
+            "q-b": {"account_id": "b"},
+            "a-high": {"account_id": "a", "performance_label": "high"},
+            "a-low": {"account_id": "a", "performance_label": "low"},
+            "b-high": {"account_id": "b", "performance_label": "high"},
+        }
+        plan = _reference_coverage_plan(
+            ["q-a", "q-b"],
+            ["a-high", "a-low", "b-high"],
+            ["a-high", "b-high"],
+            samples,
+        )
+        self.assertEqual(plan["cached_balanced_same_account_coverage"], 0.0)
+        self.assertEqual(plan["manifest_balanced_same_account_ceiling"], 0.5)
+        self.assertEqual(plan["unrecoverable_accounts"], ["b"])
+        self.assertEqual(plan["recommended_reference_ids"], ["a-low"])
+
+    def test_evidence_quality_run_is_cache_only_and_never_promotes(self) -> None:
+        config, prediction, evaluation = self._evaluated_artifacts()
+        persisted = {}
+
+        def load_stage(_benchmark_id: str, stage: str):
+            return {
+                "holdout-config": config,
+                "holdout-predictions": prediction,
+                "holdout-evaluation": evaluation,
+            }.get(stage)
+
+        def ready_pack(_manifest: dict, sample: dict, *, force: bool) -> dict:
+            del force
+            return {
+                "sample_id": sample["sample_id"],
+                "status": "ready",
+                "cache_hit": True,
+                "windows": [
+                    {"role": role, "status": "ready", "frame_seconds": index * 10.0}
+                    for index, role in enumerate(("hook", "middle", "payoff"), start=1)
+                ],
+            }
+
+        with (
+            patch(
+                "dso.learning.bailian_evidence_quality.load_multimodal_vector_manifest",
+                return_value=self.manifest,
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality._load_stage_report",
+                side_effect=load_stage,
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality._build_or_reuse_evidence_pack",
+                side_effect=ready_pack,
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality._cloud_records",
+                return_value={},
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality._vectors_for_modality",
+                return_value=self.vectors,
+            ),
+            patch(
+                "dso.learning.bailian_evidence_quality._persist_stage_report",
+                side_effect=lambda _manifest, stage, report: persisted.setdefault(stage, report),
+            ),
+        ):
+            report = run_bailian_evidence_quality_reconstruction("holdout-test-r1")
+
+        self.assertEqual(report["network_request_count"], 0)
+        self.assertEqual(report["effective_cost_cny"], "0")
+        self.assertEqual(report["evidence_pack"]["summary"]["ready_count"], 40)
+        self.assertFalse(report["evidence_gate"]["passed"])
+        self.assertFalse(report["production_weight_changed"])
+        self.assertIn("evidence-quality-reconstruction", persisted)
+
+    def test_web_route_runs_evidence_quality_reconstruction(self) -> None:
+        client = TestClient(app)
+        with patch(
+            "dso.api.main.run_bailian_evidence_quality_reconstruction",
+            return_value={"status": "ready_for_embedding_rebuild", "network_request_count": 0},
+        ):
+            response = client.post(
+                "/learning/multimodal-vector-experiment/cloud/evidence-quality/rebuild",
+                json={"benchmark_id": "holdout-test-r1", "scope": "holdout", "limit": 40},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["network_request_count"], 0)
+
     def _freeze_config(self) -> dict:
         def load_stage(_benchmark_id: str, stage: str):
             return {"ablation": self.ablation, "rerank": self.rerank}.get(stage)
@@ -208,6 +462,80 @@ class BailianHoldoutValidationTest(unittest.TestCase):
             patch("dso.learning.bailian_holdout_validation._persist_stage_report"),
         ):
             return freeze_bailian_holdout_validation("holdout-test-r1")
+
+    def _evaluated_artifacts(self) -> tuple[dict, dict, dict]:
+        config = self._freeze_config()
+        outcome_by_task = {
+            str(item["task_id"]): str(item["proxy_choice"])
+            for item in self.baseline["pair_results"]
+        }
+        prediction_rows = []
+        for item in config["holdout_baseline"]:
+            task_id = str(item["task_id"])
+            delta = 1.0 if outcome_by_task[task_id] == "left" else -1.0
+            prediction_rows.append(
+                {
+                    "task_id": task_id,
+                    "left_sample_id": item["left_sample_id"],
+                    "right_sample_id": item["right_sample_id"],
+                    "v2_4_delta": item["v2_4_delta"],
+                    "embedding_delta": delta,
+                    "rerank_delta": delta,
+                    "cloud_delta": delta,
+                    "final_delta": delta,
+                    "predicted_choice": outcome_by_task[task_id],
+                }
+            )
+        prediction_core = {
+            "contract_version": config["contract_version"],
+            "status": "predictions_frozen",
+            "admission_status": "research_only",
+            "benchmark_id": self.manifest["benchmark_id"],
+            "manifest_sha256": self.manifest["manifest_sha256"],
+            "config_sha256": config["config_sha256"],
+            "batch_id": "d12c0-test",
+            "pair_count": 20,
+            "predictions": prediction_rows,
+            "coverage": {},
+            "budget": {
+                "hard_batch_cap_cny": "10.00",
+                "effective_cost_cny": "0.25",
+                "network_request_count": 40,
+            },
+            "labels_locked": True,
+            "blind_payload_verified": True,
+            "automatic_promotion": False,
+            "production_weight_changed": False,
+        }
+        prediction = {
+            **prediction_core,
+            "prediction_sha256": stable_json_sha256(prediction_core),
+            "generated_at": "2026-07-19T00:00:00+00:00",
+        }
+
+        def load_stage(_benchmark_id: str, stage: str):
+            return {
+                "holdout-config": config,
+                "holdout-predictions": prediction,
+            }.get(stage)
+
+        with (
+            patch(
+                "dso.learning.bailian_holdout_validation.load_multimodal_vector_manifest",
+                return_value=self.manifest,
+            ),
+            patch(
+                "dso.learning.bailian_holdout_validation._local_vector_report",
+                return_value=(self.baseline, "frozen_sidecar"),
+            ),
+            patch(
+                "dso.learning.bailian_holdout_validation._load_stage_report",
+                side_effect=load_stage,
+            ),
+            patch("dso.learning.bailian_holdout_validation._persist_stage_report"),
+        ):
+            evaluation = evaluate_bailian_holdout_validation("holdout-test-r1")
+        return config, prediction, evaluation
 
 
 def _synthetic_frozen_inputs() -> tuple[dict, dict, dict, dict, dict[str, list[float]]]:

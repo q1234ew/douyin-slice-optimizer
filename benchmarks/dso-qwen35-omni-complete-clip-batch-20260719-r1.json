@@ -1,0 +1,111 @@
+{
+  "benchmark_id": "dso-qwen35-omni-complete-clip-batch-20260719-r1",
+  "contract_version": "bailian_complete_clip_batch.v1",
+  "created_at": "2026-07-19T13:14:48+00:00",
+  "goal_alignment": [
+    "G1",
+    "G3"
+  ],
+  "admission_status": "research_only",
+  "evaluation_validity": "diagnostic_only_not_independent_holdout",
+  "source_manifest_id": "dso-qwen37-full-clip-diagnostic-20260719-r1",
+  "source_manifest_sha256": "55c57900ef14bbf6d9b8e00a1a0fd2f32b7c9d725c064371e608e904f95dd895",
+  "authorization_basis": "user_explicit_complete_clip_direct_analysis_2026-07-19",
+  "input_policy": {
+    "clip_count": 10,
+    "representation": "complete_temporal_h264_aac_proxy",
+    "frame_extraction_used": false,
+    "source_temporal_range_preserved": true,
+    "audio_required": true,
+    "labels_excluded_from_provider_request": true,
+    "proxy_total_bytes": 30114709,
+    "proxy_size_range_bytes": [
+      2963519,
+      3046058
+    ],
+    "maximum_duration_delta_seconds": 0.045
+  },
+  "provider": {
+    "provider_id": "aliyun_bailian",
+    "model_id": "qwen3.5-omni-plus-2026-03-15",
+    "api_version": "bailian-openai-omni-video-stream.v1",
+    "prompt_version": "dso-bailian-qwen35-omni-complete-short-clip.v1",
+    "request_profile": "qwen35_omni_complete_short_clip",
+    "request_type": "omni_complete_short_clip_analysis",
+    "upload_level": "full_media",
+    "max_retries": 0
+  },
+  "preflight": {
+    "status": "passed",
+    "clip_count": 10,
+    "network_request_count": 0,
+    "reserved_cost_cny": 1.292704,
+    "hard_batch_cap_cny": 10,
+    "report_sha256": "a04608b9b239a374eed9105c410455c4e8c52abf11cac93a31e67e34e0ad9e78"
+  },
+  "actual_usage": {
+    "status": "partial",
+    "network_request_count": 10,
+    "successful_count": 7,
+    "fallback_count": 3,
+    "fallback_error": "invalid_provider_response",
+    "cache_hit_count": 0,
+    "input_tokens": 85368,
+    "output_tokens": 10798,
+    "usage_estimated_cost_cny": 1.131524,
+    "successful_latency_median_ms": 25363,
+    "successful_latency_p95_ms": 28746.5,
+    "all_request_latency_median_ms": 26779,
+    "all_request_latency_max_ms": 30171,
+    "report_sha256": "f69d1674246df88f474f2a264a150a6eb80aba8fed976aca01a44baf8dd721ef"
+  },
+  "semantic_evidence": {
+    "audio_evidence_coverage_on_success": 1.0,
+    "mean_timeline_items_on_success": 5.29,
+    "abstain_count_on_success": 0,
+    "assessment": "Complete audio-video input adds temporal, speech, lyric, music and visual-event evidence, but strict schema stability is only 70 percent."
+  },
+  "ranking_diagnostic": {
+    "outcome_target": "historical_visible_engagement_proxy_not_views",
+    "evaluable_pair_count": 2,
+    "pair_accuracy": 0.0,
+    "high_score_mean": 0.635,
+    "high_score_count": 2,
+    "mid_score_mean": 0.75,
+    "mid_score_count": 1,
+    "low_score_mean": 0.68,
+    "low_score_count": 4,
+    "pair_results": [
+      {
+        "pair_id": "pair-043",
+        "expected_sample_id": "hcap_c98f0dd6071f4581",
+        "selected_sample_id": "hcap_4c1373335dcc4896",
+        "high_score": 0.62,
+        "mid_score": 0.75,
+        "correct": false
+      },
+      {
+        "pair_id": "reaction-control",
+        "expected_sample_id": "hcap_fc99dd6ba82144df",
+        "selected_sample_id": "hcap_f26c9b072e674dce",
+        "high_score": 0.65,
+        "low_score": 0.7,
+        "correct": false
+      }
+    ],
+    "assessment": "The model-native traffic score is not admitted as a ranking signal. Three failed high-label responses also make this diagnostic subset selection-biased."
+  },
+  "decision": {
+    "status": "research_only",
+    "production_action": "keep_v2_4",
+    "semantic_action": "retain_complete_clip_omni_as_candidate_evidence_extractor",
+    "ranking_action": "reject_direct_traffic_potential_score",
+    "next_gate": "Measure factual semantic extraction on a new blind set and deterministically normalize schema output before testing derived features against v2.4."
+  },
+  "production_impact": {
+    "production_weight_changed": false,
+    "writes_manual_gold": false,
+    "automatic_export": false,
+    "automatic_publish": false
+  }
+}

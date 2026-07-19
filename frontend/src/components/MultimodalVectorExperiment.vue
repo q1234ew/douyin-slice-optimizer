@@ -122,8 +122,52 @@
             <button type="button" :disabled="busy || holdoutStep !== 'predictions_frozen'" @click="runHoldout('evaluate')">
               <span v-if="busyKey === 'holdout-evaluate'" class="spinner"></span><Icon v-else name="scale" />解锁并评估
             </button>
+            <button type="button" :disabled="busy || holdoutStep !== 'evaluated'" @click="runFailureAttribution">
+              <span v-if="busyKey === 'holdout-attribution'" class="spinner"></span><Icon v-else name="search-check" />零成本失败归因
+            </button>
+            <button type="button" :disabled="busy || holdoutStep !== 'evaluated'" @click="runEvidenceQualityRebuild">
+              <span v-if="busyKey === 'evidence-quality'" class="spinner"></span><Icon v-else name="workflow" />重构三窗口证据
+            </button>
           </div>
           <div class="gate-line"><span class="status neutral">research_only</span><span>{{ holdoutGateText }}</span></div>
+          <div v-if="failureAttributionReady" class="failure-attribution">
+            <div class="strategy-results-head">
+              <div><span>D12-C0 CACHE ONLY</span><strong>失败原因诊断</strong></div>
+              <span class="status neutral">0 元 · 0 请求</span>
+            </div>
+            <div class="ablation-metrics">
+              <div><span>云信号命中</span><strong>{{ percent(failureCloudAccuracy) }}</strong></div>
+              <div><span>最终改变选择</span><strong>{{ failureChoiceChanges }} / 20</strong></div>
+              <div><span>Top1 表现标签一致</span><strong>{{ percent(failureLabelMatch) }}</strong></div>
+              <div><span>Top1 内容分类一致</span><strong>{{ percent(failureCategoryMatch) }}</strong></div>
+              <div><span>视觉源不足 3 张</span><strong>{{ failureThinVisualCount }} / {{ failureVisualSampleCount }}</strong></div>
+              <div><span>同账号参考覆盖</span><strong>{{ percent(failureSameAccountCoverage) }}</strong></div>
+            </div>
+            <div class="attribution-list">
+              <div v-for="cause in failureRootCauses" :key="cause.cause">
+                <strong>{{ causeLabel(cause.cause) }}</strong><span>{{ actionLabel(cause.action) }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="evidenceQualityReady" class="failure-attribution">
+            <div class="strategy-results-head">
+              <div><span>D12-C1 EVIDENCE QUALITY</span><strong>三窗口证据与分层参考池</strong></div>
+              <span class="status neutral">0 元 · 0 请求</span>
+            </div>
+            <div class="ablation-metrics">
+              <div><span>三窗口就绪</span><strong>{{ evidenceReadyCount }} / {{ evidenceSampleCount }}</strong></div>
+              <div><span>三时点覆盖</span><strong>{{ percent(evidenceThreeFrameRate) }}</strong></div>
+              <div><span>缓存参考池</span><strong>{{ evidenceReferenceCount }} 条</strong></div>
+              <div><span>分层语境覆盖</span><strong>{{ percent(evidenceContextCoverage) }}</strong></div>
+              <div><span>同账号高低齐备</span><strong>{{ percent(evidenceBalancedAccountCoverage) }}</strong></div>
+              <div><span>冻结池同账号上限</span><strong>{{ percent(evidenceAccountCeiling) }}</strong></div>
+              <div><span>分层文本命中</span><strong>{{ percent(evidenceStratifiedAccuracy) }}</strong></div>
+              <div><span>较全局文本</span><strong :class="evidenceStratifiedDelta >= 0 ? 'metric-positive' : 'metric-negative'">{{ percentagePointsPrecise(evidenceStratifiedDelta) }}</strong></div>
+              <div><span>新 Fusion 向量</span><strong>{{ evidenceVectorReady }} / {{ evidenceVectorTarget }}</strong></div>
+              <div><span>参考池缺口账号</span><strong>{{ evidenceUnrecoverableAccounts }} 个</strong></div>
+            </div>
+            <div class="gate-line"><span class="status neutral">research_only</span><span>{{ evidenceDecisionText }}</span></div>
+          </div>
         </div>
       </div>
 
@@ -218,6 +262,8 @@ interface CloudStatus {
   outcome_proxy_comparison?: Record<string, unknown>;
   cached_ablation?: Record<string, unknown>;
   holdout_validation?: Record<string, unknown>;
+  failure_attribution?: Record<string, unknown>;
+  evidence_quality?: Record<string, unknown>;
   configuration_errors?: string[];
 }
 
@@ -255,6 +301,56 @@ const cloudReports = computed(() => cloudStatus.value.reports || {});
 const cloudOutcome = computed<Record<string, unknown>>(() => cloudStatus.value.outcome_proxy_comparison || {});
 const cachedAblation = computed<Record<string, unknown>>(() => cloudStatus.value.cached_ablation || {});
 const holdoutValidation = computed<Record<string, unknown>>(() => cloudStatus.value.holdout_validation || {});
+const failureAttribution = computed<Record<string, unknown>>(() => cloudStatus.value.failure_attribution || {});
+const failureAttributionReady = computed(() => failureAttribution.value.status === "ready");
+const failureComponents = computed<Record<string, unknown>>(() => objectValue(failureAttribution.value.component_comparison));
+const failureCloudComponent = computed<Record<string, unknown>>(() => objectValue(failureComponents.value.cloud_50_50));
+const failureDecisions = computed<Record<string, unknown>>(() => objectValue(failureAttribution.value.decision_dynamics));
+const failureRetrieval = computed<Record<string, unknown>>(() => objectValue(failureAttribution.value.retrieval_diagnostics));
+const failureTextRetrieval = computed<Record<string, unknown>>(() => objectValue(failureRetrieval.value.text));
+const failureModality = computed<Record<string, unknown>>(() => objectValue(failureAttribution.value.modality_diagnostics));
+const failureVisual = computed<Record<string, unknown>>(() => objectValue(failureModality.value.visual_payload));
+const failureCloudAccuracy = computed(() => Number(failureCloudComponent.value.balanced_accuracy || 0));
+const failureChoiceChanges = computed(() => Number(failureDecisions.value.fixed_choice_change_count || 0));
+const failureLabelMatch = computed(() => Number(failureTextRetrieval.value.top1_performance_label_accuracy || 0));
+const failureCategoryMatch = computed(() => Number(failureTextRetrieval.value.top1_content_category_match_rate || 0));
+const failureSameAccountCoverage = computed(() => Number(failureTextRetrieval.value.same_account_reference_coverage || 0));
+const failureThinVisualCount = computed(() => Number(failureVisual.value.less_than_three_sources_count || 0));
+const failureVisualSampleCount = computed(() => Number(failureVisual.value.sample_count || 0));
+const failureRootCauses = computed(() => {
+  const rows = Array.isArray(failureAttribution.value.root_causes) ? failureAttribution.value.root_causes : [];
+  return rows.slice(0, 4).map(item => {
+    const row = objectValue(item);
+    return { cause: String(row.cause || "unknown"), action: String(row.action || "") };
+  });
+});
+const evidenceQuality = computed<Record<string, unknown>>(() => cloudStatus.value.evidence_quality || {});
+const evidenceQualityReady = computed(() => !["", "not_run", "loading"].includes(String(evidenceQuality.value.status || "")));
+const evidenceSummary = computed<Record<string, unknown>>(() => objectValue(evidenceQuality.value.evidence_summary));
+const evidenceReferenceSummary = computed<Record<string, unknown>>(() => objectValue(evidenceQuality.value.reference_summary));
+const evidenceReferencePlan = computed<Record<string, unknown>>(() => objectValue(evidenceQuality.value.reference_coverage_plan));
+const evidenceComparison = computed<Record<string, unknown>>(() => objectValue(evidenceQuality.value.cached_retrieval_comparison));
+const evidenceStratified = computed<Record<string, unknown>>(() => objectValue(evidenceComparison.value.stratified_text));
+const evidenceRebuildPlan = computed<Record<string, unknown>>(() => objectValue(evidenceQuality.value.embedding_rebuild_plan));
+const evidenceReadyCount = computed(() => Number(evidenceSummary.value.ready_count || 0));
+const evidenceSampleCount = computed(() => Number(evidenceSummary.value.sample_count || 0));
+const evidenceThreeFrameRate = computed(() => Number(evidenceSummary.value.three_distinct_temporal_frames_rate || 0));
+const evidenceReferenceCount = computed(() => Number(evidenceReferenceSummary.value.available_reference_count || 0));
+const evidenceContextCoverage = computed(() => Number(evidenceReferenceSummary.value.account_or_program_or_material_coverage || 0));
+const evidenceBalancedAccountCoverage = computed(() => Number(evidenceReferenceSummary.value.balanced_same_account_coverage || 0));
+const evidenceAccountCeiling = computed(() => Number(evidenceReferencePlan.value.manifest_balanced_same_account_ceiling || 0));
+const evidenceUnrecoverableAccounts = computed(() => Number(evidenceReferencePlan.value.unrecoverable_account_count || 0));
+const evidenceStratifiedAccuracy = computed(() => Number(evidenceStratified.value.balanced_accuracy || 0));
+const evidenceStratifiedDelta = computed(() => Number(evidenceStratified.value.delta_vs_global_text || 0));
+const evidenceVectorReady = computed(() => Number(evidenceRebuildPlan.value.ready_vector_count || 0));
+const evidenceVectorTarget = computed(() => Number(evidenceRebuildPlan.value.target_sample_count || 0));
+const evidenceDecisionText = computed(() => ({
+  complete_three_window_evidence_before_embedding: "先补齐三窗口真实帧，再重建 Fusion 向量。",
+  expand_stratified_high_low_reference_coverage: "先补齐账号、节目或素材形态下的高低互动参考。",
+  await_explicit_d12c1_embedding_rebuild: "证据包已就绪，等待显式重建 D12-C1 Fusion 向量。",
+  keep_v2_4_and_revise_reference_objective: "缓存对照未达门槛，继续保持 v2.4。",
+  ready_for_new_independent_holdout: "证据门控已满足，可以冻结新的独立留出集。"
+} as Record<string, string>)[String(evidenceQuality.value.decision || "")] || "等待执行证据质量重构。" );
 const holdoutStep = computed(() => String(holdoutValidation.value.status || "not_started"));
 const holdoutPrimary = computed<Record<string, unknown>>(() => objectValue(holdoutValidation.value.holdout_primary));
 const holdoutCombined = computed<Record<string, unknown>>(() => objectValue(holdoutValidation.value.combined_60_secondary));
@@ -469,6 +565,27 @@ async function runHoldout(action: "freeze" | "predict" | "evaluate"): Promise<vo
   });
 }
 
+async function runFailureAttribution(): Promise<void> {
+  await runAction("holdout-attribution", async () => {
+    const result = await api<Record<string, unknown>>("/learning/multimodal-vector-experiment/cloud/holdout-attribution", jsonBody({ benchmark_id: benchmarkId }));
+    actionStatus.value = `零成本归因完成：${String(result.decision || "keep_v2_4")}`;
+    await loadCloudStatus();
+  });
+}
+
+async function runEvidenceQualityRebuild(): Promise<void> {
+  await runAction("evidence-quality", async () => {
+    const result = await api<Record<string, unknown>>("/learning/multimodal-vector-experiment/cloud/evidence-quality/rebuild", jsonBody({
+      benchmark_id: benchmarkId,
+      scope: "holdout",
+      limit: 40,
+      force: false
+    }));
+    actionStatus.value = `证据质量重构完成：${String(result.decision || "research_only")}`;
+    await loadCloudStatus();
+  });
+}
+
 async function runAction(key: string, action: () => Promise<void>): Promise<void> {
   busyKey.value = key;
   error.value = "";
@@ -534,6 +651,26 @@ function strategyLabel(value: string): string {
   return value;
 }
 
+function causeLabel(value: string): string {
+  return ({
+    cloud_signal_not_outcome_aligned: "云信号没有对齐互动结果",
+    retrieval_clusters_semantics_more_than_outcomes: "检索更像内容分类，不像传播结果",
+    visual_payload_has_insufficient_temporal_coverage: "视觉输入缺少时间覆盖",
+    global_reference_pool_lacks_account_context: "全局参考池缺少账号语境",
+    fixed_fusion_is_decision_inactive: "固定融合没有改变选择"
+  } as Record<string, string>)[value] || value;
+}
+
+function actionLabel(value: string): string {
+  return ({
+    do_not_raise_cloud_weight_or_expand_judge: "暂不提高云权重，也不扩大 Judge。",
+    redesign_reference_objective_and_account_conditioning: "重建传播结果参考目标，并加入账号条件。",
+    use_true_hook_middle_payoff_frames_before_retesting_fusion: "补真实 hook/middle/payoff 帧后再测图文融合。",
+    build_account_or_program_stratified_references: "建立按账号或节目分层的参考池。",
+    improve_signal_quality_before_any_new_weight_gate: "先提升证据质量，再讨论新权重门控。"
+  } as Record<string, string>)[value] || value;
+}
+
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause || "操作失败");
 }
@@ -571,6 +708,11 @@ function message(cause: unknown): string {
 .cloud-chain-metrics span { color: var(--muted); font-size: 11px; }
 .cloud-chain-metrics strong { margin-top: 3px; font-size: 14px; }
 .ablation-results { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.failure-attribution { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.attribution-list { display: grid; border: 1px solid var(--border); }
+.attribution-list > div { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(240px, 1.2fr); gap: 12px; padding: 9px 11px; border-top: 1px solid var(--border); }
+.attribution-list > div:first-child { border-top: 0; }
+.attribution-list span { color: var(--muted); }
 .holdout-results { margin-top: 2px; }
 .holdout-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); }
 .holdout-steps span { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 8px 10px; color: var(--muted); border-right: 1px solid var(--border); font-size: 11px; }
