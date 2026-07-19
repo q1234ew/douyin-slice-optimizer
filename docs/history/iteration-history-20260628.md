@@ -303,8 +303,8 @@ V0.6 已经完成“数据资产化 + 账号洞察”的后端基础。下一轮
 
 ## 10. 参考文档
 
-- `docs/douyin-collection-standard.md`
-- `docs/douyin-visible-collection-flow.md`
-- `docs/algorithm-study.md`
-- `docs/paper-architecture-review.md`
-- `docs/agent-next-iteration-plan.md`
+- `docs/guides/douyin-collection-standard.md`
+- `docs/history/douyin-visible-collection-flow.md`
+- `docs/research/strategy/algorithm-study.md`
+- `docs/research/strategy/paper-architecture-review.md`
+- `docs/history/agent-next-iteration-plan.md`

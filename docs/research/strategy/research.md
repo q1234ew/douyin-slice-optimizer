@@ -5,10 +5,10 @@
 
 扩展阅读：
 
-- 更细的论文算法拆解和工程化实现映射见 [algorithm-study.md](./algorithm-study.md)。
-- MVP 系统架构和模块拆分见 [architecture.md](./architecture.md)。
-- 主线论文复核后的架构修订建议见 [paper-architecture-review.md](./paper-architecture-review.md)。
-- 音乐综艺短视频切片的专项策略见 [music-variety-strategy.md](./music-variety-strategy.md)。
+- 更细的论文算法拆解和工程化实现映射见 [algorithm-study.md](algorithm-study.md)。
+- MVP 系统架构和模块拆分见 [architecture.md](../../architecture.md)。
+- 主线论文复核后的架构修订建议见 [paper-architecture-review.md](paper-architecture-review.md)。
+- 音乐综艺短视频切片的专项策略见 [music-variety-strategy.md](music-variety-strategy.md)。
 
 ## 1. 核心结论
 

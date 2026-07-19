@@ -2,7 +2,7 @@
 
 This workflow is for user-approved, read-only collection of visible Douyin web data. It does not inspect cookies, local storage, passwords, or private browser session stores.
 
-For the complete schema, taxonomy, quality gates, and target data model, see [Douyin Collection Standard](douyin-collection-standard.md).
+For the complete schema, taxonomy, quality gates, and target data model, see [Douyin Collection Standard](../guides/douyin-collection-standard.md).
 
 ## Flow
 

@@ -6,12 +6,13 @@
 
 相关文档：
 
-- [product-goals.md](./product-goals.md)：产品北极星目标、成功指标与持续迭代原则。
-- [research.md](./research.md)：论文与公开资料调研。
-- [algorithm-study.md](./algorithm-study.md)：Douyin/字节论文算法拆解。
-- [paper-architecture-review.md](./paper-architecture-review.md)：主线论文复核后的架构更新建议。
-- [music-variety-strategy.md](./music-variety-strategy.md)：音乐综艺短视频切片专项策略。
-- [platform-v0.3-plan.md](./platform-v0.3-plan.md)：多 Agent 进展汇总和 V0.3 平台迭代计划。
+- [product-goals.md](product-goals.md)：产品北极星目标、成功指标与持续迭代原则。
+- [research.md](research/strategy/research.md)：论文与公开资料调研。
+- [algorithm-study.md](research/strategy/algorithm-study.md)：Douyin/字节论文算法拆解。
+- [paper-architecture-review.md](research/strategy/paper-architecture-review.md)：主线论文复核后的架构更新建议。
+- [music-variety-strategy.md](research/strategy/music-variety-strategy.md)：音乐综艺短视频切片专项策略。
+- [model-scheduling-architecture.md](architecture/model-scheduling-architecture.md)：本地模型持久队列、GPU lease、优先级、模型亲和和恢复设计。
+- [platform-v0.3-plan.md](history/platform-v0.3-plan.md)：多 Agent 进展汇总和 V0.3 平台迭代计划。
 
 ## 1. 系统定位
 
@@ -86,7 +87,29 @@ Authorized Tencent-family / YouTube single-video URL           |
   -> Feedback Update / Model Calibration
 ```
 
-### 2.1 Hybrid Slice Shadow Pipeline V1（2026-07-18）
+### 2.1 Qwen3-ASR 音乐综艺主路由与 Shadow 对照（2026-07-18）
+
+音乐综艺 `input_mode=program/precut` 的 auto 路由优先使用 Qwen3-ASR 写主转写；服务不可用或失败时自动回退 Whisper。`qwen3_asr_shadow.v1` 继续提供独立对照 artifact：
+
+```text
+source_video
+  -> Qwen3-ASR 主 transcript + 数据库 transcript_path
+       -> 失败时 Whisper.cpp / faster-whisper fallback
+  -> 可选 Qwen3-ASR Shadow
+       -> transcript/shadow/qwen3_asr/transcript.json
+       -> status.json / qwen3_asr_last_run.json
+       -> comparison only / auto_promote=false
+```
+
+- auto 主路由记录 `requested_backend / backend_preference / selected_backend / fallback_used`，显式指定其他后端时尊重任务级覆盖。
+- Qwen 主转写缓存会在服务随后卸载时继续复用；只有配置变化或 `--force-asr` 才重跑，避免回退 Whisper 反向覆盖已有 Qwen 结果。
+- Shadow 路径不调用 `_mark_transcribed`，不修改 `source_videos.transcript_path/status`。
+- 音频 hash、Qwen 配置和后处理版本共同组成缓存键；相同配置重复运行直接复用。
+- 主路由服务未加载时自动回退 Whisper；Shadow 路由返回 `waiting_model_switch`，不写 placeholder。
+- CLI 为 `dso qwen3-asr-shadow <video_id>`；API 为 `GET/POST /videos/{video_id}/asr/shadow`。
+- 16GB GPU 仍需在 Qwen3-ASR、Omni 与 Embedding 间串行切换；`model_scheduler.v1` 的持久队列、GPU lease/fencing、逐窗口 Omni、逐块 ASR、Embedding Adapter 和受控 Resource Agent 已落地。局域网 canary 已在 `192.168.31.143:8010` 部署 Agent，本机 launchd Worker/8127 Web 显式启用；其他环境仍默认关闭。
+
+### 2.2 Hybrid Slice Shadow Pipeline V1（2026-07-18）
 
 候选生成采用确定性召回，Omni 只生成显式研究复排证据；大模型不直接扫描整条长视频，也不改写最终边界或默认生产排序：
 
@@ -109,6 +132,7 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
 - 转码窗口和模型结果按源文件、候选时间范围、模型与版本缓存，重复运行不重复推理。
 - 16GB 显存默认 `candidate_limit=3`、`max_clip_seconds=6`、`batch_size=1`；前端先返回规则候选，再增量刷新 Omni 结果。
 - 模型服务使用 text-only thinker 路径，明确传递 `thinker_max_new_tokens=128`；推理由单线程执行器串行化，`/health` 独立返回 `ready/busy`，150 秒超时后由 systemd watchdog 重启服务，避免孤儿推理拖死整个 API。生产端口锁定 Omni 模型，Embedding 任务必须使用独立服务或先显式解除维护锁，避免共享 `/load` 竞争显存。
+- 跨 ASR、Omni、Embedding 和研究任务的统一调度 contract 为 `model_scheduler.v1`；详细状态机、SQLite、lease/fencing、API 和迁移方案见 [本地模型资源调度架构设计](architecture/model-scheduling-architecture.md)。Phase 0–2 和 Phase 3 batch-1 基线已实现独立队列、单 GPU lease、逐 item staged commit、亲和/公平调度、准备池、逐窗口 Omni、逐块 ASR、Embedding、状态/取消 API 和安全 Resource Agent；局域网 canary 已显式启用并保持 `validate`，长节目/批量真实混合 workload、GPU 空闲率和 batch 2/4 门禁仍未通过。
 
 主要入口：
 
@@ -117,7 +141,7 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
 - CLI：`dso hybrid-slice <video_id> --load-model`
 - 前端：节目管理中的“智能切片”按钮；候选卡与右侧详情显示 Omni 参与/回退状态。
 
-### 2.2 生产排序与研究排序 contract
+### 2.3 生产排序与研究排序 contract
 
 - `production_ranking_policy.v1` 的默认 scope 为 `production`，唯一默认策略为 `current_rules`，分数字段为 `final_score`。
 - `ranker_score`、`hybrid_score`、Omni、embedding 和后续实验模型均属于显式 `research` scope；它们可参与回测、解释和诊断，不改变默认审核、导出或发布顺序。
@@ -125,7 +149,24 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
 - Gate 通过只产生 `eligible_for_promotion`，不会自动改写生产策略；采用新策略必须冻结新 benchmark，并显式更新 production policy。
 - `GET /ranking/policy` 返回当前 contract；`GET /videos/{video_id}/suggestions` 默认生产排序，只有显式 `ranking_scope=research` 才返回研究顺序。
 
-### 2.3 授权远程媒体获取（2026-07-18）
+### 2.3.1 研究账号与发布账号证据隔离
+
+历史采集账号、平台连接账号和候选所属本地账号不得再依赖同一个 `account_id` 字符串猜测用途：
+
+```text
+研究账号（tianci 等） -> historical_capture_samples -> cross-account research prior
+目标发布账号          -> target_outcome mappings   -> verified platform outcomes
+未分配 main 槽位      -> unclassified mappings     -> audit only
+```
+
+- `platform_accounts.account_role` 只接受 `unassigned / publishing_target / research_source`；目标发布账号必须显式指定，不能由历史样本、当前筛选项或 `main` 默认值推断。
+- `platform_video_mappings.evidence_scope` 只接受 `unclassified / target_outcome / research_proxy`。同一平台 item 已归属某个本地账号后禁止静默跨账号重分配。
+- `performance_metrics.metric_semantics` 区分 `explicit_platform_outcome / engagement_proxy / ambiguous_visible_count / legacy_unverified / mock`。
+- `可见计数 / 计数数值 / visible_count_number / best_visible_count_number` 不属于播放量别名，不写入 `views`。
+- 目标账号个性化 readiness 只统计 `publishing_target + target_outcome + explicit_platform_outcome + 已链接候选 + 非 mock` 的去重作品；不足 30 条或缺少流量及观看/转化维度时保持 `cold_start`。
+- 离线 research promotion gate 即使通过，也不代表目标账号生产校准通过；平台结果缺失时生产默认仍为 `current_rules/final_score`。
+
+### 2.4 授权远程媒体获取（2026-07-18）
 
 远程下载只作为 Media Ingest 前的可选获取层，不生成第二套节目、候选或排序 contract：
 
@@ -184,9 +225,22 @@ MVP 优先本地可运行，降低部署成本。
 ```text
 douyin-slice-optimizer/
   docs/
-    research.md
-    algorithm-study.md
+    README.md
+    product-goals.md
+    development-requirements.md
+    current-state.md
     architecture.md
+    model-and-algorithm-radar.md
+    user-manual.md
+    architecture/
+    guides/
+    design/
+      frontend/
+    research/
+      providers/
+      evaluations/
+      strategy/
+    history/
   src/
     dso/
       __init__.py
@@ -250,31 +304,103 @@ douyin-slice-optimizer/
 - **先做可解释排序，后做大模型排序**：100-1000 条发布样本前，使用规则和 LightGBM/LambdaRank；1000+ 样本后，再考虑 Mini-STCA、多任务模型或小型 reranker。
 - **训练数据默认保守合规**：公开视频页面可见数据不等同于可批量抓取和商用训练；批量训练应依赖自有账号、授权账号、开放平台或合同许可数据。
 
-## 4.2 G3 公网模型 Provider V1
+## 4.2 G3 公网模型 Provider V2
 
-公网模型以独立的 `src/dso/providers/` 边界接入，不允许厂商 SDK 或返回结构直接进入候选、排序和审核业务模块。V1 当前只注册零网络、零费用的 `FakeProvider`，用于验证 contract、缓存、台账和回退；Qwen、Kimi 等真实网络 Adapter 尚未实现，也不会因设置单个环境变量而自动启用。
+公网模型以独立的 `src/dso/providers/` 边界接入，不允许厂商 SDK 或返回结构直接进入候选、排序和审核业务模块。V2 注册零网络 `FakeProvider` 和真实协议但默认关闭的 `AliyunBailianProvider`。百炼 Adapter 只接受北京业务空间专属 HTTPS Host、固定模型白名单和按能力冻结的 JSON 请求；Chat、Multimodal Embedding、Multimodal Rerank、Pairwise Judge 分别使用独立 URL、参数白名单、提示词/接口版本和响应 schema。标准 profile 的媒体输入只接受本地 JPEG Data URI，单请求最多三张。完整短片研究使用互相隔离的 profile：`complete_short_clip` 只允许固定 `qwen3.7-plus-2026-05-26` 和本地无音轨 MP4；`qwen35_omni_complete_short_clip` 只允许固定 `qwen3.5-omni-plus-2026-03-15` 和 H.264/AAC MP4；`qwen35_omni_propagation_features` 复用同一固定 Omni 快照，但只抽取 `content_form/hook/audio/visual/narrative/timeline` 等事实字段，禁止要求或返回平台传播分。Omni 响应结束后才由 `propagation_feature_outcome_dataset.v1` 在本地连接可见互动代理、分享率、关注转化率和观看质量；缺失分母或指标必须写 `unavailable_*`，不能以零或其他互动计数替代。`bailian_complete_clip_batch.v1` 与 `bailian_propagation_feature_batch.v1` 只为已冻结短片清单生成源 SHA 绑定的全时长 H.264/AAC 代理，禁止抽帧和标签入模，先完成全批零网络预检与显式可配置硬预算检查，再串行执行。所有完整短片 profile 都限制 2–60 秒、3.5 MB、`fps<=2`、仅文本输出、流式 usage、模态分项计费、逐批 `full_media` 许可和 0 次重试；不接受任意公网 URL、完整节目、工具调用或调用方自定义 messages/parameters，也不会因只设置 API Key 自动联网。
+
+`propagation_feature_validation_manifest.v1` 冻结完整短片传播特征的账号隔离对照集。高低互动样本必须同账号、同发布时间年龄桶、同时长桶、同内容类别，且满足互动差距、时长差、平台 item、稳定标题和媒体 SHA 防重复；每条媒体还需通过真实视频流、音轨、时长和源 SHA 校验。`propagation_feature_account_holdout.v1` 使用留一账号评测：每个 fold 的 Omni 类别对数优势与 v2.4 历史证据都只能读取其他账号，固定比较 v2.4、Omni 事实特征和 85/15 固定融合，不在评测集搜索权重。门禁同时检查总体成对命中、样本充足账号宏平均、账号胜负和回退，避免大账号支配结论。完整视频缓存身份包含输出 Token 上限；个别截断样本只能用独立受限恢复 manifest 处理，再由成功结果优先的 merge contract 合并，禁止手工覆盖主报告。通过门禁也只允许建立下一版代理 holdout；缺少真实曝光、观看、分享率或关注转化时，禁止晋级生产排序。
 
 ```text
 本地基线
   -> ProviderRequest（内容 hash、模型/API/提示词版本、输入规模）
   -> 默认关闭 / 数据许可 / 上传级别 / 密钥引用门禁
   -> 确定性缓存
-  -> 单请求 / 单批次 / 单日预算预留
-  -> Provider Adapter（当前只有 Fake，无网络）
+  -> 跨进程预算执行锁 + 台账实时刷新
+  -> 单请求 / 单批次 / 单日最坏费用预留
+  -> Provider Adapter（Fake 或显式启用的 Aliyun Bailian）
   -> 结果 schema 与敏感字段校验
-  -> 独立 SQLite 成本台账
+  -> 按实际 usage 结算/释放；未知账单保守占用预留
+  -> 独立 SQLite 调用与逐网络尝试台账
   -> Shadow 评测（质量、严重错判、P50/P95、失败率、缓存、费用）
   -> 最终结果仍保留本地基线
 ```
 
 核心 contract：
 
-- `public_model_provider.v1`：厂商无关请求、结果、输入规模、调用指标、许可审计快照和决策证据。
-- `public_model_runner.v1`：按 fail-closed 顺序执行策略、缓存、预算、Provider、台账和本地回退。
-- `public_model_ledger.v1`：独立存储调用次数、token、字节、媒体规模、延迟、重试、限流、缓存、费用、许可和安全摘要；不存 API key、提示词正文和原始媒体。
+- `public_model_provider.v2`：厂商无关请求、结果、实际 usage、Provider request ID、缓存 Token、价表版本、账单状态、逐尝试指标、许可审计快照和决策证据。
+- `public_model_runner.v2`：按“策略/数据许可 -> 本地缓存 -> POSIX 跨进程预算锁 -> 台账费用刷新 -> 预算预留 -> Provider -> usage 结算 -> 台账 -> 本地回退”的 fail-closed 顺序执行；共享同一台账的付费调用串行进入预算临界区，缓存命中不占付费预算，实际费用超过预留时只保留本地结果。不支持跨进程锁的平台不得静默降级为进程内锁。
+- `public_model_ledger.v2`：固定字段独立存储 preflight reservation、usage estimate、账单校准位、未知账单、实际 token/字节、逐网络尝试、重试、限流、缓存、许可和保留政策引用；不存 API key、Authorization、提示词正文、字幕正文、Base64 或原始媒体。
 - `public_model_shadow_evaluation.v1`：只生成 `research_only` 对比报告，不改变生产权重、人工 Gold、导出和发布。
 
-真实 Adapter 的准入顺序固定为：核对厂商官方接口与价格、明确数据许可和保留期限、配置环境变量密钥、配置同币种预算、在冻结集 Shadow 对比，最后才讨论低权重融合。任何门禁缺失均返回本地基线。
+真实 Adapter 的准入顺序固定为：核对厂商官方接口与价格、明确数据许可和保留政策、配置环境变量密钥、配置同币种预算、在冻结集 Shadow 对比，最后才讨论低权重融合。固定保留天数未知时只允许记录带政策引用的 `provider_minimum_necessary`，状态同时暴露 `retention_days_known=false`；不得用 `0` 伪装零保留。任何门禁缺失均返回本地基线。
+
+### 4.2.1 Provider 管理配置 contract
+
+`provider_admin_config.v1` 为 Web 管理面板提供只配置、不调用的连接管理边界：
+
+- `GET /providers/config` 返回 Provider、固定模型、兼容地址、三层预算、治理门禁以及 `api_key_configured` 布尔值；响应固定 `Cache-Control: no-store`，绝不返回 API Key。
+- `POST /providers/config` 仅接受同源 JSON，并且只允许 HTTPS 反向代理或直接 loopback/SSH 本地端口转发；公网 HTTP 请求返回 403。
+- 保存目标是 root 服务的 `/etc/dso/bailian.env`，本地非 root 开发为 `data/auth/bailian.env`；采用同目录临时文件、`fsync`、原子替换和 `0600` 权限，不经过 shell、不写数据库。
+- 每次保存强制写入 `DSO_PUBLIC_MODEL_API_ENABLED=0`，因此连接信息写入不构造 Runner、不调用网络、不产生成本。数据许可和保留策略仍是独立 fail-closed 门禁。
+- API Key 只允许百炼业务空间 `sk-` Key；拒绝空白/控制字符、超长值和 `sk-sp-` Coding Plan Token。前端使用 password input，保存成功立即清空，不写 localStorage/sessionStorage。
+
+该 contract 只改变运维配置面，不改变候选、排序、人工 Gold、导出或发布 contract。验证入口为研究中心“模型与环境 → 公网模型 API”和 `pytest -q tests/test_provider_admin_config.py`。
+
+### 4.2.2 百炼向量研究链路
+
+`bailian_multimodal_vector_chain.v1` 复用 `public_model_runner.v2`，在冻结的 `dso-multimodal-vector-value-20260719-r1` 上按以下顺序运行：
+
+```text
+240 条冻结样本
+  -> qwen3-vl-embedding：text + text/image fusion，2560 维
+  -> cosine 全量初召回
+  -> qwen3-vl-rerank：只重排 Top-N 结构化候选
+  -> 与冻结可见互动代理做客观成对结果对照
+  -> 与 frozen v2.4 成对结果生成真实选择 disagreement queue
+  -> qwen3.7-plus 主 Judge + qwen3.6-flash 成本 Challenger（盲于两侧策略选择/分差）
+  -> research_only 质量/费用/延迟报告
+```
+
+- 云端向量继续写通用 `embedding_records`，但使用独立 `model_name=aliyun:qwen3-vl-embedding`、`model_version`、`source_hash` 和 `data/cache/bailian_embeddings/`，不会覆盖本地 2048 维 Qwen 记录。
+- 向量输入只含标题和现有语义字段；不含互动标签、`reward_proxy`、Gold 身份或历史策略分。Fusion 最多上传三张 manifest 内代表帧，不上传原视频。
+- `preflight` 阶段在不解析 API Key、不构造网络客户端的情况下，使用真实本地帧完成 JPEG/尺寸/Base64/schema/请求字节和最坏预算校验。长边超过 1280px 或单图超过 1MB 时，FFmpeg 只在 `data/cache/bailian_embeddings/normalized_frames/` 生成源 SHA 绑定的派生 JPEG，原始素材保持不变。
+- Rerank 当前以融合向量召回 Top-N，再用结构化文本重排；Provider Adapter 具备受限图片输入 contract，但冻结首轮不批量上传 Top-N 图片。
+- v2.4 pair 选择来自与 manifest SHA-256 绑定的冻结侧车；缺失、SHA 不匹配或覆盖不完整时，分歧比较 fail closed，Judge 返回 `not_ready` 且不发起网络请求。
+- 同一侧车的 `proxy_choice` 只在云端排序完成后进入 `outcome_proxy_comparison`，不会进入 Embedding、Rerank 或 Judge 输入。该指标是账号内校正的抓取时点可见互动代理，不是播放量、曝光或关注转化。为避免冻结 pair 左右朝向不均衡，主指标按真实结果侧做 macro-average；原始准确率、结果侧分布和多数类基线同时报告。客观门禁至少需要 40 个完整 pair，且云端平衡准确率需较 v2.4 高 `5pp`；通过也只生成正向研究信号，不自动晋级生产。
+
+`bailian_cached_signal_ablation.v1` 在上述链路之后提供 D12-A 零网络归因层：
+
+- 只读取冻结 manifest、SHA 匹配的 v2.4 侧车、现有 `embedding_records` 向量文件和 `rerank-latest.json`；函数不构造 Provider Runtime，报告固定记录 `network_request_count=0` 和 `effective_cost_cny=0`。
+- 消融矩阵比较 Text/Fusion cosine、高低互动平衡参考池、每侧 Top-3/5/10、现有缓存 Rerank、Embedding/Rerank 融合，以及经 median absolute pair delta 归一化后的 v2.4 低权重融合。
+- 每个配置只和它实际覆盖的同一 pair 子集上的 v2.4 比较，输出结果侧平衡命中、原始命中、低互动避让、分层 bootstrap 95% 区间、账号/类别/互动差距切片和诊断 pair，禁止拿全量基线与不完整云子集直接相减。
+- 扩到新 60-pair 冻结集前，至少要求 40 个可比 pair、相对 v2.4 `+2pp`、低互动避让不下降、3 个样本量充足账号和 2 个素材类别改善。即使满足也只得到 `eligible_for_60_pair_expansion`；同一 40 对上的权重搜索明确带选择偏差，不能直接晋级生产。
+- 参考池必须同时具备高/低互动云向量，Rerank 只使用两侧等量样本，多余一侧明确排除；缺任一侧直接拒绝评测。审核分歧仍允许 `tie`，但客观结果只有左右高低侧时按云分差正负二选一，避免把审核弃权阈值误当结果分类阈值。
+- `rerank --limit N` 按完整 A/B pair 选择评测样本，不允许用散列样本凑限额；报告同时保留 pair 数、云端/v2.4 正确数、准确率差、缺失语义和是否满足样本量。
+- Judge 最多处理 20–40 条真实选择分歧 pair，左右各最多一张代表帧；`pairwise-input.v2` 不传入 v2.4/cloud 选择或分差，避免裁判被待比较策略锚定。两种 Judge 读取相同盲裁输入并各自记录缓存、usage、费用和失败降级。
+- Web 的离线预检最多 40 条且不要求公网门禁；真实调用仅允许最多 10 条 Smoke 或 40 条有界批次，避免长任务阻塞健康检查。全量执行通过可续跑 CLI。任何阶段缺门禁、超预算、schema 失败或网络不可用都保留本地 v2.4，不写人工 Gold、生产权重、审核状态、导出或发布。
+
+`bailian_independent_holdout_validation.v1` 提供 D12-B 不可变独立复验：
+
+- 固定 `pair-001..040` 为校准集、`pair-041..060` 为留出集，禁止样本交叉；固定 Text ref20/K3、Embedding/Rerank 50/50 和 v2.4/cloud 85/15，不在留出集搜索配置。
+- 校准集冻结 median absolute pair delta 尺度。配置 artifact 只保留 v2.4 预测和信号分差；盲预测 artifact 拒绝结果代理、互动标签、归一化奖励和 anchor/control 身份字段，并以 SHA-256 防覆盖。
+- Rerank 支持 `include_outcomes=false` 与独立 report stage；盲预测阶段不会生成 `outcome_proxy_comparison`。预测 SHA 冻结后，评估阶段才关联可见互动代理。
+- 单实验硬上限为 `10.00 CNY`。零网络 preflight 汇总 Embedding/Rerank 最坏预留，真实 Runtime 另把共享 50 元批次额度收紧到 10 元；失败可复用逐条缓存恢复。
+- 结果继续为 `research_only`。独立增量、低互动避让和账号门禁不通过时保留 v2.4，不调用 Judge、不写生产权重、Gold、审核、导出或发布。
+
+`bailian_holdout_failure_attribution.v1` 提供 D12-C0 零网络失败归因：
+
+- 先校验 manifest、配置、盲预测和揭盲评估 SHA，再读取既有 Text/Fusion 向量与 `holdout-rerank`；不构造 Provider Runtime，固定写入 `network_request_count=0` 和 `effective_cost_cny=0`。
+- 逐 pair 区分 Cloud 纠错、Cloud 误导、共同错误和共同正确，报告 15% 固定融合的决策弹性；后验权重网格只解释翻转阈值，明确禁止作为调参或晋级结果。
+- 检查高低参考池标签/账号分布、Top1 表现标签与内容分类一致、同账号参考覆盖、标题近重复、Text/Fusion 差异和视觉源时间覆盖。
+- 报告只写独立研究 artifact，不改生产排序、人工 Gold、审核、导出或发布。同一 60 对不得因归因结果重新搜索权重。
+
+`bailian_evidence_quality_reconstruction.v1` 提供 D12-C1 证据质量重构：
+
+- 从冻结 manifest 的原视频路径确定性生成 15 秒 hook / middle / payoff 三窗口，每窗口保留一张真实时间帧；短视频允许窗口重叠，但三个代表时点必须不同。缓存记录源视频 SHA、帧 SHA、窗口时间和 `dso-bailian-vector-input.d12c1` source hash，不覆盖旧 Fusion 向量。
+- 高、低互动参考分开检索；账号、节目或素材形态层级只有在 high/low 两侧同时存在时才可共同使用，否则双侧一起降级，禁止一侧账号证据、一侧全局证据。
+- `fusion_d12c1` 是预留的新模态标识。证据包构建和缓存对照不会自动创建公网 Runtime；只有显式后续批次才能生成新向量。
+- Gate 同时要求三时点覆盖、双侧参考、语境覆盖、新 Fusion 覆盖和分层策略不劣于全局。任一条件未通过时保持 `research_only` 和 v2.4。
+- 当前冻结参考池即使全部补齐，同账号 high/low 覆盖上限也只有 65%；若目标门槛为 80%，必须冻结新参考池版本，不能原地改写当前 manifest。
 
 ## 5. 核心数据流
 
@@ -368,6 +494,12 @@ text_embedding
 cover_embedding
 multimodal_embedding = weighted_average(text, cover)
 ```
+
+Qwen3-VL 通用历史向量继续写入 `embedding_records`，与旧 `clip_embeddings` 分离。批量构建可显式传入不超过 500 个 `entity_ids`；Scheduler 在入队前按 `entity_type + entity_id + modality + model + source_hash` 复用已存在的 2048 维缓存，避免冻结实验退化为全库重算。
+
+百炼 `qwen3-vl-embedding` 使用同一表但独立模型名、2560 维与 `text/fusion` modality；缓存键同时绑定 frozen manifest SHA-256、输入 contract、模型、维度、样本 ID、语义摘要和代表帧 SHA-256。模型、维度、提示词或媒体变化后不会误用旧向量。
+
+`multimodal_vector_value.v1` 使用独立冻结 contract：60 组盲审样本与高/低互动参考池在 `sample_id / platform_item_id / stable_title_key` 上互斥；评测样本只作为查询向量，互动标签只来自参考池。盲审结果独立写入 `multimodal_vector_reviews`，不写 `material_gold_annotations`、历史语义字段或候选分数。媒体读取 API 只能通过 manifest 中的 `benchmark_id + task_id + side` 解析 `data/douyin_media_assets` 内文件，不接受任意本地路径。
 
 ### 5.6 评分和排序
 
@@ -657,6 +789,9 @@ created_at
 ```text
 id
 experiment_id
+slice_variant_id
+candidate_segment_id
+window_name
 collected_at
 views
 impressions
@@ -670,6 +805,13 @@ favorites
 shares
 follows
 negative_feedback
+comment_quality_score
+reward_proxy
+normalized_reward
+uncertainty
+sample_source
+platform_item_id
+metric_semantics
 created_at
 ```
 
@@ -707,7 +849,10 @@ updated_at
 
 ```text
 id
+performance_metric_id
 experiment_id
+slice_variant_id
+candidate_segment_id
 window_name
 collected_at
 hours_since_publish
@@ -725,6 +870,12 @@ shares
 follows
 negative_feedback
 comment_quality_score
+reward_proxy
+normalized_reward
+uncertainty
+sample_source
+platform_item_id
+metric_semantics
 created_at
 ```
 
@@ -805,7 +956,8 @@ V0.4 先作为状态壳，V0.5 接真实 OAuth/OpenAPI。
 ```text
 id
 platform
-local_account_id
+account_id
+account_role  # unassigned | publishing_target | research_source
 platform_account_id
 display_name
 auth_status
@@ -820,15 +972,20 @@ updated_at
 
 ```text
 id
-platform_account_id
+account_id
 platform
-platform_video_id
+platform_item_id
 candidate_segment_id
 slice_variant_id
-publishing_experiment_id
-match_status
-match_confidence
-matched_by
+experiment_id
+platform_url
+platform_title
+published_at
+evidence_scope  # unclassified | target_outcome | research_proxy
+sync_status
+last_synced_at
+last_metrics_at
+notes
 created_at
 updated_at
 ```
@@ -1011,7 +1168,16 @@ GET  /accounts/{id}/interest-clock
 GET  /accounts/{id}/topic-clusters
 
 GET  /providers/status
+GET  /providers/config
+POST /providers/config
 POST /providers/fake-smoke
+
+GET  /learning/multimodal-vector-experiment/cloud/status
+POST /learning/multimodal-vector-experiment/cloud/run
+POST /learning/multimodal-vector-experiment/cloud/ablation
+POST /learning/multimodal-vector-experiment/cloud/holdout/{freeze|predict|evaluate}
+POST /learning/multimodal-vector-experiment/cloud/holdout-attribution
+POST /learning/multimodal-vector-experiment/cloud/evidence-quality/rebuild
 ```
 
 ## 9. CLI 草案
@@ -1028,6 +1194,9 @@ dso import-metrics ./metrics.csv
 dso insights --account main
 dso provider-status
 dso provider-smoke --repeat 2
+dso bailian-vector-status --benchmark-id dso-multimodal-vector-value-20260719-r1
+dso bailian-vector-run --stage smoke --limit 10 --top-n 10 --judge-limit 5
+dso bailian-vector-ablation --benchmark-id dso-multimodal-vector-value-20260719-r1
 ```
 
 ## 10. MVP 里程碑

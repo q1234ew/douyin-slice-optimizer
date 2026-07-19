@@ -219,7 +219,7 @@ curl "http://127.0.0.1:8000/learning/datasets?account_id="
 
 - 新增采集器：`src/dso/collectors/douyin_media.py`。
 - 新增 CLI：`douyin-media-collect`。
-- 新增流程文档：[douyin-media-collection-flow.md](douyin-media-collection-flow.md)。
+- 新增流程文档：[douyin-media-collection-flow.md](../guides/douyin-media-collection-flow.md)。
 - 资产目录固定为 `data/douyin_media_assets/<account_id>/<run_id>/`，按账号和批次隔离保存。
 - 报告固定输出 JSON 和 Markdown，记录成功、部分成功、失败、下载、抽帧、音频提取和错误原因。
 
@@ -253,9 +253,9 @@ PYTHONPATH=src python3 -m dso.cli douyin-media-collect \
 
 ## 10. 参考文档
 
-- [current-state.md](current-state.md)
-- [development-requirements.md](development-requirements.md)
-- [douyin-collection-standard.md](douyin-collection-standard.md)
-- [douyin-media-collection-flow.md](douyin-media-collection-flow.md)
+- [current-state.md](../current-state.md)
+- [development-requirements.md](../development-requirements.md)
+- [douyin-collection-standard.md](../guides/douyin-collection-standard.md)
+- [douyin-media-collection-flow.md](../guides/douyin-media-collection-flow.md)
 - [iteration-history-20260628.md](iteration-history-20260628.md)
 - [agent-next-iteration-plan.md](agent-next-iteration-plan.md)

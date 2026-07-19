@@ -2,7 +2,7 @@
 
 审阅日期：2026-06-25
 角色：下一轮迭代产品评审员 Agent
-范围：`docs/agent-product-review.md`、`docs/agent-architecture-plan.md`、`src/dso/api/dashboard.py`、`src/dso/quality/insights.py`、`src/dso/feedback/importer.py`、`tests/test_core.py`，并补充只读查看 `src/dso/api/main.py`、`src/dso/cli.py`、`README.md` 中的 API/首启入口。
+范围：`docs/history/agent-product-review.md`、`docs/history/agent-architecture-plan.md`、`src/dso/api/dashboard.py`、`src/dso/quality/insights.py`、`src/dso/feedback/importer.py`、`tests/test_core.py`，并补充只读查看 `src/dso/api/main.py`、`src/dso/cli.py`、`README.md` 中的 API/首启入口。
 
 ## 1. 运营视角：quality gate 是否足够清楚
 

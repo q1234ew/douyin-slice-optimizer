@@ -4,7 +4,7 @@
 补充日期：2026-06-26
 补充日期：2026-06-28
 角色：架构及规划师 Agent
-范围：`README.md`、`docs/agent-architecture-plan.md`、`docs/agent-product-review.md`、`docs/platform-v0.3-plan.md`、`src/dso/quality/insights.py`、`src/dso/feedback/importer.py`、`src/dso/features/asr.py`、`src/dso/features/asr_profile.py`、`src/dso/api/dashboard.py`、`tests/test_core.py`。
+范围：`README.md`、`docs/history/agent-architecture-plan.md`、`docs/history/agent-product-review.md`、`docs/history/platform-v0.3-plan.md`、`src/dso/quality/insights.py`、`src/dso/feedback/importer.py`、`src/dso/features/asr.py`、`src/dso/features/asr_profile.py`、`src/dso/api/dashboard.py`、`tests/test_core.py`。
 
 2026-06-28 追加：抖音三账号采集、数据资产化和后续三轮迭代复盘已单独沉淀到 [2026-06-28 迭代复盘与后续计划](iteration-history-20260628.md)。该文档作为后续 `V0.6 数据资产化 + 账号洞察` 的历史入口，记录当前 983 条作品资产、账号分表约定、三轮计划和暂缓事项。
 

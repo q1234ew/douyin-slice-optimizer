@@ -3,7 +3,7 @@
 学习日期：2026-06-23
 目标：理解与抖音短视频切片流量优化最相关的最新推荐系统实现思路，并沉淀为后续可实现的系统架构。
 
-落地架构见 [architecture.md](./architecture.md)。
+落地架构见 [architecture.md](../../architecture.md)。
 
 ## 1. 总体判断
 
@@ -497,7 +497,7 @@ reward =
 
 ## 5. 建议系统数据表扩展
 
-在 `docs/research.md` 的基础上，建议新增这些表/字段。
+在 `docs/research/strategy/research.md` 的基础上，建议新增这些表/字段。
 
 ### 5.1 多模态表示缓存
 

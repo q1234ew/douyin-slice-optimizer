@@ -5,9 +5,9 @@
 
 相关文档：
 
-- [architecture.md](./architecture.md)：系统架构。
-- [music-variety-strategy.md](./music-variety-strategy.md)：音乐综艺切片策略。
-- [research.md](./research.md)：推荐系统和短视频论文调研。
+- [architecture.md](../architecture.md)：系统架构。
+- [music-variety-strategy.md](../research/strategy/music-variety-strategy.md)：音乐综艺切片策略。
+- [research.md](../research/strategy/research.md)：推荐系统和短视频论文调研。
 
 ## 1. 当前多 Agent 进展
 

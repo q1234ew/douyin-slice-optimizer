@@ -1,6 +1,6 @@
 # 开发要求
 
-本文档定义当前项目的开发约束、验证要求和数据管理规则。产品目标和指标口径以 [product-goals.md](./product-goals.md) 为准；后续开发优先遵守这两份规范性文档。如果历史计划文档与二者冲突，以规范性文档为准。
+本文档定义当前项目的开发约束、验证要求和数据管理规则。产品目标和指标口径以 [product-goals.md](product-goals.md) 为准；后续开发优先遵守这两份规范性文档。如果历史计划文档与二者冲突，以规范性文档为准。
 
 ## 1. 基本原则
 
@@ -99,6 +99,39 @@ npm run build
 
 构建产物会写入 `src/dso/api/static/dashboard/`。不要手工编辑这个目录里的构建文件，应修改 `frontend/src/` 后重新构建。
 
+### 3.1 本地模型调度要求
+
+调度实现以 [model-scheduling-architecture.md](architecture/model-scheduling-architecture.md) 为准，并遵守以下不变量：
+
+- ASR、Omni、Embedding 等竞争同一物理 GPU 的任务必须经统一 `model_scheduler.v1` lease；Scheduler 启用时普通业务调用不得绕过 lease 直接调用 GPU 服务。
+- 模型队列必须持久化并由独立 Worker 消费，不能把 FastAPI `BackgroundTasks`、线程锁或前端未等待的 Promise 当作可靠任务系统。
+- 每个物理 GPU 同时最多一个有效推理 attempt；lease 必须有 heartbeat、expiry 和 fencing token，过期 attempt 不得提交业务结果。
+- API 必须先返回规则、历史先验、Whisper 或已有缓存基线，并提供 job 状态；模型繁忙是 `waiting_resource`，不是伪成功或零分。
+- 相同输入 hash、模型、运行时、提示词、参数和媒体 profile 必须复用完成缓存或合并 active job，不能重复计费或重复占用 GPU。
+- 任务取消采用协作式语义；运行中的单个推理单元可以完成或超时，但取消后不得继续派发后续 item。
+- 调度状态和高频心跳使用独立 `model_scheduler.sqlite3`；跨调度库与业务库通过 staged artifact 和幂等提交恢复，不假设跨库事务。
+- 公网 Provider 不得作为本地 GPU 繁忙时的隐式溢出路径；外部调用仍必须通过数据许可、预算、缓存、台账和 Provider policy。
+- 调度器首版不得改变模型、提示词、候选边界、排序权重、人工 Gold、导出或发布状态；批处理和自适应窗口必须单独通过冻结 benchmark。
+- 当前 Phase 0–3 batch-1 基线通过 `DSO_MODEL_SCHEDULER_ENABLED=1` 显式启用；必须同时运行独立 `dso model-worker --resource gpu:0`。Omni、Qwen3-ASR 和 Text/Visual Embedding 已迁移 Adapter；新增 GPU 调用仍必须先迁移，lease guard 不允许静默绕过。
+- Scheduler 默认关闭；未配置 `DSO_GPU_RESOURCE_AGENT_URL`/`DSO_GPU_RESOURCE_AGENT_TOKEN` 时，必须预先确认任务对应模型已驻留。Resource Agent 只能接受服务端白名单 Profile 和单调 fencing token，不得接受任意 shell、systemd unit、模型路径或来自前端的密钥。
+- Resource Agent 健康检查与模型激活必须使用不同超时：健康检查默认 5 秒，激活默认 1800 秒并覆盖当前 8–45 秒实测切模；不得用短健康超时误判仍在正常加载的模型切换。
+- Scheduler 启用时，候选详情、历史证据等读取接口只能复用已缓存模型结果；缺失向量必须返回 `deferred_scheduler`/弃权并由显式构建 job 补齐，读取请求不得调用 `/load` 或直接触发 GPU 推理。
+- 正式启用前必须运行真实冻结混合 workload，验证零跨模型并发、输出等价、显存/OOM、GPU 空闲间隙、切模恢复和失败降级；合成 benchmark 只能验证队列/亲和/公平 contract，不能替代真实 GPU 验收。
+
+### 3.2 公网 Provider 治理要求
+
+- 公网调用顺序固定为：总开关/Provider/数据许可门禁、确定性本地缓存、最坏费用预留、网络调用、实际 usage 结算、固定字段台账和本地回退；缓存命中不得预留或消耗付费预算。
+- 预算必须同时限制单请求、单批次和单日。预留覆盖全部允许重试；成功后按实际 usage 结算并释放余额，实际费用超过预留时 fail closed；响应丢失等未知账单按全额预留保守入账。
+- 共享同一 Provider 台账的多个进程必须在预算刷新、预留、网络调用、结算和最终台账写入的完整区间持有跨进程排他锁；每次预留前重新读取批次/当日保守费用。不得只依赖 `threading.Lock` 或进程启动时快照；跨进程锁不可用时必须拒绝公网调用并保留本地基线。
+- 调用与每次网络尝试必须分别记录实际输入/输出/缓存 Token、原始 HTTP 响应字节、延迟、状态、Provider request ID、价表版本和账单状态；不得用请求前 Token 估算或解析后业务 JSON 长度冒充实际值。
+- 外发许可必须记录可审计的 `retention_policy_reference`；有书面固定期限时同时记录非负整数 `retention_days`。厂商只声明按服务所需最短期限保留、未给固定天数时，可显式使用 `provider_minimum_necessary` 语义并记录 `retention_days_known=false`，但不得伪填 `0`、不得省略政策引用，也不得把它表述成已知零保留。
+- OpenAI 兼容只代表传输形态相近，不允许一个通用参数字典跨厂商透传。每个 Adapter 必须有独立模型 allowlist、Host allowlist、请求字段 allowlist、响应 schema、价格、错误重试和媒体限制。
+- `AliyunBailianProvider` 标准 profile 只允许华北 2 业务空间专属 HTTPS Host、fixed snapshot、非流式/非思考 JSON Mode、脱敏摘要和最多三张本地 JPEG。完整短片只允许用户逐批授权的两个隔离研究 profile：视觉 `complete_short_clip` 固定 `qwen3.7-plus-2026-05-26`，只收源 SHA 绑定的本地无音轨 MP4 Base64；全模态 `qwen35_omni_complete_short_clip` 固定 `qwen3.5-omni-plus-2026-03-15`，必须有完整 AAC 音轨、只请求文本输出、流式汇总 usage，并按文本/视频输入、音频输入和文本输出分项费用。二者都限制为 2–60 秒、3.5 MB、`fps<=2`、固定像素与输出上限、`full_media` 进程许可和 0 次重试；都禁止滚动模型别名、任意 URL、完整节目、工具、联网搜索和调用方自定义 messages/parameters。
+- API Key 只从进程环境或权限为 `0600` 的 systemd EnvironmentFile 读取。状态 API、日志、缓存、调用台账和测试产物必须断言不含 Key、Authorization、提示词、字幕正文或 Base64。
+- Web 密钥配置必须使用 `provider_admin_config.v1`：GET 只返回 `api_key_configured`，POST 只接受同源 JSON，且仅允许可信 HTTPS 反向代理或直接 loopback/SSH 本地端口转发。公网 HTTP 必须禁用输入并返回 403；前端不得把 Key 写入 localStorage、sessionStorage、URL、错误消息或响应，也不得硬编码 SSH 主机、用户或客户端密钥路径，只能显示通用占位符模板。
+- Web 保存只允许原子写入权限为 `0600` 的独立 EnvironmentFile，并强制保持 `DSO_PUBLIC_MODEL_API_ENABLED=0`；保存动作不得构造真实 Runner、发起模型调用或消耗预算。Nginx 必须覆盖而非透传客户端提交的 `X-Forwarded-Proto`、`X-Forwarded-For` 和 `X-Real-IP`。
+- ECS 的 systemd drop-in 使用 `deployment/systemd/dso-web-provider.conf`，把 `/etc/dso/bailian.env` 注入进程并只为 `/etc/dso` 增加写入白名单；不得为配置面板放宽其他 `ProtectSystem` 或 `ReadWritePaths` 范围。
+
 ## 4. 验证要求
 
 ### 4.1 后端或学习逻辑变更
@@ -166,7 +199,7 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 - Shadow、生产权重、人工 Gold、导出和发布行为是否发生变化。
 - 超时、限流、模型不可用或预算耗尽时的本地回退结果。
 
-只展示少量成功案例不能替代冻结 benchmark。新方案的状态和结论还应同步到 [model-and-algorithm-radar.md](./model-and-algorithm-radar.md)。
+只展示少量成功案例不能替代冻结 benchmark。新方案的状态和结论还应同步到 [model-and-algorithm-radar.md](model-and-algorithm-radar.md)。
 
 排序策略准入还必须遵守：默认生产排序只能读取已明确采用的 production policy；`ranker_score`、`hybrid_score` 或模型分不得因为字段存在而隐式成为默认分。研究策略必须同时通过绝对门槛、相对 `current_rules` 与语义基线的强基线保护以及账号级门槛；即使通过，也只能标记为 `eligible_for_promotion`，需冻结新 benchmark 并显式修改 policy 后才可采用。
 
@@ -196,14 +229,24 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 - 不同节目、不同账号、不同视频 ID 不应被标题相似性误合并。
 - 标题相同但视频 ID 不同，默认视为不同发布作品。
 
-### 5.4 采集数据要求
+### 5.4 账号与结果证据隔离
+
+- 历史采集账号默认是 `research_source`，只用于跨账号研究先验；不得因为账号 ID 出现在筛选器、平台映射或 `main` 默认值中就推断为目标发布账号。
+- 目标发布账号必须显式设置 `account_role=publishing_target` 并具有稳定 `platform_account_id`；缺少目标结果时必须返回 `cold_start`。
+- 平台映射必须带 `evidence_scope`。旧数据默认 `unclassified`，不得通过迁移自动升级为 `target_outcome`。
+- 同一 `platform_item_id` 不允许静默跨本地账号重分配；需要改归属时必须走可审计的显式数据修复流程。
+- `可见计数`、`计数数值`、`visible_count_number` 和 `best_visible_count_number` 属于模糊展示字段，禁止映射为 `views`。只有明确平台结果字段才能标记 `explicit_platform_outcome`。
+- 旧平台指标默认 `legacy_unverified`，保留审计但不满足目标账号个性化或生产 promotion readiness。
+- 离线研究 gate 和目标账号生产 readiness 必须分开返回、分开展示；前者通过不能覆盖后者的冷启动状态。
+
+### 5.5 采集数据要求
 
 - 新采集文件优先放在 `outputs/douyin_<program>_<YYYYMMDD>/` 或 `outputs/douyin_three_accounts_<YYYYMMDD>/accounts/<program>/`。
 - Excel 导入必须支持 `.xlsx`，历史兼容 `.xslx` 拼写。
 - 采集工作簿优先读取 `作品去重`、`作品明细`、`三账号作品`、`天赐作品`、`歌手2026作品`、`思绪作品`、`原始清洗记录`。
 - 采集字段命名变化时，必须同步更新解析逻辑和文档口径。
 
-### 5.5 授权远程媒体获取
+### 5.6 授权远程媒体获取
 
 - 只处理自有或已取得下载、处理许可的媒体；Provider 的开源/源码可见不等于媒体版权授权。
 - 当前 `video_download.v1` 只允许经审计的 `TencentVideoClient`、受限 `YouTubeVideoClient` 和对应白名单域名，不启用上游通用解析器。YouTube 路径只调用 `videodl` 内置直连工具，必须禁用上游的 `ytdown`、`downr` 第三方解析服务。
@@ -233,7 +276,7 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 
 ## 8. ASR 开发要求
 
-- 默认保持本地优先，`whisper.cpp` 优先，faster-whisper 兜底。
+- 默认保持自托管优先；音乐综艺 auto 路由以 Qwen3-ASR 为主，`whisper.cpp`、faster-whisper 依次兜底。
 - `fast=base` 用于批量默认模式。
 - `quality=small` 用于复杂舞台、英文歌名、人名密集场景。
 - `verify/premium` 可用于候选级复核，但不要直接替换全片默认策略。
@@ -242,9 +285,12 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 - 长音频 ASR 的 HTTP 200 只代表请求完成，不代表语义完整；必须记录逐块文本量、耗时、空结果、重试和最终 `ready/degraded` 状态。
 - Qwen3-ASR 默认使用 60 秒窗口、低能量边界吸附和空 context；context 回显、有声音却空文本、异常慢且文本稀疏时必须缩块重试或显式标为未解决，不得静默进入候选生成。
 - 切块长度、重叠、context 和恢复阈值属于 ASR 缓存键；修改后不得复用旧 transcript 冒充新配置结果。
+- Qwen3-ASR 完整节目 Shadow 必须写入独立 artifact，保持 `auto_promote=false`，不得修改 `source_videos.transcript_path/status`、Whisper 主转写、人工 Gold、候选边界或生产排序；服务未加载时返回 `waiting_model_switch`，不得写 placeholder 冒充 Shadow 成功。
+- 音乐综艺 auto ASR 生产路由固定为 `Qwen3-ASR primary -> Whisper.cpp/faster-whisper fallback`；Qwen 不可用、失败或空结果时必须记录实际回退后端，且不得用 placeholder 覆盖可用旧转写。已缓存的同配置 Qwen 主转写不得仅因模型暂时卸载而被 Whisper 反向覆盖。
 
 ## 9. 抖音账号和合规要求
 
+- 研究中心顶部账号选择器只筛选研究数据；平台连接、item 绑定和结果同步使用独立发布账号上下文，不得跟随研究筛选器切换。
 - 生产链路优先接抖音开放平台 OAuth 和官方 API。
 - 扫码登录需要配置：
   - `DSO_DOUYIN_CLIENT_KEY`
@@ -264,7 +310,7 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 | 新增开发命令、测试门槛、数据规则 | `docs/development-requirements.md` |
 | 数据表、模块边界、API 合同变化 | `docs/architecture.md` |
 | 发现新模型/算法、完成 benchmark 或准入状态变化 | `docs/model-and-algorithm-radar.md` |
-| 采集字段、质量门、合规边界变化 | `docs/douyin-collection-standard.md` |
+| 采集字段、质量门、合规边界变化 | `docs/guides/douyin-collection-standard.md` |
 | 阶段性复盘和下一步计划 | 新增或更新 `docs/iteration-history-YYYYMMDD.md` |
 
 文档不得只写结论，必须给出至少一种验证方式：命令、API、数据库查询或页面位置。

@@ -6,9 +6,9 @@
 
 相关文档：
 
-- [research.md](./research.md)：推荐系统和短视频论文调研。
-- [algorithm-study.md](./algorithm-study.md)：Douyin/字节推荐系统算法拆解。
-- [architecture.md](./architecture.md)：MVP 系统架构。
+- [research.md](research.md)：推荐系统和短视频论文调研。
+- [algorithm-study.md](algorithm-study.md)：Douyin/字节推荐系统算法拆解。
+- [architecture.md](../../architecture.md)：MVP 系统架构。
 
 ## 1. 目标变化
 
