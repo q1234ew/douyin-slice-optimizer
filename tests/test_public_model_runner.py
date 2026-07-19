@@ -65,6 +65,18 @@ class PublicModelRunnerTests(unittest.TestCase):
             {
                 "DSO_ROOT": str(self.root),
                 "DSO_PUBLIC_MODEL_API_ENABLED": "",
+                "DSO_PUBLIC_MODEL_PROVIDER": "",
+                "DSO_BAILIAN_BASE_URL": "",
+                "DSO_BAILIAN_API_KEY": "",
+                "DSO_PUBLIC_MODEL_BUDGET_PER_REQUEST_CNY": "",
+                "DSO_PUBLIC_MODEL_BUDGET_PER_BATCH_CNY": "",
+                "DSO_PUBLIC_MODEL_BUDGET_PER_DAY_CNY": "",
+                "DSO_BAILIAN_DATA_ALLOWED": "",
+                "DSO_BAILIAN_AUTHORIZATION_BASIS": "",
+                "DSO_BAILIAN_REDACTION_STRATEGY": "",
+                "DSO_BAILIAN_RETENTION_DAYS": "",
+                "DSO_BAILIAN_RETENTION_POLICY_REFERENCE": "",
+                "DSO_BAILIAN_ALLOWED_UPLOAD_LEVELS": "",
             },
             clear=False,
         )
@@ -74,15 +86,19 @@ class PublicModelRunnerTests(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
-    def test_status_is_fail_closed_and_only_registers_network_free_fake(self) -> None:
+    def test_status_is_fail_closed_with_registered_but_disabled_bailian(self) -> None:
         status = public_model_status()
 
         self.assertEqual(status["status"], "disabled")
         self.assertFalse(status["public_api_enabled"])
         self.assertFalse(status["network_calls_allowed"])
-        self.assertEqual(status["network_provider_count"], 0)
-        self.assertEqual(status["registered_providers"][0]["provider"], "fake")
-        self.assertFalse(status["registered_providers"][0]["uses_public_network"])
+        self.assertEqual(status["network_provider_count"], 1)
+        providers = {item["provider"]: item for item in status["registered_providers"]}
+        self.assertEqual(set(providers), {"aliyun_bailian", "fake"})
+        self.assertTrue(providers["aliyun_bailian"]["uses_public_network"])
+        self.assertFalse(providers["fake"]["uses_public_network"])
+        self.assertFalse(status["gates"]["provider_selected"])
+        self.assertFalse(status["gates"]["secret_configured"])
         self.assertFalse(status["production_weight_changed"])
         self.assertFalse(status["writes_manual_gold"])
 
@@ -130,6 +146,7 @@ class PublicModelRunnerTests(unittest.TestCase):
                 authorization_basis="owned_media",
                 redaction_strategy="structured_summary_only",
                 retention_days=0,
+                retention_policy_reference="test-contract://no-retention.v1",
             ),
             execution_policy=ProviderExecutionPolicy(
                 public_api_enabled=True,

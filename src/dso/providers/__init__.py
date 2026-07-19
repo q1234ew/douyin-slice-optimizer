@@ -1,6 +1,21 @@
 from dso.providers.base import Provider, PublicModelProvider
+from dso.providers.aliyun_bailian import (
+    BAILIAN_CHALLENGER_JUDGE_MODEL,
+    BAILIAN_EMBEDDING_MODEL,
+    BAILIAN_PROVIDER_ID,
+    BAILIAN_PRIMARY_JUDGE_MODEL,
+    BAILIAN_RERANK_MODEL,
+    DEFAULT_BAILIAN_MODEL,
+    AliyunBailianProvider,
+    BailianConfigurationError,
+    estimate_bailian_cost,
+    estimate_bailian_research_cost,
+    validate_bailian_base_url,
+)
 from dso.providers.contracts import (
     PUBLIC_MODEL_PROVIDER_CONTRACT_VERSION,
+    ProviderAttemptMetrics,
+    ProviderBillingStatus,
     ProviderCallMetrics,
     ProviderCallStatus,
     ProviderDecisionEvidence,
@@ -21,8 +36,18 @@ from dso.providers.registry import ProviderRegistry, ProviderRegistryError, prov
 
 __all__ = [
     "PUBLIC_MODEL_PROVIDER_CONTRACT_VERSION",
+    "BAILIAN_PROVIDER_ID",
+    "BAILIAN_EMBEDDING_MODEL",
+    "BAILIAN_RERANK_MODEL",
+    "BAILIAN_PRIMARY_JUDGE_MODEL",
+    "BAILIAN_CHALLENGER_JUDGE_MODEL",
+    "DEFAULT_BAILIAN_MODEL",
+    "AliyunBailianProvider",
+    "BailianConfigurationError",
     "FakeProvider",
     "Provider",
+    "ProviderAttemptMetrics",
+    "ProviderBillingStatus",
     "ProviderCallMetrics",
     "ProviderCallStatus",
     "ProviderDecisionEvidence",
@@ -39,5 +64,8 @@ __all__ = [
     "ProviderResult",
     "PublicModelProvider",
     "provider_registry",
+    "estimate_bailian_cost",
+    "estimate_bailian_research_cost",
     "stable_json_sha256",
+    "validate_bailian_base_url",
 ]

@@ -11,6 +11,8 @@ from dso.config import ensure_data_dirs
 from dso.features.asr import active_asr_backend, asr_prompt
 from dso.features.asr_contract import asr_profile_plan
 from dso.features.asr_profile import ASR_PROFILE_MODELS, normalize_asr_profile, resolve_asr_model_size
+from dso.features.asr_routing import qwen3_asr_primary_policy
+from dso.features.qwen3_asr import qwen3_asr_health, qwen3_asr_model, qwen3_asr_service_url
 from dso.features.whisper_cpp import (
     whisper_cpp_binary,
     whisper_cpp_language,
@@ -33,9 +35,32 @@ def runtime_diagnostics() -> dict:
     device = os.getenv("DSO_WHISPER_DEVICE", "auto")
     compute_type = os.getenv("DSO_WHISPER_COMPUTE_TYPE", "int8")
     whisper_cpp = _whisper_cpp_status()
-    asr_ready = faster_whisper or whisper_cpp["ready"]
+    primary_policy = qwen3_asr_primary_policy({"input_mode": "program"})
+    qwen3_health = qwen3_asr_health()
+    qwen3_model_status = qwen3_health.get("model") if isinstance(qwen3_health.get("model"), dict) else {}
+    qwen3_ready = qwen3_health.get("status") == "ready" and bool(qwen3_model_status.get("loaded"))
+    prefer_qwen3 = backend.strip().lower() == "auto" and bool(primary_policy.get("eligible"))
+    backend_preference = "qwen3_asr_preferred" if prefer_qwen3 else backend
+    asr_ready = qwen3_ready or faster_whisper or whisper_cpp["ready"]
     asr_status = "ready" if asr_ready else "fallback_placeholder"
-    active_backend = active_asr_backend(model_size=model_size)
+    if prefer_qwen3:
+        if qwen3_ready:
+            active_backend = "qwen3_asr"
+        else:
+            whisper_backend = active_asr_backend("auto", model_size=model_size)
+            active_backend = (
+                f"{whisper_backend}_fallback" if whisper_backend != "placeholder" else "missing_preferred_asr"
+            )
+    else:
+        active_backend = active_asr_backend(backend, model_size=model_size)
+    primary_runtime = {
+        **primary_policy,
+        "backend_preference": backend_preference,
+        "selected_backend": active_backend,
+        "fallback_active": active_backend.endswith("_fallback"),
+        "service_status": qwen3_health.get("status") or "unknown",
+        "model_loaded": qwen3_ready,
+    }
     return {
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
@@ -47,6 +72,13 @@ def runtime_diagnostics() -> dict:
             "profile_plan": asr_profile_plan(),
             "active_backend": active_backend,
             "fallback_order": _fallback_order(backend, active_backend),
+            "primary": primary_runtime,
+            "qwen3_asr": {
+                "ready": qwen3_ready,
+                "service_url": qwen3_asr_service_url(),
+                "model": qwen3_model_status.get("model_id") or qwen3_asr_model(),
+                "health": qwen3_health,
+            },
             "cache_enabled": True,
             "faster_whisper_installed": faster_whisper,
             "default_model": model_size,
@@ -64,7 +96,7 @@ def runtime_diagnostics() -> dict:
             "benchmark_command": "python3 -m dso.cli bench-asr <audio_or_video> --backend whisper_cpp --profile compare",
             "install_command": 'python3 -m pip install -e ".[asr]"',
             "note": (
-                _asr_note(faster_whisper, whisper_cpp)
+                _asr_note(qwen3_ready, bool(primary_policy.get("eligible")), faster_whisper, whisper_cpp)
             ),
         },
         "rights_mode": rights_mode(),
@@ -78,7 +110,13 @@ def runtime_diagnostics() -> dict:
     }
 
 
-def _asr_note(faster_whisper: bool, whisper_cpp: dict) -> str:
+def _asr_note(qwen3_ready: bool, qwen3_primary: bool, faster_whisper: bool, whisper_cpp: dict) -> str:
+    if qwen3_ready and qwen3_primary:
+        return "Qwen3-ASR 已加载并作为音乐综艺主转写；Whisper 保留为自动兜底与候选复核"
+    if qwen3_primary and whisper_cpp.get("ready"):
+        return "Qwen3-ASR 主服务当前未加载；已自动回退 whisper.cpp"
+    if qwen3_primary and faster_whisper:
+        return "Qwen3-ASR 主服务当前未加载；已自动回退 faster-whisper"
     if whisper_cpp.get("ready"):
         return "whisper.cpp 已配置；Apple Silicon 可通过 Metal/Core ML 后端加速"
     if faster_whisper:
@@ -110,7 +148,9 @@ def _whisper_cpp_status() -> dict:
 def _fallback_order(backend: str, active_backend: str) -> list[str]:
     requested = backend.strip().lower() or "auto"
     if requested == "auto":
-        return ["sidecar_srt", "whisper_cpp", "faster_whisper", "placeholder"]
+        return ["sidecar_srt", "qwen3_asr", "whisper_cpp", "faster_whisper", "placeholder"]
+    if requested in {"qwen3_asr_preferred", "qwen3-asr-preferred"}:
+        return ["sidecar_srt", "qwen3_asr", "whisper_cpp", "faster_whisper", "placeholder"]
     if active_backend.startswith("unknown"):
         return ["placeholder"]
     return ["sidecar_srt", active_backend, "placeholder"]

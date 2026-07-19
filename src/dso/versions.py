@@ -13,8 +13,11 @@ VIDEO_DOWNLOAD_CONTRACT_VERSION = "video_download.v1"
 STANDARD_CANDIDATE_VERSION = "standard_candidate.v1"
 PRECUT_BATCH_VERSION = "precut_batch.v1"
 PRODUCTION_RANKING_POLICY_VERSION = "production_ranking_policy.v1"
+MODEL_SCHEDULER_VERSION = "model_scheduler.v1"
 ASR_PROFILE_PLAN_VERSION = "asr_profile_plan.v1"
 ASR_MODEL_ROUTING_VERSION = "asr_model_routing.v1"
+QWEN3_ASR_SHADOW_VERSION = "qwen3_asr_shadow.v1"
+QWEN3_ASR_VERSION = "qwen3_asr.program_v1"
 ASR_VERIFY_VERSION = "asr_verify.v1"
 VARIANT_EXPERIMENT_VERSION = "variant_experiment.v1"
 PLATFORM_SYNC_VERSION = "platform_sync.v1"
@@ -30,6 +33,7 @@ SLICE_STRUCTURE_EVALUATOR_VERSION = "slice_structure_evaluator.v1"
 MULTIMODAL_VALIDATION_VERSION = "multimodal_validation.v1"
 MULTIMODAL_FEATURE_VERSION = "multimodal_features.lightweight_v1"
 QWEN_EMBEDDING_VERSION = "qwen3_vl_embedding.evidence_v1"
+MULTIMODAL_VECTOR_VALUE_VERSION = "multimodal_vector_value.v1"
 QWEN_OMNI_VERSION = "qwen2_5_omni_7b_gptq_int4.shadow_v1"
 OMNI_SLICE_RANKER_VERSION = "omni_slice_ranker.hybrid_v1"
 HYBRID_SLICE_PIPELINE_VERSION = "hybrid_slice_pipeline.v1"
@@ -56,8 +60,11 @@ def component_versions() -> dict[str, str]:
         "standard_candidate": STANDARD_CANDIDATE_VERSION,
         "precut_batch": PRECUT_BATCH_VERSION,
         "production_ranking_policy": PRODUCTION_RANKING_POLICY_VERSION,
+        "model_scheduler": MODEL_SCHEDULER_VERSION,
         "asr_profile_plan": ASR_PROFILE_PLAN_VERSION,
         "asr_model_routing": ASR_MODEL_ROUTING_VERSION,
+        "qwen3_asr_shadow": QWEN3_ASR_SHADOW_VERSION,
+        "qwen3_asr": QWEN3_ASR_VERSION,
         "asr_verify": ASR_VERIFY_VERSION,
         "variant_experiment": VARIANT_EXPERIMENT_VERSION,
         "platform_sync": PLATFORM_SYNC_VERSION,
@@ -73,6 +80,7 @@ def component_versions() -> dict[str, str]:
         "multimodal_validation": MULTIMODAL_VALIDATION_VERSION,
         "multimodal_features": MULTIMODAL_FEATURE_VERSION,
         "qwen_embeddings": QWEN_EMBEDDING_VERSION,
+        "multimodal_vector_value": MULTIMODAL_VECTOR_VALUE_VERSION,
         "qwen_omni": QWEN_OMNI_VERSION,
         "omni_slice_ranker": OMNI_SLICE_RANKER_VERSION,
         "hybrid_slice_pipeline": HYBRID_SLICE_PIPELINE_VERSION,

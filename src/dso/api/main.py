@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from dso.artifacts import record_artifact, video_manifest, write_artifact_json
 from dso.api.dashboard import dashboard_static_dir, render_dashboard
@@ -18,6 +18,7 @@ from dso.corrections.editor import (
 from dso.db.session import connect, fetch_one
 from dso.db.session import init_db
 from dso.features.asr import transcribe_video
+from dso.features.asr_shadow import qwen3_asr_shadow_status, run_qwen3_asr_shadow
 from dso.features.asr_verify import latest_asr_verification, list_asr_verifications, verify_candidate_asr
 from dso.features.audio import extract_audio_features
 from dso.feedback.douyin import douyin_sync_contract, douyin_sync_summary, register_douyin_account, sync_douyin_feedback
@@ -46,7 +47,8 @@ from dso.precut import (
     process_precut_batch,
     queue_precut_batch,
 )
-from dso.providers.service import public_model_status, run_fake_provider_smoke
+from dso.providers.admin_config import ProviderAdminConfigError, save_provider_connection_config
+from dso.providers.service import provider_admin_status, public_model_status, run_fake_provider_smoke
 from dso.learning.backtest import backtest_rule_ranker, list_backtest_reports, run_ranker_tuning, semantic_feature_experiment
 from dso.learning.benchmark_manifest import load_benchmark_manifest, run_frozen_benchmark, verify_benchmark_manifest
 from dso.learning.historical_samples import (
@@ -102,6 +104,26 @@ from dso.learning.qwen_embeddings import (
     qwen_embedding_evidence_for_segment,
     run_qwen_embedding_evidence,
 )
+from dso.learning.multimodal_vector_value import (
+    DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+    freeze_multimodal_vector_experiment,
+    multimodal_vector_embedding_request,
+    multimodal_vector_experiment_status,
+    multimodal_vector_media_path,
+    run_multimodal_vector_comparison,
+    save_multimodal_vector_review,
+    verify_multimodal_vector_manifest,
+)
+from dso.learning.bailian_vector_chain import (
+    bailian_vector_chain_status,
+    run_bailian_vector_chain,
+)
+from dso.learning.bailian_cached_ablation import run_bailian_cached_ablation
+from dso.learning.bailian_holdout_validation import (
+    evaluate_bailian_holdout_validation,
+    freeze_bailian_holdout_validation,
+    run_bailian_holdout_prediction,
+)
 from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
 from dso.learning.omni_slice_ranker import rerank_video_candidates_with_omni, run_hybrid_slice_pipeline
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure
@@ -110,6 +132,17 @@ from dso.review import list_change_events, list_review_events, mark_candidate_re
 from dso.runtime import runtime_diagnostics
 from dso.scoring.ranking_policy import attach_ranking_policy, production_ranking_contract
 from dso.scoring.scorer import sanitize_title_suggestions, score_video, suggestions
+from dso.scheduler.db import init_scheduler_db
+from dso.scheduler.asr import submit_qwen3_asr_job
+from dso.scheduler.repository import InvalidJobTransition, JobNotFound, ModelJobRepository
+from dso.scheduler.service import (
+    model_scheduler_enabled,
+    scheduler_resources,
+    scheduler_status,
+    submit_embedding_build_job,
+    submit_omni_rerank_job,
+    wait_for_model_job,
+)
 from dso.segments.generator import generate_segments
 from dso.simulation.recommender import simulate_segment, simulate_video
 from dso.utils import utc_now
@@ -131,7 +164,7 @@ from dso.versions import (
 )
 
 try:
-    from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
     from fastapi.responses import FileResponse, HTMLResponse
     from fastapi.staticfiles import StaticFiles
 except Exception as exc:  # pragma: no cover
@@ -147,6 +180,8 @@ if _dashboard_static_dir.is_dir():
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    if model_scheduler_enabled():
+        init_scheduler_db()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -169,9 +204,123 @@ def providers_status() -> dict:
     return public_model_status()
 
 
+def _provider_config_submission_security(request: Request) -> tuple[bool, str]:
+    """Allow secrets only through HTTPS proxying or a direct loopback tunnel."""
+
+    client_host = (request.client.host if request.client else "").strip().lower()
+    if client_host not in {"127.0.0.1", "::1", "localhost"}:
+        return False, "API Key 只能通过 HTTPS 或 SSH 本地端口转发提交"
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    if forwarded_proto:
+        if forwarded_proto == "https":
+            return True, "当前连接由可信本机反向代理以 HTTPS 转发"
+        return False, "当前为公网 HTTP，禁止提交 API Key"
+    has_proxy_headers = bool(
+        request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    )
+    host = (request.url.hostname or "").strip().lower()
+    if not has_proxy_headers and host in {"127.0.0.1", "::1", "localhost"}:
+        return True, "当前通过 SSH 本地端口转发访问"
+    return False, "API Key 只能通过 HTTPS 或 SSH 本地端口转发提交"
+
+
+def _same_origin_request(request: Request) -> bool:
+    origin = request.headers.get("origin", "").strip()
+    if not origin:
+        return True
+    parsed = urlsplit(origin)
+    host = request.headers.get("host", "").strip().lower()
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    scheme = forwarded_proto or request.url.scheme
+    return parsed.scheme.lower() == scheme.lower() and parsed.netloc.lower() == host
+
+
+@app.get("/providers/config")
+def providers_config(request: Request, response: Response) -> dict:
+    allowed, reason = _provider_config_submission_security(request)
+    response.headers["Cache-Control"] = "no-store"
+    return provider_admin_status(
+        secure_submission_allowed=allowed,
+        secure_submission_reason=reason,
+    )
+
+
+@app.post("/providers/config")
+def update_providers_config(
+    request: Request,
+    response: Response,
+    payload: dict = Body(...),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+        raise HTTPException(status_code=415, detail="仅接受 application/json")
+    allowed, reason = _provider_config_submission_security(request)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=reason)
+    if not _same_origin_request(request):
+        raise HTTPException(status_code=403, detail="拒绝跨站提交 Provider 配置")
+    try:
+        save_provider_connection_config(payload)
+    except ProviderAdminConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **provider_admin_status(
+            secure_submission_allowed=allowed,
+            secure_submission_reason=reason,
+        ),
+        "saved": True,
+    }
+
+
 @app.get("/ranking/policy")
 def ranking_policy() -> dict:
     return production_ranking_contract()
+
+
+@app.get("/model-scheduler/status")
+def model_scheduler_runtime_status() -> dict:
+    return scheduler_status()
+
+
+@app.get("/model-scheduler/resources")
+def model_scheduler_resource_status() -> dict:
+    return scheduler_resources()
+
+
+@app.get("/model-jobs/{job_id}")
+def model_job_status(job_id: str) -> dict:
+    try:
+        return ModelJobRepository().get(job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"model job not found: {job_id}") from exc
+
+
+@app.get("/model-jobs/{job_id}/events")
+def model_job_events(job_id: str, after: int = 0, limit: int = 200) -> dict:
+    try:
+        events = ModelJobRepository().events(job_id, after=after, limit=limit)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"model job not found: {job_id}") from exc
+    return {"job_id": job_id, "events": events}
+
+
+@app.post("/model-jobs/{job_id}/cancel")
+def cancel_model_job(job_id: str) -> dict:
+    try:
+        return ModelJobRepository().cancel(job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"model job not found: {job_id}") from exc
+
+
+@app.post("/model-jobs/{job_id}/retry")
+def retry_model_job(job_id: str) -> dict:
+    try:
+        outcome = ModelJobRepository().retry(job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"model job not found: {job_id}") from exc
+    except InvalidJobTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {**outcome.job, "deduplicated": outcome.deduplicated, "cache_hit": outcome.cache_hit}
 
 
 @app.post("/providers/fake-smoke")
@@ -296,7 +445,17 @@ def process_precut_batch_endpoint(
 
 
 @app.post("/videos/{video_id}/extract")
-def extract(video_id: str) -> dict:
+def extract(video_id: str, response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    if model_scheduler_enabled():
+        scheduled = submit_qwen3_asr_job(video_id, force=bool(payload.get("force", False)), role="primary")
+        audio = extract_audio_features(video_id)
+        response.status_code = 200 if scheduled.get("status") in {"cached", "empty"} else 202
+        return {
+            **scheduled,
+            "audio_peaks": len(audio["peaks"]),
+            "asr_selected_backend": "qwen3_asr_scheduled",
+            "asr_fallback_used": False,
+        }
     transcript = transcribe_video(video_id)
     audio = extract_audio_features(video_id)
     settings = ensure_data_dirs()
@@ -316,7 +475,36 @@ def extract(video_id: str) -> dict:
         artifact_path=audio.get("wav_path") or "",
         summary={"peaks": len(audio["peaks"]), "frames": len(audio["frames"])},
     )
-    return {"transcript_source": transcript["source"], "segments": len(transcript["segments"]), "audio_peaks": len(audio["peaks"])}
+    routing = (transcript.get("metadata") or {}).get("routing") or {}
+    return {
+        "transcript_source": transcript["source"],
+        "segments": len(transcript["segments"]),
+        "audio_peaks": len(audio["peaks"]),
+        "asr_primary": routing.get("primary") or {},
+        "asr_selected_backend": routing.get("selected_backend") or (transcript.get("metadata") or {}).get("backend") or "",
+        "asr_fallback_used": bool(routing.get("fallback_used", False)),
+        "asr_shadow": routing.get("shadow") or {},
+    }
+
+
+@app.get("/videos/{video_id}/asr/shadow")
+def get_qwen3_asr_shadow(video_id: str) -> dict:
+    try:
+        return qwen3_asr_shadow_status(video_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/videos/{video_id}/asr/shadow")
+def post_qwen3_asr_shadow(video_id: str, response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        if model_scheduler_enabled():
+            scheduled = submit_qwen3_asr_job(video_id, force=bool(payload.get("force", False)), role="shadow")
+            response.status_code = 200 if scheduled.get("status") in {"cached", "empty"} else 202
+            return scheduled
+        return run_qwen3_asr_shadow(video_id, force=bool(payload.get("force", False)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/videos/{video_id}/segments")
@@ -351,7 +539,51 @@ def score(video_id: str) -> dict:
 
 
 @app.post("/videos/{video_id}/hybrid-slice")
-def hybrid_slice(video_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+def hybrid_slice(video_id: str, response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    if model_scheduler_enabled():
+        candidate_limit = int(payload.get("candidate_limit") or 3)
+        top_k = int(payload.get("top_k") or 10)
+        recall_count = max(30, candidate_limit * 4, top_k * 3)
+        segments = generate_segments(video_id, top_k=recall_count)
+        scores = score_video(video_id)
+        scheduled = submit_omni_rerank_job(
+            video_id,
+            candidate_limit=candidate_limit,
+            max_clip_seconds=float(payload.get("max_clip_seconds") or 6.0),
+            omni_weight=float(payload.get("omni_weight") or 0.15),
+            load_model=bool(payload.get("load_model", False)),
+            force=bool(payload.get("force", False)),
+        )
+        response.status_code = 200 if scheduled.get("status") in {"cached", "empty"} else 202
+        result = {
+            "contract_version": HYBRID_SLICE_PIPELINE_VERSION,
+            "status": scheduled.get("status") or "accepted",
+            "video_id": video_id,
+            "pipeline": {
+                "recall": "timeline_signal_segmenter",
+                "pre_rank": "current_rules",
+                "rerank": "model_scheduler.v1/qwen_omni_multi_window_research",
+                "fallback": "current_rules",
+            },
+            "counts": {
+                "recalled": len(segments),
+                "scored": len(scores),
+                "preselected": int(((scheduled.get("model_job") or {}).get("progress") or {}).get("total_items") or 0),
+                "omni_applied": int((((scheduled.get("model_job") or {}).get("result_summary") or {}).get("omni_applied_count") or 0)),
+            },
+            "baseline": scheduled.get("baseline") or {},
+            "model_job": scheduled.get("model_job"),
+            "production_weight": False,
+            "research_only": True,
+        }
+        record_artifact(
+            video_id,
+            step="hybrid_ranking",
+            artifact_type="model_job",
+            version=HYBRID_SLICE_PIPELINE_VERSION,
+            summary={"status": result["status"], **result["counts"]},
+        )
+        return result
     try:
         result = run_hybrid_slice_pipeline(
             video_id,
@@ -378,7 +610,41 @@ def hybrid_slice(video_id: str, payload: dict = Body(default_factory=dict)) -> d
 
 
 @app.post("/videos/{video_id}/omni-rerank")
-def omni_rerank(video_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+def omni_rerank(video_id: str, response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    if model_scheduler_enabled():
+        mode = str(payload.get("mode") or "async").strip().lower()
+        if mode not in {"async", "wait"}:
+            raise HTTPException(status_code=400, detail="mode must be async or wait when model scheduler is enabled")
+        result = submit_omni_rerank_job(
+            video_id,
+            candidate_limit=int(payload.get("candidate_limit") or 3),
+            max_clip_seconds=float(payload.get("max_clip_seconds") or 6.0),
+            omni_weight=float(payload.get("omni_weight") or 0.15),
+            load_model=bool(payload.get("load_model", False)),
+            force=bool(payload.get("force", False)),
+        )
+        job = result.get("model_job") if isinstance(result.get("model_job"), dict) else None
+        if mode == "wait" and job and job.get("status") not in {"succeeded", "degraded", "failed", "cancelled", "cancelled_partial", "expired"}:
+            job = wait_for_model_job(
+                str(job["job_id"]),
+                timeout_seconds=float(payload.get("wait_timeout_seconds") or 10.0),
+            )
+            result["model_job"] = job
+            if job.get("status") in {"succeeded", "degraded", "failed", "cancelled", "cancelled_partial", "expired"}:
+                result["status"] = str(job.get("status"))
+        response.status_code = 200 if result.get("status") in {"cached", "empty", "succeeded", "degraded", "failed", "cancelled", "cancelled_partial", "expired"} else 202
+        record_artifact(
+            video_id,
+            step="omni_rerank",
+            artifact_type="model_job",
+            version=HYBRID_SLICE_PIPELINE_VERSION,
+            summary={
+                "status": result.get("status") or "accepted",
+                "job_id": str((result.get("model_job") or {}).get("job_id") or ""),
+                "deduplicated": bool((result.get("model_job") or {}).get("deduplicated")),
+            },
+        )
+        return result
     result = rerank_video_candidates_with_omni(
         video_id,
         candidate_limit=int(payload.get("candidate_limit") or 3),
@@ -1366,11 +1632,24 @@ def post_multimodal_feature_experiment(payload: dict = Body(default_factory=dict
 
 
 @app.post("/learning/qwen-embeddings/build")
-def post_qwen_embeddings_build(payload: dict = Body(default_factory=dict)) -> dict:
+def post_qwen_embeddings_build(response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    if model_scheduler_enabled():
+        scheduled = submit_embedding_build_job(
+            account_id=payload.get("account_id"),
+            dataset_id=payload.get("dataset_id"),
+            entity_type=payload.get("entity_type") or "historical_sample",
+            entity_ids=payload.get("entity_ids") if isinstance(payload.get("entity_ids"), list) else None,
+            modality=payload.get("modality") or "text",
+            limit=int(payload.get("limit") or 300),
+            force=bool(payload.get("force", False)),
+        )
+        response.status_code = 200 if scheduled.get("status") in {"cached", "empty"} else 202
+        return scheduled
     return build_qwen_embedding_index(
         account_id=payload.get("account_id"),
         dataset_id=payload.get("dataset_id"),
         entity_type=payload.get("entity_type") or "historical_sample",
+        entity_ids=payload.get("entity_ids") if isinstance(payload.get("entity_ids"), list) else None,
         modality=payload.get("modality") or "text",
         limit=int(payload.get("limit") or 300),
         force=bool(payload.get("force", False)),
@@ -1386,6 +1665,197 @@ def post_qwen_embedding_evidence(payload: dict = Body(default_factory=dict)) -> 
         k=int(payload.get("k") or 10),
         modality=payload.get("modality") or "all",
     )
+
+
+@app.get("/learning/multimodal-vector-experiment/status")
+def get_multimodal_vector_experiment_status(
+    benchmark_id: str = DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+    reviewer_id: str = "local",
+) -> dict:
+    try:
+        return multimodal_vector_experiment_status(benchmark_id, reviewer_id=reviewer_id)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/freeze")
+def post_multimodal_vector_experiment_freeze(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return freeze_multimodal_vector_experiment(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+            pair_count=int(payload.get("pair_count") or 60),
+            reference_per_label=int(payload.get("reference_per_label") or 60),
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/multimodal-vector-experiment/verify")
+def get_multimodal_vector_experiment_verify(
+    benchmark_id: str = DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+    deep: bool = False,
+) -> dict:
+    try:
+        return verify_multimodal_vector_manifest(benchmark_id, deep=deep)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/embeddings")
+def post_multimodal_vector_experiment_embeddings(response: Response, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        request = multimodal_vector_embedding_request(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID
+        )
+        if not model_scheduler_enabled():
+            raise HTTPException(
+                status_code=409,
+                detail="multimodal vector embedding build requires the persistent model scheduler",
+            )
+        scheduled = submit_embedding_build_job(
+            entity_type="historical_sample",
+            entity_ids=request["entity_ids"],
+            modality="all",
+            limit=len(request["entity_ids"]),
+            force=bool(payload.get("force", False)),
+        )
+        response.status_code = 200 if scheduled.get("status") in {"cached", "empty"} else 202
+        return {
+            "benchmark_id": request["benchmark_id"],
+            "manifest_sha256": request["manifest_sha256"],
+            "target_sample_count": len(request["entity_ids"]),
+            **scheduled,
+        }
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/compare")
+def post_multimodal_vector_experiment_compare(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_multimodal_vector_comparison(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+            reviewer_id=payload.get("reviewer_id") or "local",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/multimodal-vector-experiment/cloud/status")
+def get_multimodal_vector_cloud_status(
+    benchmark_id: str = DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+) -> dict:
+    try:
+        return bailian_vector_chain_status(benchmark_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/cloud/run")
+def post_multimodal_vector_cloud_run(payload: dict = Body(default_factory=dict)) -> dict:
+    stage = str(payload.get("stage") or "smoke").strip().lower()
+    limit = int(payload.get("limit") if payload.get("limit") is not None else 10)
+    if stage == "full":
+        raise HTTPException(
+            status_code=409,
+            detail="full cloud chain is a resumable CLI operation; use bounded web batches to keep health checks responsive",
+        )
+    maximum = 10 if stage == "smoke" else 40
+    if not 1 <= limit <= maximum:
+        raise HTTPException(
+            status_code=400,
+            detail=f"web {stage} batches require limit between 1 and {maximum}",
+        )
+    try:
+        return run_bailian_vector_chain(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+            stage=stage,
+            limit=limit,
+            top_n=int(payload.get("top_n") or 20),
+            judge_limit=int(payload.get("judge_limit") or 20),
+            force=bool(payload.get("force", False)),
+            batch_id=payload.get("batch_id"),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/cloud/ablation")
+def post_multimodal_vector_cloud_ablation(payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return run_bailian_cached_ablation(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/cloud/holdout/{action}")
+def post_multimodal_vector_cloud_holdout(
+    action: str, payload: dict = Body(default_factory=dict)
+) -> dict:
+    benchmark_id = payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID
+    try:
+        if action == "freeze":
+            return freeze_bailian_holdout_validation(benchmark_id)
+        if action == "predict":
+            return run_bailian_holdout_prediction(benchmark_id)
+        if action == "evaluate":
+            return evaluate_bailian_holdout_validation(benchmark_id)
+        raise HTTPException(status_code=404, detail=f"unsupported holdout action: {action}")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/learning/multimodal-vector-experiment/reviews/{task_id}")
+def post_multimodal_vector_experiment_review(task_id: str, payload: dict = Body(default_factory=dict)) -> dict:
+    try:
+        return save_multimodal_vector_review(
+            payload.get("benchmark_id") or DEFAULT_MULTIMODAL_VECTOR_BENCHMARK_ID,
+            task_id,
+            payload,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/learning/multimodal-vector-experiment/media/{benchmark_id}/{task_id}/{side}")
+def get_multimodal_vector_experiment_media(benchmark_id: str, task_id: str, side: str) -> FileResponse:
+    try:
+        path = multimodal_vector_media_path(benchmark_id, task_id, side)
+        return FileResponse(path, filename=path.name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/learning/qwen-omni/status")

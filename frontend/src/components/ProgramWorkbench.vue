@@ -14,10 +14,10 @@
           id="run-selected-btn"
           class="primary"
           type="button"
-          :disabled="!selectedProgramVideo || state.busyKey === 'run-selected'"
+          :disabled="!selectedProgramVideo || Boolean(state.busyKey) || sliceActive"
           @click="runSelected"
         >
-          <span v-if="state.busyKey === 'run-selected'" class="spinner"></span>
+          <span v-if="state.busyKey === 'run-selected' || selectedSliceActive" class="spinner"></span>
           <Icon v-else name="wand-sparkles" />智能切片
         </button>
       </div>
@@ -34,6 +34,44 @@
 
       <PrecutBatchWorkbench v-if="state.entryMode === 'precut'" />
       <template v-else>
+      <section
+        v-if="sliceProgressVisible"
+        class="slice-progress-card"
+        :class="`is-${state.sliceProgress.status}`"
+        data-testid="slice-progress"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="slice-progress-head">
+          <div>
+            <span class="slice-progress-kicker">{{ progressStatusLabel }} · {{ progressVideoTitle }}</span>
+            <strong>{{ state.sliceProgress.stageLabel }}</strong>
+            <p>{{ state.sliceProgress.detail }}</p>
+          </div>
+          <strong class="slice-progress-percent">{{ Math.round(state.sliceProgress.percent) }}%</strong>
+        </div>
+        <div
+          class="slice-progress-track"
+          role="progressbar"
+          aria-label="智能切片进度"
+          :aria-valuenow="Math.round(state.sliceProgress.percent)"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <span :style="{ width: `${state.sliceProgress.percent}%` }"></span>
+        </div>
+        <div class="slice-progress-stages" aria-label="智能切片处理阶段">
+          <span v-for="(stage, index) in progressStages" :key="stage" :class="progressStageClass(index)">
+            <b>{{ index + 1 }}</b><small>{{ stage }}</small>
+          </span>
+        </div>
+        <div class="slice-progress-meta">
+          <span><Icon name="file-clock" />已耗时 <strong>{{ formatDuration(state.sliceProgress.elapsedSeconds) }}</strong></span>
+          <span><Icon name="gauge" />{{ remainingTimeLabel }}</span>
+          <span>阶段 <strong>{{ displayedStage }}/{{ state.sliceProgress.totalStages }}</strong></span>
+        </div>
+      </section>
+
       <div class="workbench-focus" aria-live="polite">
         <div class="focus-next">
           <span class="meta">下一步任务</span>
@@ -104,11 +142,11 @@
               <td><span class="status" :class="statusClass(video.status)">{{ statusLabel(video.status) }}</span></td>
               <td>
                 <div class="row-actions">
-                  <button class="icon-only" title="提取" aria-label="提取节目素材" data-action="extract" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'extract')"><Icon name="scan-line" /></button>
-                  <button class="icon-only" title="生成候选" aria-label="生成节目候选" data-action="segments" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'segments')"><Icon name="list-video" /></button>
-                  <button class="icon-only" title="评分" aria-label="为节目候选评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
-                  <button class="primary" data-action="run-all" :data-video-id="video.id" :disabled="Boolean(state.busyKey)" @click="runWholeVideo(video.id)">
-                    <span v-if="state.busyKey === `run-all-${video.id}`" class="spinner"></span>
+                  <button class="icon-only" title="提取" aria-label="提取节目素材" data-action="extract" :data-video-id="video.id" :disabled="Boolean(state.busyKey) || sliceActive" @click="runVideoStep(video.id, 'extract')"><Icon name="scan-line" /></button>
+                  <button class="icon-only" title="生成候选" aria-label="生成节目候选" data-action="segments" :data-video-id="video.id" :disabled="Boolean(state.busyKey) || sliceActive" @click="runVideoStep(video.id, 'segments')"><Icon name="list-video" /></button>
+                  <button class="icon-only" title="评分" aria-label="为节目候选评分" data-action="score" :data-video-id="video.id" :disabled="Boolean(state.busyKey) || sliceActive" @click="runVideoStep(video.id, 'score')"><Icon name="star" /></button>
+                  <button class="primary" data-action="run-all" :data-video-id="video.id" :disabled="Boolean(state.busyKey) || sliceActive" @click="runWholeVideo(video.id)">
+                    <span v-if="state.busyKey === `run-all-${video.id}` || isSliceActive(video.id)" class="spinner"></span>
                     <Icon v-else name="wand-sparkles" />智能切片
                   </button>
                 </div>
@@ -154,12 +192,54 @@ const {
 
 const filteredProgramVideos = computed(() => filteredVideos.value.filter(video => video.input_mode !== "precut"));
 const selectedProgramVideo = computed(() => selectedVideo.value?.input_mode === "precut" ? null : selectedVideo.value);
+const progressStages = ["转写分析", "候选生成", "评分排序", "Omni 复排"];
+const sliceActive = computed(() => ["running", "refining"].includes(state.sliceProgress.status));
+const selectedSliceActive = computed(() => Boolean(selectedProgramVideo.value && isSliceActive(selectedProgramVideo.value.id)));
+const sliceProgressVisible = computed(() => state.sliceProgress.status !== "idle" && Boolean(state.sliceProgress.videoId));
+const progressVideoTitle = computed(() => state.videos.find(video => video.id === state.sliceProgress.videoId)?.title || state.sliceProgress.videoId);
+const displayedStage = computed(() => state.sliceProgress.status === "completed"
+  ? state.sliceProgress.totalStages
+  : Math.min(state.sliceProgress.totalStages, state.sliceProgress.stageIndex + 1));
+const progressStatusLabel = computed(() => ({
+  running: "正在智能切片",
+  refining: "候选已就绪",
+  completed: "处理完成",
+  failed: "处理失败",
+  idle: "等待开始"
+}[state.sliceProgress.status]));
+const remainingTimeLabel = computed(() => {
+  if (state.sliceProgress.status === "completed") return `总耗时 ${formatDuration(state.sliceProgress.elapsedSeconds)}`;
+  if (state.sliceProgress.status === "failed") return "已停止，可检查提示后重试";
+  if (state.sliceProgress.status === "refining") return "剩余时间由 GPU 队列决定";
+  const remaining = state.sliceProgress.estimatedRemainingSeconds;
+  return remaining == null ? "正在估算剩余时间" : `预计剩余 ${formatDuration(remaining)}`;
+});
 
 function selectEntryMode(mode: "precut" | "program"): void {
   state.entryMode = mode;
   if (mode === "program" && !selectedProgramVideo.value && filteredProgramVideos.value.length) {
     state.selectedVideoId = filteredProgramVideos.value[0].id;
   }
+}
+
+function isSliceActive(videoId: string): boolean {
+  return state.sliceProgress.videoId === videoId && sliceActive.value;
+}
+
+function progressStageClass(index: number): string {
+  if (state.sliceProgress.status === "completed") return "done";
+  if (index < state.sliceProgress.stageIndex) return "done";
+  if (index === state.sliceProgress.stageIndex) return state.sliceProgress.status === "failed" ? "failed" : "active";
+  return "pending";
+}
+
+function formatDuration(value: number | null): string {
+  const totalSeconds = Math.max(0, Math.round(Number(value || 0)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function statusClass(status?: string): string {

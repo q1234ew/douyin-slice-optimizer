@@ -489,6 +489,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "python-multipart" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -499,7 +500,6 @@ asr = [
     { name = "faster-whisper" },
 ]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
 ]
 videodl = [
@@ -510,7 +510,7 @@ videodl = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "faster-whisper", marker = "extra == 'asr'", specifier = ">=1.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "typer", specifier = ">=0.12" },

@@ -7,7 +7,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dso.db.session import connect, init_db
-from dso.learning.omni_slice_ranker import candidate_window_plan, rerank_video_candidates_with_omni
+from dso.learning.omni_slice_ranker import (
+    candidate_window_plan,
+    commit_scheduled_omni_windows,
+    commit_scheduled_omni_rerank,
+    omni_rerank_input_snapshot,
+    rerank_video_candidates_with_omni,
+)
 from dso.learning.qwen_omni import QWEN_OMNI_MODEL
 from dso.scoring.scorer import score_segment
 
@@ -151,6 +157,94 @@ class OmniSliceRankerTest(unittest.TestCase):
                 "SELECT hybrid_score, omni_status FROM slice_scores WHERE candidate_segment_id = 'seg_hybrid'"
             ).fetchone()
         self.assertEqual(row["omni_status"], "fallback_busy")
+
+    def test_scheduled_result_does_not_write_before_fenced_commit(self) -> None:
+        client = FakeOmniClient()
+        dummy_clip = self.root / "scheduled-window.mp4"
+        dummy_clip.write_bytes(b"test")
+        snapshot = omni_rerank_input_snapshot(
+            "video_hybrid",
+            candidate_limit=1,
+            max_clip_seconds=8,
+            omni_weight=0.18,
+        )
+        with patch(
+            "dso.learning.omni_slice_ranker._prepare_candidate_window",
+            return_value=(dummy_clip, {"clip_path": str(dummy_clip), "cache_hit": False}),
+        ):
+            report = rerank_video_candidates_with_omni(
+                "video_hybrid",
+                candidate_limit=1,
+                max_clip_seconds=8,
+                omni_weight=0.18,
+                client=client,
+                persist=False,
+            )
+
+        with connect() as conn:
+            before = conn.execute(
+                "SELECT omni_status FROM slice_scores WHERE candidate_segment_id = 'seg_hybrid'"
+            ).fetchone()
+        self.assertEqual(before["omni_status"], "not_run")
+
+        summary = commit_scheduled_omni_rerank(
+            report,
+            expected_input_hash=snapshot["input_hash"],
+            candidate_limit=1,
+            max_clip_seconds=8,
+            omni_weight=0.18,
+        )
+
+        self.assertEqual(summary["status"], "ready")
+        with connect() as conn:
+            after = conn.execute(
+                "SELECT omni_status, hybrid_rank FROM slice_scores WHERE candidate_segment_id = 'seg_hybrid'"
+            ).fetchone()
+        self.assertEqual(after["omni_status"], "ready")
+        self.assertEqual(after["hybrid_rank"], 1)
+
+    def test_scheduler_snapshot_splits_and_commits_independent_windows(self) -> None:
+        snapshot = omni_rerank_input_snapshot(
+            "video_hybrid",
+            candidate_limit=1,
+            max_clip_seconds=8,
+            omni_weight=0.18,
+        )
+        self.assertEqual([item["window_role"] for item in snapshot["window_items"]], ["hook", "middle", "payoff"])
+        self.assertEqual(len({item["input_hash"] for item in snapshot["window_items"]}), 3)
+        item_results = [
+            {
+                "item_status": "succeeded",
+                "result": {
+                    "status": "ready",
+                    "segment_id": item["segment_id"],
+                    "window_role": item["window_role"],
+                    "window": item["window"],
+                    "role_score": 80.0 + index,
+                    "confidence": 0.9,
+                    "boundary_advice": {},
+                },
+            }
+            for index, item in enumerate(snapshot["window_items"])
+        ]
+
+        summary = commit_scheduled_omni_windows(
+            "video_hybrid",
+            item_results,
+            expected_input_hash=snapshot["input_hash"],
+            candidate_limit=1,
+            max_clip_seconds=8,
+            omni_weight=0.18,
+        )
+
+        self.assertEqual(summary["status"], "ready")
+        self.assertEqual(summary["completed_window_count"], 3)
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT omni_status, hybrid_rank FROM slice_scores WHERE candidate_segment_id = 'seg_hybrid'"
+            ).fetchone()
+        self.assertEqual(row["omni_status"], "ready")
+        self.assertEqual(row["hybrid_rank"], 1)
 
 
 def _insert_candidate() -> None:

@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 
-PUBLIC_MODEL_PROVIDER_CONTRACT_VERSION = "public_model_provider.v1"
+PUBLIC_MODEL_PROVIDER_CONTRACT_VERSION = "public_model_provider.v2"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -30,6 +30,13 @@ class ProviderCallStatus(StrEnum):
     DENIED = "denied"
     RATE_LIMITED = "rate_limited"
     FALLBACK_LOCAL = "fallback_local"
+
+
+class ProviderBillingStatus(StrEnum):
+    NOT_BILLABLE = "not_billable"
+    USAGE_ESTIMATED = "usage_estimated"
+    BILLED = "billed"
+    UNKNOWN = "unknown"
 
 
 class ProviderDecisionStatus(StrEnum):
@@ -110,7 +117,8 @@ class ProviderDataPermissionRecord:
     allowed_to_leave_local: bool = False
     authorization_basis: str = "local_only"
     redaction_strategy: str = "not_applicable"
-    retention_days: int | None = 0
+    retention_days: int | None = None
+    retention_policy_reference: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.allowed_to_leave_local, bool):
@@ -126,8 +134,10 @@ class ProviderDataPermissionRecord:
         if self.allowed_to_leave_local:
             if self.authorization_basis == "local_only":
                 raise ValueError("external data use requires an explicit authorization_basis")
-            if self.retention_days is None:
-                raise ValueError("external data use requires a known retention_days policy")
+            if not self.retention_policy_reference.strip():
+                raise ValueError(
+                    "external data use requires a retention_policy_reference"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +210,57 @@ class ProviderRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderAttemptMetrics:
+    attempt_number: int
+    status_code: int = 0
+    latency_ms: float = 0.0
+    response_bytes: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    provider_cached_input_tokens: int = 0
+    estimated_cost: Decimal = Decimal("0")
+    cost_currency: str = "CNY"
+    billing_status: ProviderBillingStatus = ProviderBillingStatus.UNKNOWN
+    provider_request_id: str = ""
+    error_code: str = ""
+
+    def __post_init__(self) -> None:
+        for name in (
+            "attempt_number",
+            "status_code",
+            "response_bytes",
+            "input_tokens",
+            "output_tokens",
+            "provider_cached_input_tokens",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if self.attempt_number < 1:
+            raise ValueError("attempt_number must start at 1")
+        if isinstance(self.latency_ms, bool) or not isinstance(self.latency_ms, (int, float)):
+            raise TypeError("latency_ms must be a finite non-negative number")
+        if not math.isfinite(self.latency_ms) or self.latency_ms < 0:
+            raise ValueError("latency_ms must be finite and non-negative")
+        if not isinstance(self.estimated_cost, Decimal):
+            raise TypeError("estimated_cost must be Decimal")
+        if not self.estimated_cost.is_finite() or self.estimated_cost < 0:
+            raise ValueError("estimated_cost must be finite and non-negative")
+        currency = self.cost_currency.strip().upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise ValueError("cost_currency must be a three-letter currency code")
+        object.__setattr__(self, "cost_currency", currency)
+        if not isinstance(self.billing_status, ProviderBillingStatus):
+            raise TypeError("billing_status must be ProviderBillingStatus")
+        for name in ("provider_request_id", "error_code"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a string")
+            if "\x00" in value or "\r" in value or "\n" in value:
+                raise ValueError(f"{name} must not contain control-line characters")
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderCallMetrics:
     input_size: ProviderInputSize
     output_tokens: int = 0
@@ -208,9 +269,15 @@ class ProviderCallMetrics:
     rate_limit_count: int = 0
     request_count: int = 1
     network_request_count: int = 0
+    provider_cached_input_tokens: int = 0
+    response_bytes: int = 0
     cache_hit: bool = False
     estimated_cost: Decimal = Decimal("0")
     cost_currency: str = "CNY"
+    billing_status: ProviderBillingStatus = ProviderBillingStatus.NOT_BILLABLE
+    provider_request_id: str = ""
+    pricing_version: str = ""
+    attempts: tuple[ProviderAttemptMetrics, ...] = ()
     error_code: str = ""
     error_message: str = ""
 
@@ -223,6 +290,8 @@ class ProviderCallMetrics:
             "rate_limit_count",
             "request_count",
             "network_request_count",
+            "provider_cached_input_tokens",
+            "response_bytes",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -233,6 +302,19 @@ class ProviderCallMetrics:
             raise ValueError("latency_ms must be finite and non-negative")
         if not isinstance(self.cache_hit, bool):
             raise TypeError("cache_hit must be bool")
+        if not isinstance(self.billing_status, ProviderBillingStatus):
+            raise TypeError("billing_status must be ProviderBillingStatus")
+        if not isinstance(self.attempts, tuple) or not all(
+            isinstance(item, ProviderAttemptMetrics) for item in self.attempts
+        ):
+            raise TypeError("attempts must be a tuple of ProviderAttemptMetrics")
+        if self.attempts:
+            expected_numbers = tuple(range(1, len(self.attempts) + 1))
+            actual_numbers = tuple(item.attempt_number for item in self.attempts)
+            if actual_numbers != expected_numbers:
+                raise ValueError("attempt metrics must be sequential starting at 1")
+            if len(self.attempts) != self.network_request_count:
+                raise ValueError("attempt metrics count must match network_request_count")
         if not isinstance(self.estimated_cost, Decimal):
             raise TypeError("estimated_cost must be Decimal")
         if not self.estimated_cost.is_finite() or self.estimated_cost < 0:
@@ -241,6 +323,12 @@ class ProviderCallMetrics:
         if len(currency) != 3 or not currency.isalpha():
             raise ValueError("cost_currency must be a three-letter currency code")
         object.__setattr__(self, "cost_currency", currency)
+        for name in ("provider_request_id", "pricing_version", "error_code", "error_message"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a string")
+            if "\x00" in value or "\r" in value or "\n" in value:
+                raise ValueError(f"{name} must not contain control-line characters")
 
 
 @dataclass(frozen=True, slots=True)

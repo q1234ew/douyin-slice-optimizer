@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import re
@@ -10,6 +11,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
+
+from dso.scheduler.guard import SchedulerLeaseRequired, require_scheduler_lease
 
 
 DEFAULT_QWEN3_ASR_SERVICE_URL = "http://192.168.31.143:8002"
@@ -66,6 +69,10 @@ def qwen3_asr_cache_config() -> dict:
 
 
 def transcribe_wav(audio_path: Path, work_dir: Path) -> tuple[list[dict], dict]:
+    try:
+        require_scheduler_lease("qwen3_asr.transcribe_wav")
+    except SchedulerLeaseRequired as exc:
+        raise Qwen3ASRError(str(exc)) from exc
     health = qwen3_asr_health(timeout_seconds=5.0)
     model_status = health.get("model") if isinstance(health.get("model"), dict) else {}
     if not model_status.get("loaded") and _env_truthy("DSO_QWEN3_ASR_REMOTE_LOAD", False):
@@ -135,6 +142,66 @@ def transcribe_wav(audio_path: Path, work_dir: Path) -> tuple[list[dict], dict]:
         "suspect_chunk_count": suspect_count,
         "recovered_chunk_count": recovered_count,
         "config": config,
+    }
+
+
+def prepare_qwen3_asr_chunks(audio_path: Path, chunk_dir: Path, *, config: dict | None = None) -> list[dict]:
+    """Prepare deterministic ASR chunk artifacts without using the GPU."""
+
+    selected = dict(config or qwen3_asr_cache_config())
+    chunks = []
+    for chunk in _wav_chunks(
+        audio_path,
+        chunk_dir,
+        chunk_seconds=float(selected["chunk_seconds"]),
+        overlap_seconds=float(selected["overlap_seconds"]),
+        boundary_search_seconds=float(selected["boundary_search_seconds"]),
+    ):
+        path = Path(chunk["path"])
+        chunks.append(
+            {
+                **{key: value for key, value in chunk.items() if key != "path"},
+                "path": str(path),
+                "sha256": _file_sha256(path),
+            }
+        )
+    return chunks
+
+
+def transcribe_prepared_qwen3_asr_chunk(chunk: dict, *, config: dict, work_dir: Path) -> dict:
+    """Transcribe one pre-cut chunk and return globally offset segments."""
+
+    try:
+        require_scheduler_lease("qwen3_asr.transcribe_prepared_chunk")
+    except SchedulerLeaseRequired as exc:
+        raise Qwen3ASRError(str(exc)) from exc
+    path = Path(str(chunk.get("path") or ""))
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    if str(chunk.get("sha256") or "") and _file_sha256(path) != str(chunk["sha256"]):
+        raise Qwen3ASRError("input_changed: prepared ASR chunk content changed")
+    health = qwen3_asr_health(timeout_seconds=5.0)
+    model_status = health.get("model") if isinstance(health.get("model"), dict) else {}
+    if not model_status.get("loaded"):
+        raise Qwen3ASRError(f"model_unavailable: Qwen3-ASR is not loaded ({health.get('status') or 'unknown'})")
+    internal_chunk = {**chunk, "path": path}
+    response, diagnostics = _transcribe_chunk_with_recovery(internal_chunk, dict(config), work_dir)
+    segments = []
+    remote_segments = response.get("segments") if isinstance(response.get("segments"), list) else []
+    for remote in remote_segments:
+        row = _offset_segment(remote, internal_chunk)
+        if row:
+            row["index"] = len(segments) + 1
+            segments.append(row)
+    return {
+        "status": "ready" if segments and diagnostics.get("quality_status") == "ready" else ("degraded" if segments else "failed"),
+        "chunk_index": int(chunk.get("index") or 0),
+        "start": float(chunk.get("start") or 0.0),
+        "end": float(chunk.get("end") or 0.0),
+        "segments": segments,
+        "diagnostics": diagnostics,
+        "model": model_status.get("model_id") or qwen3_asr_model(),
+        "aligner": model_status.get("aligner_id") or "",
     }
 
 
@@ -586,3 +653,11 @@ def _float_env(name: str, default: float, minimum: float, maximum: float) -> flo
     except ValueError:
         value = default
     return max(minimum, min(maximum, value))
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

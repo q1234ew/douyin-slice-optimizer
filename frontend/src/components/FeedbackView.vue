@@ -3,12 +3,12 @@
     <div class="panel-head">
       <div>
         <h2 class="panel-title"><Icon name="database" />研究中心</h2>
-        <p class="panel-subtitle">样本与标注、评测校准、平台连接和模型环境</p>
+        <p class="panel-subtitle">研究样本与发布账号隔离管理、评测校准和模型环境</p>
       </div>
       <div class="toolbar-actions">
         <label class="account-switcher" for="feedback-account">
-          <span>账号</span>
-          <select id="feedback-account" v-model="state.feedbackAccount" aria-label="反馈账号" @change="onFeedbackAccountChange">
+          <span>研究账号</span>
+          <select id="feedback-account" v-model="state.feedbackAccount" aria-label="研究账号筛选" @change="onFeedbackAccountChange">
             <option value="">全部账号</option>
             <option v-for="account in feedbackAccountOptions" :key="account.id" :value="account.id">
               {{ account.label }}
@@ -156,6 +156,8 @@
           </div>
         </div>
 
+        <ProviderConfigPanel :active="state.feedbackSection === 'runtime'" />
+
         <div v-show="state.feedbackSection === 'platform'" class="feedback-block metrics-import-block">
           <span id="feedback-platform" class="section-anchor"></span>
           <h3><Icon name="file-spreadsheet" />授权指标导入</h3>
@@ -176,8 +178,8 @@
           <div class="inner">
             <div class="douyin-account-card">
               <div class="douyin-account-main">
-                <span>当前账号</span>
-                <strong>{{ feedbackAccountLabel }}</strong>
+                <span>发布账号槽位</span>
+                <strong>{{ publishingAccountLabel }}</strong>
                 <div class="meta">{{ douyinAccountMeta }}</div>
               </div>
               <span class="status" :class="authClass">{{ authStatusLabel }}</span>
@@ -187,8 +189,8 @@
               <span>{{ authText }}</span>
             </div>
             <div class="sync-actions">
-              <button id="douyin-login-btn" class="primary" type="button" :disabled="state.busyKey === 'douyin-login'" @click="withBusy('douyin-login', startDouyinLogin)"><Icon name="qr-code" />连接抖音账号</button>
-              <button id="douyin-mock-sync-btn" type="button" :disabled="state.busyKey === 'douyin-mock'" @click="withBusy('douyin-mock', syncDouyinMock)"><Icon name="refresh-cw" />Mock 同步</button>
+              <button id="douyin-login-btn" class="primary" type="button" :disabled="state.busyKey === 'douyin-login'" @click="withBusy('douyin-login', startDouyinLogin)"><Icon name="qr-code" />连接发布账号</button>
+              <button id="douyin-mock-sync-btn" type="button" :disabled="state.busyKey === 'douyin-mock'" @click="withBusy('douyin-mock', syncDouyinMock)"><Icon name="refresh-cw" />Mock 链路测试</button>
               <form id="douyin-sync-form" class="inline-file-form" @submit.prevent="submitDouyinFile">
                 <input id="douyin-sync-file" ref="douyinFile" type="file" name="file" accept=".csv,.xlsx,.xslx,.json,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="抖音授权数据文件" />
                 <button type="submit" :disabled="state.busyKey === 'douyin-file'"><Icon name="upload-cloud" />同步文件</button>
@@ -197,15 +199,15 @@
             <div id="douyin-sync-result" class="meta" style="margin-top:10px;">{{ state.douyinSyncResult }}</div>
             <div id="douyin-sync-summary">
               <div class="detail-metrics">
-                <span>平台映射<strong>{{ mappings.length }}</strong></span>
-                <span>授权指标<strong>{{ Number(metrics.count || 0) }}</strong></span>
-                <span>未链接<strong>{{ Number(metrics.unlinked || 0) }}</strong></span>
+                <span>平台映射<strong>{{ platformMappingCount }}</strong></span>
+                <span>目标结果<strong>{{ verifiedTargetOutcomeCount }}</strong></span>
+                <span>待审计旧指标<strong>{{ auditOnlyMetricCount }}</strong></span>
               </div>
               <div class="meta">{{ runText }}</div>
               <template v-if="mappings.length">
                 <div v-for="item in mappings.slice(0, 4)" :key="item.platform_item_id" class="sample-row">
-                  <div><strong>{{ item.platform_item_id || "未绑定 item" }}</strong><div class="meta">{{ item.sync_status || "linked" }} / {{ item.last_metrics_at || item.last_synced_at || "待同步" }}</div></div>
-                  <span class="status" :class="item.candidate_segment_id ? 'ok' : 'warn'">{{ item.candidate_segment_id ? "已链接" : "未链接" }}</span>
+                  <div><strong>{{ item.platform_item_id || "未绑定 item" }}</strong><div class="meta">{{ evidenceScopeLabel(item.evidence_scope) }} / {{ item.last_metrics_at || item.last_synced_at || "待同步" }}</div></div>
+                  <span class="status" :class="item.evidence_scope === 'target_outcome' && item.candidate_segment_id ? 'ok' : 'warn'">{{ item.evidence_scope === 'target_outcome' && item.candidate_segment_id ? "目标结果" : "未分类" }}</span>
                 </div>
               </template>
               <div v-else class="empty"><Icon name="radio-tower" /><strong>暂无平台映射</strong><span>先在候选详情绑定抖音 item_id，再运行 Mock 或文件同步。</span></div>
@@ -255,6 +257,7 @@
             <div id="learning-result" class="learning-status-line">{{ state.learningResult }}</div>
 
             <MaterialGoldReview v-if="calibrationMode === 'material'" />
+            <MultimodalVectorExperiment v-if="calibrationMode === 'vector'" />
 
             <section v-if="calibrationMode === 'research'" class="research-mode-section">
               <div class="research-primary-actions">
@@ -580,9 +583,11 @@
 import { computed, ref } from "vue";
 import Icon from "./Icon.vue";
 import { useDashboardContext } from "../composables/dashboardContext";
-import type { AccountQuality, AnnotationFieldGuide, DouyinHistorySignal, FeedbackSectionName, LearningDataset, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
+import type { AccountQuality, AnnotationFieldGuide, DouyinHistorySignal, FeedbackSectionName, LearningDataset, PlatformAccountContext, PrototypeBankItem, SemanticCalibrationSample, TrainingSample } from "../types";
 import { clipText } from "../utils";
 import MaterialGoldReview from "./MaterialGoldReview.vue";
+import MultimodalVectorExperiment from "./MultimodalVectorExperiment.vue";
+import ProviderConfigPanel from "./ProviderConfigPanel.vue";
 
 type CountSource = Record<string, unknown> | null | undefined;
 
@@ -630,7 +635,7 @@ const {
 
 const metricsFile = ref<HTMLInputElement | null>(null);
 const douyinFile = ref<HTMLInputElement | null>(null);
-const calibrationMode = ref<"material" | "semantic" | "research">("material");
+const calibrationMode = ref<"material" | "semantic" | "vector" | "research">("material");
 const feedbackSections = [
   { key: "overview", label: "概览", icon: "layout-dashboard" },
   { key: "samples", label: "样本与标注", icon: "database" },
@@ -673,32 +678,52 @@ const oauth = computed(() => state.douyinOAuth || {});
 const oauthAccount = computed(() => oauth.value.account || {});
 const oauthToken = computed(() => oauth.value.token || {});
 const oauthConfig = computed(() => oauth.value.config || {});
-const authStatus = computed(() => oauthAccount.value.auth_status || (oauthToken.value.stored ? "connected" : "not_connected"));
-const authClass = computed(() => authStatus.value === "connected" ? "ok" : (oauthConfig.value.ready_for_qr_login ? "neutral" : "warn"));
+const summary = computed(() => state.douyinSummary || {});
+const accountContext = computed<PlatformAccountContext>(() => summary.value.account_context || {});
+const isPublishingTarget = computed(() => accountContext.value.account_role === "publishing_target");
+const authStatus = computed(() => accountContext.value.auth_status || oauthAccount.value.auth_status || (oauthToken.value.stored ? "connected" : "not_connected"));
+const authClass = computed(() => !isPublishingTarget.value
+  ? "warn"
+  : (accountContext.value.production_personalization_allowed ? "ok" : "neutral"));
 const authStatusLabel = computed(() => {
+  if (!isPublishingTarget.value) return "未指定发布账号";
+  if (accountContext.value.cold_start) return "冷启动";
   const labels: Record<string, string> = {
     connected: "已连接",
     code_received: "已收授权码",
     mock_ready: "Mock 就绪",
+    read_only_ready: "只读就绪",
     waiting_scan: "等待扫码",
     not_connected: "未连接"
   };
   return labels[authStatus.value] || authStatus.value || "未连接";
 });
-const authText = computed(() => oauthConfig.value.ready_for_qr_login
-  ? `授权 ${authStatus.value}${oauthToken.value.access_token_expires_at ? ` / token 至 ${oauthToken.value.access_token_expires_at.slice(0, 10)}` : ""}`
-  : `OAuth 未配置：${Array.isArray(oauthConfig.value.missing) ? oauthConfig.value.missing.join(", ") : "缺少环境变量"}`);
+const authText = computed(() => {
+  if (!isPublishingTarget.value) return "研究账号仅用于跨账号先验；目标发布账号尚未明确，当前不做账号个性化。";
+  if (accountContext.value.target_outcome_status === "unavailable") return "目标账号结果数据暂不可用，排序保持冷启动与研究辅助口径。";
+  if (accountContext.value.target_outcome_status === "insufficient") return `目标账号结果不足 ${Number(accountContext.value.target_outcome_minimum_items || 30)} 条，暂不启用个性化。`;
+  return oauthConfig.value.ready_for_qr_login
+    ? `授权 ${authStatus.value}${oauthToken.value.access_token_expires_at ? ` / token 至 ${oauthToken.value.access_token_expires_at.slice(0, 10)}` : ""}`
+    : `OAuth 未配置：${Array.isArray(oauthConfig.value.missing) ? oauthConfig.value.missing.join(", ") : "缺少环境变量"}`;
+});
+const publishingAccountLabel = computed(() => {
+  if (!isPublishingTarget.value) return "尚未指定";
+  return accountContext.value.display_name || accountContext.value.platform_account_id || accountContext.value.account_id || "目标发布账号";
+});
 const douyinAccountMeta = computed(() => {
-  if (!state.feedbackAccount.trim()) return "全量聚合视图：用于查看 15 个关注账号的历史样本质量";
-  const platformId = oauthAccount.value.platform_account_id;
+  if (!isPublishingTarget.value) return "main 仅是本地发布槽位，不代表 tianci 或当前研究筛选账号";
+  const platformId = accountContext.value.platform_account_id || oauthAccount.value.platform_account_id;
   if (platformId) return `平台 ID ${platformId}`;
-  return oauthToken.value.open_id ? `OpenID ${oauthToken.value.open_id}` : `内部 ID ${state.feedbackAccount}，用于平台映射与数据回流`;
+  return oauthToken.value.open_id ? `OpenID ${oauthToken.value.open_id}` : `内部 ID ${accountContext.value.account_id || "main"}`;
 });
 
-const summary = computed(() => state.douyinSummary || {});
 const mappings = computed(() => Array.isArray(summary.value.mappings) ? summary.value.mappings || [] : []);
 const runs = computed(() => Array.isArray(summary.value.runs) ? summary.value.runs || [] : []);
-const metrics = computed(() => summary.value.metrics || {});
+const platformMappingCount = computed(() => Number(accountContext.value.mapping_summary?.count || 0));
+const verifiedTargetOutcomeCount = computed(() => Number(accountContext.value.metric_summary?.verified_target_outcome_items || 0));
+const auditOnlyMetricCount = computed(() => Number(accountContext.value.metric_summary?.legacy_unverified_rows || 0)
+  + Number(accountContext.value.metric_summary?.ambiguous_visible_count_rows || 0)
+  + Number(accountContext.value.metric_summary?.orphan_rows || 0));
 const runText = computed(() => {
   const latestRun = runs.value[0] || {};
   return latestRun.id ? `最近 ${latestRun.source || ""} / 导入 ${Number(latestRun.imported_metrics || 0)} / 链接 ${Number(latestRun.linked_rows || 0)}` : "暂无同步批次";
@@ -791,6 +816,7 @@ const calibrationModes = computed(() => {
   return [
     { key: "material" as const, label: "素材审核", icon: "badge-check", badge: materialPending > 0 ? `${materialPending} 待审` : materialConfirmed > 0 ? "已完成" : "待生成" },
     { key: "semantic" as const, label: "语义校准", icon: "tags", badge: semanticPending > 0 ? `${semanticPending} 待校准` : semanticSaved > 0 ? "已完成" : "待生成" },
+    { key: "vector" as const, label: "向量评测", icon: "blocks", badge: "60 组" },
     { key: "research" as const, label: "算法回测", icon: "radar", badge: "" }
   ];
 });
@@ -1064,11 +1090,14 @@ const promotionGate = computed<Record<string, unknown>>(() => {
   const value = latestMetrics.value.promotion_gate;
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 });
-const promotionGateStatus = computed(() => Boolean(promotionGate.value.passed) ? "可提升" : "研究证据");
-const promotionGateClass = computed(() => Boolean(promotionGate.value.passed) ? "ok" : "warn");
+const promotionGateStatus = computed(() => Boolean(promotionGate.value.passed) ? "离线门控通过" : "研究证据");
+const promotionGateClass = computed(() => Boolean(promotionGate.value.passed)
+  ? (accountContext.value.production_personalization_allowed ? "ok" : "neutral")
+  : "warn");
 const promotionGateText = computed(() => {
   if (!latestBacktest.value) return "";
-  return `门控 lift ${Number(promotionGate.value.topk_lift_vs_random || 0).toFixed(2)} / 账号 ${Number(promotionGate.value.improved_ready_account_count || 0)}/${Number(promotionGate.value.required_improved_ready_account_count || 3)} / ${promotionGate.value.decision || "keep_as_research_evidence"}`;
+  const accountState = accountContext.value.production_personalization_allowed ? "发布账号可校准" : "发布账号冷启动";
+  return `离线门控 lift ${Number(promotionGate.value.topk_lift_vs_random || 0).toFixed(2)} / 研究账号 ${Number(promotionGate.value.improved_ready_account_count || 0)}/${Number(promotionGate.value.required_improved_ready_account_count || 3)} / ${accountState}`;
 });
 const feedbackAccountLabel = computed(() => accountDisplayName(state.feedbackAccount.trim()));
 const feedbackAccountOptions = computed<FeedbackAccountOption[]>(() => {
@@ -1160,6 +1189,12 @@ function accountDisplayName(accountId?: string, displayName?: string): string {
   if (fromQuality) return fromQuality;
   const fromDataset = state.learningDatasets.find(item => item.account_id === id || item.program_key === id)?.account_display_name;
   return fromDataset || id;
+}
+
+function evidenceScopeLabel(value?: string): string {
+  if (value === "target_outcome") return "目标账号结果";
+  if (value === "research_proxy") return "研究代理证据";
+  return "证据用途未分类";
 }
 
 function sampleSourceLabel(value: string): string {

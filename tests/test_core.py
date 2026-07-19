@@ -1714,10 +1714,14 @@ class CoreWorkflowTest(unittest.TestCase):
         self.assertEqual(result["import_result"]["row_summary"]["unlinked_rows"], 1)
         self.assertEqual(summary["mappings"][0]["platform_item_id"], "7655575210669722907")
         with connect() as conn:
-            row = conn.execute("SELECT views, platform_item_id, sample_source FROM performance_metrics").fetchone()
-        self.assertEqual(row["views"], 238000)
+            row = conn.execute(
+                "SELECT views, platform_item_id, sample_source, metric_semantics FROM performance_metrics"
+            ).fetchone()
+        self.assertEqual(row["views"], 0)
         self.assertEqual(row["platform_item_id"], "7655575210669722907")
         self.assertEqual(row["sample_source"], "csv")
+        self.assertEqual(row["metric_semantics"], "ambiguous_visible_count")
+        self.assertEqual(result["import_result"]["target_outcome_eligibility"]["explicit_platform_outcome_rows"], 0)
 
     def test_douyin_visible_clean_recovers_counts_ids_and_dedupes(self) -> None:
         capture_dir = self.root / "douyin_capture"

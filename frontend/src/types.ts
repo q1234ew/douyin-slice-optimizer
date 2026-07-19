@@ -24,6 +24,43 @@ export interface DashboardStats {
   training_samples: number;
 }
 
+export interface ModelJob {
+  contract_version?: string;
+  job_id: string;
+  job_kind?: string;
+  status?: string;
+  deduplicated?: boolean;
+  cache_hit?: boolean;
+  progress?: {
+    total_items?: number;
+    completed_items?: number;
+    failed_items?: number;
+  };
+  result_summary?: {
+    status?: string;
+    omni_applied_count?: number;
+    segment_count?: number;
+    completed_chunk_count?: number;
+    failed_chunk_count?: number;
+    completed_items?: number;
+    failed_items?: number;
+    error_code?: string;
+    error_summary?: string;
+  };
+}
+
+export interface ModelJobSubmission {
+  status?: string;
+  model_job?: ModelJob | null;
+  omni_applied_count?: number;
+  baseline?: {
+    status?: string;
+    source?: string;
+    segment_count?: number;
+    preserved?: boolean;
+  };
+}
+
 export interface VideoRow {
   id: string;
   account_id?: string;
@@ -361,13 +398,49 @@ export interface AccountInsights {
 export interface PlatformMapping {
   candidate_segment_id?: string;
   platform_item_id?: string;
+  evidence_scope?: "unclassified" | "target_outcome" | "research_proxy" | string;
   sync_status?: string;
   last_metrics_at?: string;
   last_synced_at?: string;
   [key: string]: unknown;
 }
 
+export interface PlatformAccountContext {
+  contract_version?: string;
+  account_id?: string;
+  platform?: string;
+  account_role?: "unassigned" | "publishing_target" | "research_source" | string;
+  account_role_source?: string;
+  display_name?: string;
+  platform_account_id?: string;
+  auth_status?: string;
+  is_publishing_target?: boolean;
+  is_research_source?: boolean;
+  target_identity_ready?: boolean;
+  target_outcome_status?: "unavailable" | "insufficient" | "calibration_ready" | string;
+  target_outcome_minimum_items?: number;
+  cold_start?: boolean;
+  production_personalization_allowed?: boolean;
+  blockers?: string[];
+  mapping_summary?: {
+    count?: number;
+    target_outcome?: number;
+    research_proxy?: number;
+    unclassified?: number;
+  };
+  metric_summary?: {
+    rows?: number;
+    items?: number;
+    verified_target_outcome_items?: number;
+    legacy_unverified_rows?: number;
+    ambiguous_visible_count_rows?: number;
+    orphan_rows?: number;
+  };
+  [key: string]: unknown;
+}
+
 export interface DouyinSummary {
+  account_context?: PlatformAccountContext;
   mappings?: PlatformMapping[];
   runs?: Array<{
     id?: string;
@@ -378,6 +451,13 @@ export interface DouyinSummary {
   metrics?: {
     count?: number;
     unlinked?: number;
+    explicit_outcome_rows?: number;
+    engagement_proxy_rows?: number;
+    legacy_unverified_rows?: number;
+    ambiguous_visible_count_rows?: number;
+    target_outcome_rows?: number;
+    research_proxy_rows?: number;
+    unclassified_rows?: number;
   };
   [key: string]: unknown;
 }

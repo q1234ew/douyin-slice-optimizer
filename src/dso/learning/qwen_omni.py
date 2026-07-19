@@ -24,6 +24,7 @@ from dso.learning.semantic_labels import SEMANTIC_ENUMS, normalize_semantic_fiel
 from dso.learning.slice_structure_evaluator import evaluate_slice_structure_row
 from dso.learning.multimodal_validation import _build_asset_index, _prepare_row
 from dso.media.ffmpeg import probe_video, require_binary
+from dso.scheduler.guard import require_scheduler_lease
 from dso.utils import read_json, run_cmd, utc_now, write_json
 from dso.versions import QWEN_OMNI_VERSION
 
@@ -332,6 +333,7 @@ class QwenOmniClient:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
     def load(self, *, model_id: str | None = None, max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS) -> dict:
+        require_scheduler_lease("qwen_omni.load")
         payload = {
             "model": model_id or self.model_id,
             "model_id": model_id or self.model_id,
@@ -347,9 +349,11 @@ class QwenOmniClient:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
     def analyze_clip(self, payload: dict) -> dict:
+        require_scheduler_lease("qwen_omni.analyze_clip")
         return self._json_request("POST", "/analyze/clip", payload, timeout_seconds=max(self.timeout_seconds, 120.0))
 
     def analyze_clip_file(self, payload: dict, video_path: str | Path) -> dict:
+        require_scheduler_lease("qwen_omni.analyze_clip_file")
         return self._multipart_request(
             "/analyze/clip-file",
             payload,

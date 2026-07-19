@@ -31,6 +31,7 @@ def _permission(*levels: UploadLevel) -> DataPermission:
         allowed_upload_levels=frozenset(levels),
         redaction_strategy="remove account identifiers before upload",
         retention_days=0,
+        retention_policy_reference="test-contract://no-retention.v1",
     )
 
 
@@ -126,14 +127,17 @@ def test_budget_enforces_request_batch_and_day_before_network_call() -> None:
     assert request_error.value.scope == "per_request"
     assert guard.snapshot().daily_spent.amount == Decimal("0")
 
-    guard.reserve(Money(Decimal("1.00"), "CNY"))
-    guard.reserve(Money(Decimal("0.50"), "CNY"))
+    first = guard.reserve(Money(Decimal("1.00"), "CNY"))
+    guard.settle(first, Money(Decimal("1.00"), "CNY"))
+    second = guard.reserve(Money(Decimal("0.50"), "CNY"))
+    guard.settle(second, Money(Decimal("0.50"), "CNY"))
     with pytest.raises(BudgetExceeded) as batch_error:
         guard.reserve(Money(Decimal("0.01"), "CNY"))
     assert batch_error.value.scope == "per_batch"
 
     guard.begin_batch("batch-2")
-    guard.reserve(Money(Decimal("0.50"), "CNY"))
+    third = guard.reserve(Money(Decimal("0.50"), "CNY"))
+    guard.settle(third, Money(Decimal("0.50"), "CNY"))
     with pytest.raises(BudgetExceeded) as day_error:
         guard.reserve(Money(Decimal("0.01"), "CNY"))
     assert day_error.value.scope == "per_day"
@@ -152,6 +156,27 @@ def test_budget_can_resume_persisted_batch_and_daily_spend() -> None:
     with pytest.raises(BudgetExceeded) as error:
         guard.reserve(Money(Decimal("0.01"), "CNY"))
     assert error.value.scope == "per_batch"
+
+
+def test_budget_settlement_releases_unused_reservation_and_accounts_actual_overrun() -> None:
+    guard = BudgetGuard(_limits(per_request="1", per_batch="2", per_day="3"))
+    reservation = guard.reserve(Money(Decimal("0.80"), "CNY"))
+
+    settlement = guard.settle(reservation, Money(Decimal("0.25"), "CNY"))
+
+    assert settlement.released.amount == Decimal("0.55")
+    assert guard.snapshot().batch_spent.amount == Decimal("0.25")
+    assert guard.snapshot().active_reservation_count == 0
+
+    released = guard.reserve(Money(Decimal("0.50"), "CNY"))
+    guard.release(released)
+    assert guard.snapshot().batch_spent.amount == Decimal("0.25")
+
+    overrun = guard.reserve(Money(Decimal("0.10"), "CNY"))
+    with pytest.raises(BudgetExceeded) as error:
+        guard.settle(overrun, Money(Decimal("0.20"), "CNY"))
+    assert error.value.scope == "reservation"
+    assert guard.snapshot().batch_spent.amount == Decimal("0.45")
 
 
 def test_daily_budget_rolls_over_but_batch_and_daily_are_reset() -> None:
@@ -256,6 +281,14 @@ def test_ledger_records_only_safe_fixed_fields_and_preserves_decimal_cost(tmp_pa
         authorization_basis="owned_media",
         redaction_strategy="remove_account_identifiers",
         retention_days=0,
+        retention_days_known=True,
+        retention_policy_reference="contract://owned-media.v1",
+        preflight_reserved_cost=Money(Decimal("0.020000"), "CNY"),
+        usage_estimated_cost=Money(Decimal("0.012300"), "CNY"),
+        billing_status="usage_estimated",
+        pricing_version="price-20260718",
+        provider_request_id="req-safe-1",
+        provider_cached_input_tokens=11,
         estimated_cost=Money(Decimal("0.012300"), "CNY"),
         error_code="provider_error",
         error_summary=(
@@ -278,6 +311,12 @@ def test_ledger_records_only_safe_fixed_fields_and_preserves_decimal_cost(tmp_pa
     assert row["request_count"] == 2
     assert row["network_request_count"] == 2
     assert row["rate_limit_count"] == 1
+    assert row["preflight_reserved_cost"] == Decimal("0.020000")
+    assert row["usage_estimated_cost"] == Decimal("0.012300")
+    assert row["billing_status"] == "usage_estimated"
+    assert row["provider_request_id"] == "req-safe-1"
+    assert row["provider_cached_input_tokens"] == 11
+    assert row["retention_days_known"] is True
     assert secret not in str(row["error_summary"])
     assert "private-user-prompt" not in str(row["error_summary"])
     assert secret.encode() not in db_path.read_bytes()

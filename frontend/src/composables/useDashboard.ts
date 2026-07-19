@@ -1,4 +1,4 @@
-import { computed, reactive, type ComputedRef } from "vue";
+import { computed, onScopeDispose, reactive, type ComputedRef } from "vue";
 import { api, jsonBody } from "../api";
 import type {
   AccountInsights,
@@ -30,6 +30,8 @@ import type {
   MaterialResolverReport,
   MaterialWindowDraft,
   MemoryBuildResult,
+  ModelJob,
+  ModelJobSubmission,
   ModuleStatus,
   ModuleStatusKey,
   MultimodalCollectionPlan,
@@ -75,6 +77,65 @@ const defaultStats: DashboardStats = {
   exports: 0,
   training_samples: 0
 };
+
+// Research-account filters must never select the publishing account implicitly.
+const PUBLISHING_ACCOUNT_ID = "main";
+
+const sliceStages = [
+  { key: "extract", label: "转写与音频分析", start: 3, end: 72 },
+  { key: "segments", label: "生成候选片段", start: 72, end: 84 },
+  { key: "score", label: "评分与推荐排序", start: 84, end: 94 },
+  { key: "prepare", label: "整理候选并提交复排", start: 94, end: 96 }
+] as const;
+
+const terminalModelJobStatuses = new Set([
+  "succeeded",
+  "degraded",
+  "failed",
+  "cancelled",
+  "cancelled_partial",
+  "expired"
+]);
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForModelJob(
+  jobId: string,
+  timeoutMilliseconds = 180_000,
+  onUpdate?: (job: ModelJob) => void
+): Promise<ModelJob> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  let latest = await api<ModelJob>(`/model-jobs/${encodeURIComponent(jobId)}`);
+  onUpdate?.(latest);
+  while (!terminalModelJobStatuses.has(String(latest.status || "")) && Date.now() < deadline) {
+    await delay(1_500);
+    latest = await api<ModelJob>(`/model-jobs/${encodeURIComponent(jobId)}`);
+    onUpdate?.(latest);
+  }
+  return latest;
+}
+
+async function waitForSubmittedModelJob(
+  submission: ModelJobSubmission,
+  timeoutMilliseconds: number,
+  onUpdate?: (job: ModelJob) => void
+): Promise<ModelJob | null> {
+  const job = submission.model_job || null;
+  if (!job || terminalModelJobStatuses.has(String(job.status || submission.status || ""))) {
+    return job;
+  }
+  return waitForModelJob(job.job_id, timeoutMilliseconds, onUpdate);
+}
+
+function scheduledAsrIsUsable(submission: ModelJobSubmission, job: ModelJob | null): boolean {
+  if (!job) return true;
+  const status = String(job.status || submission.status || "");
+  if (status === "succeeded") return true;
+  if (status !== "degraded") return false;
+  return Number(job.result_summary?.segment_count || submission.baseline?.segment_count || 0) > 0;
+}
 
 const moduleKeys: ModuleStatusKey[] = [
   "videos",
@@ -236,6 +297,45 @@ export interface DashboardState {
   learningResult: string;
   toastMessage: string;
   busyKey: string;
+  sliceProgress: SliceProgressState;
+}
+
+export interface SliceProgressState {
+  videoId: string;
+  status: "idle" | "running" | "refining" | "completed" | "failed";
+  stageKey: string;
+  stageLabel: string;
+  detail: string;
+  stageIndex: number;
+  totalStages: number;
+  percent: number;
+  startedAt: number | null;
+  stageStartedAt: number | null;
+  finishedAt: number | null;
+  elapsedSeconds: number;
+  estimatedTotalSeconds: number | null;
+  estimatedRemainingSeconds: number | null;
+  error: string;
+}
+
+function emptySliceProgress(): SliceProgressState {
+  return {
+    videoId: "",
+    status: "idle",
+    stageKey: "",
+    stageLabel: "等待开始",
+    detail: "",
+    stageIndex: 0,
+    totalStages: sliceStages.length,
+    percent: 0,
+    startedAt: null,
+    stageStartedAt: null,
+    finishedAt: null,
+    elapsedSeconds: 0,
+    estimatedTotalSeconds: null,
+    estimatedRemainingSeconds: null,
+    error: ""
+  };
 }
 
 export interface WorkflowGuideItem {
@@ -318,7 +418,8 @@ export function useDashboard(): DashboardStore {
     douyinSyncResult: "等待同步",
     learningResult: "等待学习评估",
     toastMessage: "",
-    busyKey: ""
+    busyKey: "",
+    sliceProgress: emptySliceProgress()
   });
 
   let toastTimer: number | undefined;
@@ -329,6 +430,8 @@ export function useDashboard(): DashboardStore {
   let calibrationWorkspaceKey = "";
   let calibrationLoadPromise: Promise<void> | null = null;
   const precutPollIds = new Set<string>();
+  let sliceProgressTimer: number | undefined;
+  let activeSliceStageEstimates = [20, 6, 8, 8];
 
   const selectedVideo = computed(() => state.videos.find(video => video.id === state.selectedVideoId) || null);
   const selectedSegment = computed(() => state.suggestions.find(row => row.id === state.selectedSegmentId) || null);
@@ -343,6 +446,148 @@ export function useDashboard(): DashboardStore {
         && (!state.statusFilter || video.status === state.statusFilter);
     });
   });
+
+  function sliceStageEstimates(durationSeconds: number): number[] {
+    const duration = Math.max(0, Number(durationSeconds || 0));
+    return [
+      Math.max(20, Math.ceil(duration * 0.065)),
+      Math.max(6, Math.min(30, Math.ceil(duration * 0.003))),
+      Math.max(8, Math.min(35, Math.ceil(duration * 0.0035))),
+      8
+    ];
+  }
+
+  function stopSliceProgressTimer(): void {
+    if (sliceProgressTimer !== undefined) {
+      window.clearInterval(sliceProgressTimer);
+      sliceProgressTimer = undefined;
+    }
+  }
+
+  function updateSliceProgressClock(): void {
+    const progress = state.sliceProgress;
+    if (!progress.startedAt || !["running", "refining"].includes(progress.status)) return;
+    const now = Date.now();
+    progress.elapsedSeconds = Math.max(0, Math.floor((now - progress.startedAt) / 1000));
+    if (progress.status === "refining") {
+      progress.estimatedRemainingSeconds = null;
+      return;
+    }
+    const stage = sliceStages[progress.stageIndex];
+    if (!stage || !progress.stageStartedAt) return;
+    const stageElapsed = Math.max(0, (now - progress.stageStartedAt) / 1000);
+    const stageEstimate = activeSliceStageEstimates[progress.stageIndex] || 8;
+    const futureEstimate = activeSliceStageEstimates
+      .slice(progress.stageIndex + 1)
+      .reduce((sum, value) => sum + value, 0);
+    const stageRatio = Math.min(0.92, stageElapsed / Math.max(1, stageEstimate));
+    progress.percent = Math.max(
+      progress.percent,
+      Math.min(stage.end - 1, Math.round(stage.start + (stage.end - stage.start) * stageRatio))
+    );
+    progress.estimatedRemainingSeconds = Math.max(
+      1,
+      Math.ceil(Math.max(0, stageEstimate - stageElapsed) + futureEstimate)
+    );
+  }
+
+  function beginSliceProgress(videoId: string, durationSeconds: number): void {
+    stopSliceProgressTimer();
+    activeSliceStageEstimates = sliceStageEstimates(durationSeconds);
+    const startedAt = Date.now();
+    state.sliceProgress = {
+      ...emptySliceProgress(),
+      videoId,
+      status: "running",
+      stageLabel: sliceStages[0].label,
+      detail: "正在准备节目音频与转写任务",
+      percent: sliceStages[0].start,
+      startedAt,
+      stageStartedAt: startedAt,
+      estimatedTotalSeconds: activeSliceStageEstimates.reduce((sum, value) => sum + value, 0),
+      estimatedRemainingSeconds: activeSliceStageEstimates.reduce((sum, value) => sum + value, 0)
+    };
+    sliceProgressTimer = window.setInterval(updateSliceProgressClock, 1_000);
+    updateSliceProgressClock();
+  }
+
+  function setSliceStage(stageIndex: number, detail: string): void {
+    const stage = sliceStages[stageIndex];
+    if (!stage) return;
+    state.sliceProgress.status = "running";
+    state.sliceProgress.stageKey = stage.key;
+    state.sliceProgress.stageLabel = stage.label;
+    state.sliceProgress.detail = detail;
+    state.sliceProgress.stageIndex = stageIndex;
+    state.sliceProgress.stageStartedAt = Date.now();
+    state.sliceProgress.percent = Math.max(state.sliceProgress.percent, stage.start);
+    updateSliceProgressClock();
+  }
+
+  function completeSliceStage(stageIndex: number): void {
+    const stage = sliceStages[stageIndex];
+    if (!stage) return;
+    state.sliceProgress.percent = Math.max(state.sliceProgress.percent, stage.end);
+    updateSliceProgressClock();
+  }
+
+  function beginOmniRefining(job: ModelJob): void {
+    state.sliceProgress.status = "refining";
+    state.sliceProgress.stageKey = "omni";
+    state.sliceProgress.stageLabel = "Omni 后台复排";
+    state.sliceProgress.stageIndex = sliceStages.length - 1;
+    state.sliceProgress.percent = Math.max(96, state.sliceProgress.percent);
+    state.sliceProgress.estimatedRemainingSeconds = null;
+    updateOmniProgress(job);
+    updateSliceProgressClock();
+  }
+
+  function updateOmniProgress(job: ModelJob): void {
+    if (state.sliceProgress.status !== "refining") return;
+    const completed = Number(job.progress?.completed_items || 0);
+    const failed = Number(job.progress?.failed_items || 0);
+    const total = Number(job.progress?.total_items || 0);
+    const settled = completed + failed;
+    if (total > 0) {
+      state.sliceProgress.percent = Math.max(
+        state.sliceProgress.percent,
+        Math.min(99, 96 + Math.floor((settled / total) * 3))
+      );
+      state.sliceProgress.detail = `GPU 复排 ${settled}/${total} 条，可继续审核已生成候选`;
+    } else {
+      const status = String(job.status || "queued");
+      state.sliceProgress.detail = status === "running"
+        ? "Omni 正在检查预筛候选，可继续审核"
+        : "Omni 已进入 GPU 队列，等待调度";
+    }
+  }
+
+  function finishSliceProgress(stageLabel: string, detail: string): void {
+    updateSliceProgressClock();
+    state.sliceProgress.status = "completed";
+    state.sliceProgress.stageKey = "completed";
+    state.sliceProgress.stageLabel = stageLabel;
+    state.sliceProgress.detail = detail;
+    state.sliceProgress.stageIndex = sliceStages.length - 1;
+    state.sliceProgress.percent = 100;
+    state.sliceProgress.estimatedRemainingSeconds = 0;
+    state.sliceProgress.finishedAt = Date.now();
+    stopSliceProgressTimer();
+  }
+
+  function failSliceProgress(error: unknown): void {
+    updateSliceProgressClock();
+    const message = errorText(error, "智能切片失败，请检查服务状态后重试");
+    state.sliceProgress.status = "failed";
+    state.sliceProgress.stageLabel = "智能切片未完成";
+    state.sliceProgress.detail = message;
+    state.sliceProgress.error = message;
+    state.sliceProgress.estimatedRemainingSeconds = null;
+    state.sliceProgress.finishedAt = Date.now();
+    stopSliceProgressTimer();
+  }
+
+  onScopeDispose(stopSliceProgressTimer);
 
   const workflowGuide = computed<WorkflowGuideItem>(() => {
     const videoCount = statCount("videos");
@@ -611,38 +856,96 @@ export function useDashboard(): DashboardStore {
 
   async function runStep(videoId: string, step: "extract" | "segments" | "score"): Promise<void> {
     const labels = { extract: "提取完成", segments: "候选生成完成", score: "评分完成" };
-    await api(`/videos/${encodeURIComponent(videoId)}/${step}`, { method: "POST" });
+    const result = await api<ModelJobSubmission>(`/videos/${encodeURIComponent(videoId)}/${step}`, { method: "POST" });
+    if (step === "extract" && result.model_job) {
+      toast(result.model_job.deduplicated ? "已合并到现有 ASR 任务" : "ASR 已进入模型调度队列");
+      const job = await waitForSubmittedModelJob(result, 7_200_000);
+      if (!job || !scheduledAsrIsUsable(result, job)) {
+        throw new Error("ASR 调度未产生可用转写，已保留原转写或回退状态");
+      }
+    }
     toast(labels[step] || "处理完成");
     await refreshVideos();
   }
 
   async function runAll(videoId: string): Promise<void> {
-    toast("开始智能切片：先生成候选，Omni 随后增量复排");
-    await api(`/videos/${encodeURIComponent(videoId)}/extract`, { method: "POST" });
-    await api(`/videos/${encodeURIComponent(videoId)}/segments`, { method: "POST" });
-    await api(`/videos/${encodeURIComponent(videoId)}/score`, { method: "POST" });
-    await refreshVideos();
-    await loadSuggestions(videoId, false);
-    toast("候选已生成，Omni 正在后台检查预筛候选");
-    void api<{
-      status?: string;
-      preselected_count?: number;
-      omni_applied_count?: number;
-    }>(
-      `/videos/${encodeURIComponent(videoId)}/omni-rerank`,
-      jsonBody({
-        candidate_limit: 3,
-        max_clip_seconds: 6,
-        omni_weight: 0.15,
-        load_model: false
-      })
-    ).then(async result => {
+    const video = state.videos.find(item => item.id === videoId);
+    beginSliceProgress(videoId, Number(video?.duration_seconds || 0));
+    toast("开始智能切片：正在转写并分析节目音频");
+    try {
+      setSliceStage(0, "Qwen3-ASR 转写、时间对齐与音频特征提取");
+      const extractResult = await api<ModelJobSubmission>(`/videos/${encodeURIComponent(videoId)}/extract`, { method: "POST" });
+      const asrJob = await waitForSubmittedModelJob(extractResult, 7_200_000, job => {
+        const completed = Number(job.progress?.completed_items || 0);
+        const total = Number(job.progress?.total_items || 0);
+        setSliceStage(0, `Qwen3-ASR 分块调度 ${completed}/${total || "?"}，可安全恢复与轮转`);
+      });
+      if (extractResult.model_job && (!asrJob || !scheduledAsrIsUsable(extractResult, asrJob))) {
+        throw new Error("ASR 调度结束但没有可用转写，候选生成已暂停");
+      }
+      completeSliceStage(0);
+
+      setSliceStage(1, "根据语义、情绪、音乐结构和能量峰值召回候选");
+      await api(`/videos/${encodeURIComponent(videoId)}/segments`, { method: "POST" });
+      completeSliceStage(1);
+
+      setSliceStage(2, "计算传播潜力、内容完整度与质量风险");
+      await api(`/videos/${encodeURIComponent(videoId)}/score`, { method: "POST" });
+      completeSliceStage(2);
+
+      setSliceStage(3, "刷新候选并提交 Omni 增量复排任务");
+      await refreshVideos();
       await loadSuggestions(videoId, false);
-      const applied = Number(result.omni_applied_count || 0);
-      toast(result.status === "ready" ? `Omni 增量复排完成：${applied} 条` : "Omni 未就绪，当前保持规则与历史排序");
-    }).catch(() => {
-      toast("Omni 复排暂不可用，当前保持规则与历史排序");
-    });
+      const result = await api<ModelJobSubmission>(
+        `/videos/${encodeURIComponent(videoId)}/omni-rerank`,
+        jsonBody({
+          candidate_limit: 3,
+          max_clip_seconds: 6,
+          omni_weight: 0.15,
+          load_model: false
+        })
+      );
+      completeSliceStage(3);
+
+      let job = result.model_job || null;
+      if (!job || terminalModelJobStatuses.has(String(job.status || result.status || ""))) {
+        const status = String(job?.status || result.status || "");
+        const applied = Number(job?.result_summary?.omni_applied_count || result.omni_applied_count || 0);
+        if (["succeeded", "ready", "cached"].includes(status)) {
+          finishSliceProgress("智能切片完成", `候选与 Omni 复排已完成，共应用 ${applied} 条`);
+          toast(`智能切片完成：Omni 已复排 ${applied} 条`);
+        } else {
+          finishSliceProgress("候选已生成", "Omni 当前未就绪，已保留规则与历史排序");
+          toast("候选已生成，Omni 未就绪，当前保持规则排序");
+        }
+        return;
+      }
+
+      beginOmniRefining(job);
+      toast(job.deduplicated ? "已合并到现有 Omni 任务，等待 GPU 调度" : "候选已生成，Omni 正在后台增量复排");
+      void waitForModelJob(job.job_id, 180_000, updateOmniProgress).then(async latest => {
+        job = latest;
+        await loadSuggestions(videoId, false);
+        const status = String(job?.status || "");
+        const applied = Number(job?.result_summary?.omni_applied_count || 0);
+        if (["succeeded", "ready", "cached"].includes(status)) {
+          finishSliceProgress("智能切片完成", `候选与 Omni 复排已完成，共应用 ${applied} 条`);
+          toast(`Omni 增量复排完成：${applied} 条`);
+        } else if (job && !terminalModelJobStatuses.has(status)) {
+          finishSliceProgress("候选已就绪", "Omni 仍在后台队列，可继续审核并稍后刷新候选");
+          toast("Omni 仍在模型队列中，可继续审核，结果完成后刷新候选");
+        } else {
+          finishSliceProgress("候选已生成", "Omni 复排未应用，当前保持规则与历史排序");
+          toast("Omni 未就绪，当前保持规则排序");
+        }
+      }).catch(() => {
+        finishSliceProgress("候选已生成", "Omni 复排暂不可用，当前保持规则与历史排序");
+        toast("Omni 复排暂不可用，当前保持规则与历史排序");
+      });
+    } catch (error) {
+      failSliceProgress(error);
+      toast(errorText(error, "智能切片失败，请检查服务状态后重试"));
+    }
   }
 
   function currentFeedbackLoadKey(): string {
@@ -721,15 +1024,10 @@ export function useDashboard(): DashboardStore {
       api<BacktestList>(`/learning/backtest?account_id=${accountQuery}&limit=1&compact=true`),
       api<PrototypeBankResult>(`/accounts/${encodeURIComponent(accountPath)}/prototypes?limit=5&source=visible_capture&dataset_id=${encodeURIComponent(dataset)}`)
     ]);
-    const douyinRequest = account
-      ? Promise.all([
-        api<DouyinSummary>(`/platform/douyin/summary?account_id=${encodeURIComponent(account)}`),
-        api<DouyinOAuthStatus>(`/platform/douyin/oauth/status?account_id=${encodeURIComponent(account)}`)
-      ])
-      : Promise.resolve<[DouyinSummary, DouyinOAuthStatus]>([
-        { mappings: [], runs: [], metrics: { count: 0, unlinked: 0 } },
-        { account: { auth_status: "not_connected" }, token: {}, config: { ready_for_qr_login: false, missing: [] } }
-      ]);
+    const douyinRequest = Promise.all([
+      api<DouyinSummary>(`/platform/douyin/summary?account_id=${encodeURIComponent(PUBLISHING_ACCOUNT_ID)}`),
+      api<DouyinOAuthStatus>(`/platform/douyin/oauth/status?account_id=${encodeURIComponent(PUBLISHING_ACCOUNT_ID)}`)
+    ]);
 
     samplesRequest.catch(() => undefined);
     historyBaselinesRequest.catch(() => undefined);
@@ -1203,7 +1501,7 @@ export function useDashboard(): DashboardStore {
   }
 
   async function syncDouyinMock(): Promise<void> {
-    const account = state.feedbackAccount || "main";
+    const account = PUBLISHING_ACCOUNT_ID;
     const result = await api<{
       pulled_rows?: number;
       import_result?: {
@@ -1219,6 +1517,7 @@ export function useDashboard(): DashboardStore {
   }
 
   async function syncDouyinFile(form: FormData): Promise<void> {
+    form.set("account_id", PUBLISHING_ACCOUNT_ID);
     const result = await api<{
       pulled_rows?: number;
       import_result?: { row_summary?: { linked_rows?: number; unlinked_rows?: number } };
@@ -1231,7 +1530,7 @@ export function useDashboard(): DashboardStore {
   }
 
   async function startDouyinLogin(): Promise<void> {
-    const account = state.feedbackAccount || "main";
+    const account = PUBLISHING_ACCOUNT_ID;
     const result = await api<DouyinOAuthStatus>("/platform/douyin/oauth/start", jsonBody({ account_id: account }));
     state.douyinOAuth = {
       ...(state.douyinOAuth || {}),
@@ -1934,7 +2233,7 @@ export function useDashboard(): DashboardStore {
     const row = state.suggestions.find(item => item.id === segmentId);
     const firstVariant = Array.isArray(row?.variants) ? row.variants[0] : null;
     const mapping = await api(`/platform/mappings`, jsonBody({
-      account_id: state.feedbackAccount || "main",
+      account_id: PUBLISHING_ACCOUNT_ID,
       platform: "douyin",
       platform_item_id: platformItemId,
       candidate_segment_id: segmentId,

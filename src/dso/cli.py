@@ -12,6 +12,7 @@ from dso.collectors.douyin_visible import clean_visible_snapshots
 from dso.db.session import init_db
 from dso.features.asr import transcribe_video
 from dso.features.asr_bench import benchmark_asr
+from dso.features.asr_shadow import qwen3_asr_shadow_status, run_qwen3_asr_shadow
 from dso.features.asr_verify import verify_candidate_asr
 from dso.features.asr_profile import normalize_asr_profile, resolve_asr_model_list, resolve_asr_model_size
 from dso.features.whisper_cpp import setup_whisper_cpp
@@ -54,6 +55,16 @@ from dso.learning.multimodal_validation import (
     run_multimodal_feature_experiment,
     run_multimodal_validation,
 )
+from dso.learning.bailian_vector_chain import (
+    bailian_vector_chain_status,
+    run_bailian_vector_chain,
+)
+from dso.learning.bailian_cached_ablation import run_bailian_cached_ablation
+from dso.learning.bailian_holdout_validation import (
+    evaluate_bailian_holdout_validation,
+    freeze_bailian_holdout_validation,
+    run_bailian_holdout_prediction,
+)
 from dso.learning.prototypes import build_prototype_bank, list_capture_datasets, list_prototype_bank, match_segment_prototypes
 from dso.learning.qwen_embeddings import build_qwen_embedding_index, run_qwen_embedding_evidence
 from dso.learning.qwen_omni import analyze_candidate_with_qwen_omni, qwen_omni_status, run_qwen_omni_media_batch, run_qwen_omni_shadow
@@ -67,6 +78,11 @@ from dso.review import mark_candidate_review
 from dso.runtime import runtime_diagnostics
 from dso.scoring.rights import set_rights
 from dso.scoring.scorer import score_video, suggestions
+from dso.scheduler.repository import JobNotFound, ModelJobRepository
+from dso.scheduler.asr import submit_qwen3_asr_job
+from dso.scheduler.benchmark import run_model_scheduler_benchmark
+from dso.scheduler.service import model_scheduler_enabled, scheduler_resources, scheduler_status, submit_embedding_build_job
+from dso.scheduler.worker import ModelWorker, default_worker_id
 from dso.segments.generator import generate_segments
 from dso.variants.exporter import create_variant, export_segment
 
@@ -162,6 +178,16 @@ def cmd_extract(
     asr_backend: str | None = None,
 ) -> dict:
     init_db()
+    if model_scheduler_enabled() and (asr_backend is None or str(asr_backend).lower() in {"auto", "qwen3_asr", "qwen3-asr"}):
+        scheduled = submit_qwen3_asr_job(video_id, force=force_asr, role="primary")
+        audio = extract_audio_features(video_id)
+        return {
+            "video_id": video_id,
+            **scheduled,
+            "audio_peaks": len(audio["peaks"]),
+            "asr_selected_backend": "qwen3_asr_scheduled",
+            "asr_fallback_used": False,
+        }
     profile_name = normalize_asr_profile(asr_profile)
     model_size = resolve_asr_model_size(asr_model, profile=profile_name)
     transcript = transcribe_video(
@@ -172,6 +198,7 @@ def cmd_extract(
         force=force_asr,
     )
     audio = extract_audio_features(video_id)
+    routing = (transcript.get("metadata") or {}).get("routing") or {}
     return {
         "video_id": video_id,
         "asr_profile": profile_name,
@@ -181,7 +208,20 @@ def cmd_extract(
         "transcript_segments": len(transcript["segments"]),
         "transcript_cache_hit": bool(transcript.get("cache_hit") or (transcript.get("metadata") or {}).get("cache_hit")),
         "audio_peaks": len(audio["peaks"]),
+        "asr_primary": routing.get("primary") or {},
+        "asr_selected_backend": routing.get("selected_backend") or (transcript.get("metadata") or {}).get("backend") or "",
+        "asr_fallback_used": bool(routing.get("fallback_used", False)),
+        "asr_shadow": routing.get("shadow") or {},
     }
+
+
+def cmd_qwen3_asr_shadow(video_id: str, force: bool = False, status_only: bool = False) -> dict:
+    init_db()
+    if status_only:
+        return qwen3_asr_shadow_status(video_id)
+    if model_scheduler_enabled():
+        return submit_qwen3_asr_job(video_id, force=force, role="shadow")
+    return run_qwen3_asr_shadow(video_id, force=force)
 
 
 def cmd_generate_segments(video_id: str, top_k: int) -> dict:
@@ -601,6 +641,15 @@ def cmd_qwen_embeddings_build(
     force: bool = False,
 ) -> dict:
     init_db()
+    if model_scheduler_enabled():
+        return submit_embedding_build_job(
+            account_id=account,
+            dataset_id=dataset,
+            entity_type=entity_type,
+            modality=modality,
+            limit=limit,
+            force=force,
+        )
     return build_qwen_embedding_index(
         account_id=account,
         dataset_id=dataset,
@@ -927,6 +976,90 @@ def cmd_provider_smoke(
     return run_fake_provider_smoke(text=text, repeat=repeat, batch_id=batch_id)
 
 
+def cmd_bailian_vector_status(benchmark_id: str) -> dict:
+    init_db()
+    return bailian_vector_chain_status(benchmark_id)
+
+
+def cmd_bailian_vector_run(
+    benchmark_id: str,
+    stage: str,
+    limit: int,
+    top_n: int,
+    judge_limit: int,
+    force: bool,
+    batch_id: str | None,
+) -> dict:
+    init_db()
+    return run_bailian_vector_chain(
+        benchmark_id,
+        stage=stage,
+        limit=limit,
+        top_n=top_n,
+        judge_limit=judge_limit,
+        force=force,
+        batch_id=batch_id,
+    )
+
+
+def cmd_bailian_vector_ablation(benchmark_id: str) -> dict:
+    init_db()
+    return run_bailian_cached_ablation(benchmark_id)
+
+
+def cmd_bailian_vector_holdout(benchmark_id: str, stage: str) -> dict:
+    init_db()
+    selected = str(stage or "freeze").strip().lower()
+    if selected == "freeze":
+        return freeze_bailian_holdout_validation(benchmark_id)
+    if selected == "predict":
+        return run_bailian_holdout_prediction(benchmark_id)
+    if selected == "evaluate":
+        return evaluate_bailian_holdout_validation(benchmark_id)
+    raise ValueError(f"unsupported D12-B holdout stage: {selected}")
+
+
+def cmd_model_scheduler_status() -> dict:
+    return {**scheduler_status(), "resource_inventory": scheduler_resources()}
+
+
+def cmd_model_scheduler_benchmark(manifest: str | None = None, output: str | None = None) -> dict:
+    return run_model_scheduler_benchmark(manifest_path=manifest, output_path=output)
+
+
+def cmd_model_jobs(status: str | None = None, limit: int = 50) -> dict:
+    rows = ModelJobRepository().list_jobs(status=status, limit=limit)
+    return {"count": len(rows), "jobs": rows}
+
+
+def cmd_model_job_cancel(job_id: str) -> dict:
+    return ModelJobRepository().cancel(job_id)
+
+
+def cmd_model_scheduler_reconcile() -> dict:
+    return {"status": "ready", **ModelJobRepository().recover_stale()}
+
+
+def cmd_model_worker(
+    *,
+    resource_id: str = "gpu:0",
+    worker_id: str | None = None,
+    once: bool = False,
+    poll_seconds: float = 1.0,
+    max_jobs: int = 0,
+) -> dict:
+    repository = ModelJobRepository()
+    selected_worker_id = str(worker_id or default_worker_id())
+    worker = ModelWorker(repository, selected_worker_id, resource_id=resource_id)
+    if once:
+        result = worker.run_once()
+        return result or {"status": "idle", "worker_id": selected_worker_id, "resource_id": resource_id}
+    return worker.run_forever(
+        poll_seconds=max(0.05, float(poll_seconds)),
+        max_jobs=max(1, int(max_jobs)) if int(max_jobs or 0) > 0 else None,
+    )
+
+
 def cmd_web(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
     missing = []
     for module_name in ["fastapi", "uvicorn"]:
@@ -1027,6 +1160,103 @@ def _typer_main(typer_module: Any) -> None:
     ) -> None:
         _print(cmd_provider_smoke(text, repeat, batch_id))
 
+    @app.command("bailian-vector-status")
+    def bailian_vector_status_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+    ) -> None:
+        _print(cmd_bailian_vector_status(benchmark_id))
+
+    @app.command("bailian-vector-run")
+    def bailian_vector_run_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+        stage: str = typer_module.Option("smoke", "--stage"),
+        limit: int = typer_module.Option(10, "--limit", min=0),
+        top_n: int = typer_module.Option(20, "--top-n", min=1, max=40),
+        judge_limit: int = typer_module.Option(20, "--judge-limit", min=1, max=40),
+        force: bool = typer_module.Option(False, "--force"),
+        batch_id: str | None = typer_module.Option(None, "--batch-id"),
+    ) -> None:
+        _print(
+            cmd_bailian_vector_run(
+                benchmark_id,
+                stage,
+                limit,
+                top_n,
+                judge_limit,
+                force,
+                batch_id,
+            )
+        )
+
+    @app.command("bailian-vector-ablation")
+    def bailian_vector_ablation_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+    ) -> None:
+        _print(cmd_bailian_vector_ablation(benchmark_id))
+
+    @app.command("bailian-vector-holdout")
+    def bailian_vector_holdout_command(
+        benchmark_id: str = typer_module.Option(
+            "dso-multimodal-vector-value-20260719-r1", "--benchmark-id"
+        ),
+        stage: str = typer_module.Option("freeze", "--stage"),
+    ) -> None:
+        _print(cmd_bailian_vector_holdout(benchmark_id, stage))
+
+    @app.command("model-scheduler-status")
+    def model_scheduler_status_command() -> None:
+        _print(cmd_model_scheduler_status())
+
+    @app.command("model-scheduler-benchmark")
+    def model_scheduler_benchmark_command(
+        manifest: str | None = typer_module.Option(None, "--manifest"),
+        output: str | None = typer_module.Option(None, "--output"),
+    ) -> None:
+        _print(cmd_model_scheduler_benchmark(manifest, output))
+
+    @app.command("model-jobs")
+    def model_jobs_command(
+        status: str | None = typer_module.Option(None, "--status"),
+        limit: int = typer_module.Option(50, "--limit", min=1, max=200),
+    ) -> None:
+        _print(cmd_model_jobs(status, limit))
+
+    @app.command("model-job-cancel")
+    def model_job_cancel_command(job_id: str) -> None:
+        try:
+            _print(cmd_model_job_cancel(job_id))
+        except JobNotFound as exc:
+            typer_module.echo(f"Error: model job not found: {job_id}", err=True)
+            raise typer_module.Exit(1) from exc
+
+    @app.command("model-scheduler-reconcile")
+    def model_scheduler_reconcile_command() -> None:
+        _print(cmd_model_scheduler_reconcile())
+
+    @app.command("model-worker")
+    def model_worker_command(
+        resource_id: str = typer_module.Option("gpu:0", "--resource"),
+        worker_id: str | None = typer_module.Option(None, "--worker-id"),
+        once: bool = typer_module.Option(False, "--once"),
+        poll_seconds: float = typer_module.Option(1.0, "--poll-seconds", min=0.05),
+        max_jobs: int = typer_module.Option(0, "--max-jobs", min=0),
+    ) -> None:
+        _print(
+            cmd_model_worker(
+                resource_id=resource_id,
+                worker_id=worker_id,
+                once=once,
+                poll_seconds=poll_seconds,
+                max_jobs=max_jobs,
+            )
+        )
+
     @app.command("setup-asr")
     def setup_asr_command(
         model: str | None = typer_module.Option(None, "--model"),
@@ -1123,6 +1353,14 @@ def _typer_main(typer_module: Any) -> None:
         asr_backend: str | None = typer_module.Option(None, "--asr-backend"),
     ) -> None:
         _print(cmd_extract(video_id, force_asr, asr_profile, asr_model, asr_backend))
+
+    @app.command("qwen3-asr-shadow")
+    def qwen3_asr_shadow_command(
+        video_id: str,
+        force: bool = typer_module.Option(False, "--force"),
+        status_only: bool = typer_module.Option(False, "--status"),
+    ) -> None:
+        _print(cmd_qwen3_asr_shadow(video_id, force, status_only))
 
     @app.command("generate-segments")
     def generate_segments_command(video_id: str, top_k: int = typer_module.Option(30, "--top-k")) -> None:
@@ -1773,6 +2011,51 @@ def _argparse_main() -> None:
     provider_smoke.add_argument("--text", default="G3 provider contract smoke")
     provider_smoke.add_argument("--repeat", type=int, default=2)
     provider_smoke.add_argument("--batch-id")
+    bailian_vector_status = sub.add_parser("bailian-vector-status")
+    bailian_vector_status.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_vector_run = sub.add_parser("bailian-vector-run")
+    bailian_vector_run.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_vector_run.add_argument(
+        "--stage",
+        choices=["preflight", "smoke", "embeddings", "rerank", "judge", "full"],
+        default="smoke",
+    )
+    bailian_vector_run.add_argument("--limit", type=int, default=10)
+    bailian_vector_run.add_argument("--top-n", type=int, default=20)
+    bailian_vector_run.add_argument("--judge-limit", type=int, default=20)
+    bailian_vector_run.add_argument("--force", action="store_true")
+    bailian_vector_run.add_argument("--batch-id")
+    bailian_vector_ablation = sub.add_parser("bailian-vector-ablation")
+    bailian_vector_ablation.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_vector_holdout = sub.add_parser("bailian-vector-holdout")
+    bailian_vector_holdout.add_argument(
+        "--benchmark-id", default="dso-multimodal-vector-value-20260719-r1"
+    )
+    bailian_vector_holdout.add_argument(
+        "--stage", choices=["freeze", "predict", "evaluate"], default="freeze"
+    )
+    sub.add_parser("model-scheduler-status")
+    model_jobs = sub.add_parser("model-jobs")
+    model_jobs.add_argument("--status")
+    model_jobs.add_argument("--limit", type=int, default=50)
+    model_job_cancel = sub.add_parser("model-job-cancel")
+    model_job_cancel.add_argument("job_id")
+    sub.add_parser("model-scheduler-reconcile")
+    model_worker = sub.add_parser("model-worker")
+    model_worker.add_argument("--resource", default="gpu:0")
+    model_worker.add_argument("--worker-id")
+    model_worker.add_argument("--once", action="store_true")
+    model_worker.add_argument("--poll-seconds", type=float, default=1.0)
+    model_worker.add_argument("--max-jobs", type=int, default=0)
+    model_scheduler_benchmark = sub.add_parser("model-scheduler-benchmark")
+    model_scheduler_benchmark.add_argument("--manifest")
+    model_scheduler_benchmark.add_argument("--output")
     setup_asr = sub.add_parser("setup-asr")
     setup_asr.add_argument("--model")
     setup_asr.add_argument("--profile")
@@ -1829,6 +2112,10 @@ def _argparse_main() -> None:
     extract.add_argument("--asr-profile")
     extract.add_argument("--asr-model")
     extract.add_argument("--asr-backend")
+    qwen3_asr_shadow = sub.add_parser("qwen3-asr-shadow")
+    qwen3_asr_shadow.add_argument("video_id")
+    qwen3_asr_shadow.add_argument("--force", action="store_true")
+    qwen3_asr_shadow.add_argument("--status", action="store_true")
     gen = sub.add_parser("generate-segments")
     gen.add_argument("video_id")
     gen.add_argument("--top-k", type=int, default=30)
@@ -2174,6 +2461,44 @@ def _argparse_main() -> None:
         _print(cmd_provider_status())
     elif args.command == "provider-smoke":
         _print(cmd_provider_smoke(args.text, args.repeat, args.batch_id))
+    elif args.command == "bailian-vector-status":
+        _print(cmd_bailian_vector_status(args.benchmark_id))
+    elif args.command == "bailian-vector-run":
+        _print(
+            cmd_bailian_vector_run(
+                args.benchmark_id,
+                args.stage,
+                args.limit,
+                args.top_n,
+                args.judge_limit,
+                args.force,
+                args.batch_id,
+            )
+        )
+    elif args.command == "bailian-vector-ablation":
+        _print(cmd_bailian_vector_ablation(args.benchmark_id))
+    elif args.command == "bailian-vector-holdout":
+        _print(cmd_bailian_vector_holdout(args.benchmark_id, args.stage))
+    elif args.command == "model-scheduler-status":
+        _print(cmd_model_scheduler_status())
+    elif args.command == "model-scheduler-benchmark":
+        _print(cmd_model_scheduler_benchmark(args.manifest, args.output))
+    elif args.command == "model-jobs":
+        _print(cmd_model_jobs(args.status, args.limit))
+    elif args.command == "model-job-cancel":
+        _print(cmd_model_job_cancel(args.job_id))
+    elif args.command == "model-scheduler-reconcile":
+        _print(cmd_model_scheduler_reconcile())
+    elif args.command == "model-worker":
+        _print(
+            cmd_model_worker(
+                resource_id=args.resource,
+                worker_id=args.worker_id,
+                once=args.once,
+                poll_seconds=args.poll_seconds,
+                max_jobs=args.max_jobs,
+            )
+        )
     elif args.command == "setup-asr":
         _print(cmd_setup_asr(args.model, args.force, args.vad_model, args.profile))
     elif args.command == "bench-asr":
@@ -2209,6 +2534,8 @@ def _argparse_main() -> None:
         _print(cmd_rights_set(args.asset_type, args.asset_id, args.program, args.song, args.performance, args.artist, args.platforms, args.duration, args.accounts))
     elif args.command == "extract":
         _print(cmd_extract(args.video_id, args.force_asr, args.asr_profile, args.asr_model, args.asr_backend))
+    elif args.command == "qwen3-asr-shadow":
+        _print(cmd_qwen3_asr_shadow(args.video_id, args.force, args.status))
     elif args.command == "generate-segments":
         _print(cmd_generate_segments(args.video_id, args.top_k))
     elif args.command == "score":

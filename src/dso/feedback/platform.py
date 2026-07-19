@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
+from dso.feedback.account_context import (
+    default_evidence_scope,
+    normalize_account_role,
+    normalize_evidence_scope,
+)
 from dso.utils import new_id, utc_now
 from dso.versions import PLATFORM_SYNC_VERSION
 
@@ -13,7 +18,7 @@ FIELD_ALIASES = {
     "platform_title": ["platform_title", "item_title", "video_title", "desc", "title", "标题", "normalized_title"],
     "platform_url": ["platform_url", "share_url", "video_url", "url", "视频URL"],
     "published_at": ["published_at", "publish_time", "create_time"],
-    "views": ["views", "play_count", "view_count", "计数数值", "可见计数", "visible_count_number", "best_visible_count_number"],
+    "views": ["views", "play_count", "view_count"],
     "impressions": ["impressions", "show_count", "impression_count", "exposure_count"],
     "avg_watch_seconds": ["avg_watch_seconds", "avg_play_duration", "average_play_time"],
     "avg_watch_ratio": ["avg_watch_ratio", "avg_play_ratio", "average_play_ratio"],
@@ -29,9 +34,31 @@ FIELD_ALIASES = {
     "comment_quality_score": ["comment_quality_score", "comment_quality"],
 }
 
+AMBIGUOUS_VISIBLE_COUNT_ALIASES = [
+    "计数数值",
+    "可见计数",
+    "visible_count_number",
+    "best_visible_count_number",
+    "ambiguous_visible_count",
+]
+EXPLICIT_OUTCOME_FIELDS = {
+    "views",
+    "impressions",
+    "avg_watch_seconds",
+    "avg_watch_ratio",
+    "five_second_retention",
+    "completion_rate",
+    "rewatch_rate",
+    "shares",
+    "follows",
+    "negative_feedback",
+}
+ENGAGEMENT_PROXY_FIELDS = {"likes", "comments", "favorites"}
+
 
 def create_platform_mapping(payload: dict[str, Any]) -> dict:
     platform = _text(payload.get("platform")) or "douyin"
+    account_id = _text(payload.get("account_id")) or "main"
     platform_item_id = _clean_item_id(_first(payload, FIELD_ALIASES["platform_item_id"]))
     if not platform_item_id:
         raise ValueError("platform_item_id is required")
@@ -51,8 +78,25 @@ def create_platform_mapping(payload: dict[str, Any]) -> dict:
             "SELECT * FROM platform_video_mappings WHERE platform = ? AND platform_item_id = ?",
             [platform, platform_item_id],
         )
+        if existing and str(existing.get("account_id") or "main") != account_id:
+            raise ValueError(
+                f"platform_item_id already belongs to account_id={existing.get('account_id') or 'main'}; "
+                "cross-account reassignment is not allowed"
+            )
+        requested_scope = payload.get("evidence_scope")
+        if requested_scope not in (None, ""):
+            evidence_scope = normalize_evidence_scope(requested_scope)
+        elif existing:
+            evidence_scope = normalize_evidence_scope(existing.get("evidence_scope"))
+        else:
+            account = fetch_one(
+                conn,
+                "SELECT account_role FROM platform_accounts WHERE platform = ? AND account_id = ?",
+                [platform, account_id],
+            )
+            evidence_scope = default_evidence_scope((account or {}).get("account_role") or "unassigned")
         data = {
-            "account_id": _text(payload.get("account_id")) or "main",
+            "account_id": account_id,
             "platform": platform,
             "platform_item_id": platform_item_id,
             "candidate_segment_id": candidate_segment_id,
@@ -61,6 +105,7 @@ def create_platform_mapping(payload: dict[str, Any]) -> dict:
             "platform_url": _text(_first(payload, FIELD_ALIASES["platform_url"])),
             "platform_title": _text(_first(payload, FIELD_ALIASES["platform_title"])),
             "published_at": _text(_first(payload, FIELD_ALIASES["published_at"])),
+            "evidence_scope": evidence_scope,
             "sync_status": _text(payload.get("sync_status")) or "linked",
             "last_synced_at": _text(payload.get("last_synced_at")),
             "last_metrics_at": _text(payload.get("last_metrics_at")),
@@ -119,7 +164,13 @@ def list_platform_mappings(
 def resolve_platform_mapping(conn, raw: dict) -> dict[str, str | None]:
     item_id = _clean_item_id(_first(raw, FIELD_ALIASES["platform_item_id"]))
     if not item_id:
-        return {"experiment_id": None, "slice_variant_id": None, "candidate_segment_id": None}
+        return {
+            "experiment_id": None,
+            "slice_variant_id": None,
+            "candidate_segment_id": None,
+            "account_id": None,
+            "evidence_scope": None,
+        }
     platform = _text(raw.get("platform")) or "douyin"
     row = fetch_one(
         conn,
@@ -127,11 +178,19 @@ def resolve_platform_mapping(conn, raw: dict) -> dict[str, str | None]:
         [platform, item_id],
     )
     if not row:
-        return {"experiment_id": None, "slice_variant_id": None, "candidate_segment_id": None}
+        return {
+            "experiment_id": None,
+            "slice_variant_id": None,
+            "candidate_segment_id": None,
+            "account_id": None,
+            "evidence_scope": None,
+        }
     return {
         "experiment_id": row.get("experiment_id"),
         "slice_variant_id": row.get("slice_variant_id"),
         "candidate_segment_id": row.get("candidate_segment_id"),
+        "account_id": row.get("account_id"),
+        "evidence_scope": row.get("evidence_scope") or "unclassified",
     }
 
 
@@ -139,26 +198,33 @@ def upsert_platform_account(payload: dict[str, Any]) -> dict:
     platform = _text(payload.get("platform")) or "douyin"
     account_id = _text(payload.get("account_id")) or "main"
     now = utc_now()
-    data = {
-        "account_id": account_id,
-        "platform": platform,
-        "platform_account_id": _text(payload.get("platform_account_id") or payload.get("open_id") or payload.get("union_id")),
-        "display_name": _text(payload.get("display_name") or payload.get("nickname")),
-        "auth_status": _text(payload.get("auth_status")) or "mock_ready",
-        "scopes": _json_text(payload.get("scopes")),
-        "token_status": _text(payload.get("token_status")) or "not_stored",
-        "token_expires_at": _text(payload.get("token_expires_at") or payload.get("expires_at")),
-        "last_synced_at": _text(payload.get("last_synced_at")),
-        "sync_cursor": _text(payload.get("sync_cursor")),
-        "notes": _text(payload.get("notes")),
-        "updated_at": now,
-    }
     with connect() as conn:
         existing = fetch_one(
             conn,
-            "SELECT id FROM platform_accounts WHERE platform = ? AND account_id = ?",
+            "SELECT * FROM platform_accounts WHERE platform = ? AND account_id = ?",
             [platform, account_id],
         )
+        requested_role = payload.get("account_role")
+        account_role = (
+            normalize_account_role(requested_role)
+            if requested_role not in (None, "")
+            else normalize_account_role((existing or {}).get("account_role"))
+        )
+        data = {
+            "account_id": account_id,
+            "platform": platform,
+            "account_role": account_role,
+            "platform_account_id": _text(payload.get("platform_account_id") or payload.get("open_id") or payload.get("union_id")),
+            "display_name": _text(payload.get("display_name") or payload.get("nickname")),
+            "auth_status": _text(payload.get("auth_status")) or "mock_ready",
+            "scopes": _json_text(payload.get("scopes")),
+            "token_status": _text(payload.get("token_status")) or "not_stored",
+            "token_expires_at": _text(payload.get("token_expires_at") or payload.get("expires_at")),
+            "last_synced_at": _text(payload.get("last_synced_at")),
+            "sync_cursor": _text(payload.get("sync_cursor")),
+            "notes": _text(payload.get("notes")),
+            "updated_at": now,
+        }
         if existing:
             data = {key: value for key, value in data.items() if value not in (None, "") or key in {"auth_status", "updated_at"}}
             assignments = ", ".join(f"{key} = ?" for key in data)
@@ -244,8 +310,9 @@ def list_platform_sync_runs(account_id: str | None = None, platform: str | None 
 
 
 def map_platform_metric_row(raw: dict[str, Any], *, sample_source: str = "mock") -> dict:
+    source = _text(raw.get("sample_source") or sample_source) or "mock"
     mapped = {
-        "sample_source": sample_source,
+        "sample_source": source,
         "platform": _text(raw.get("platform")) or "douyin",
     }
     for target, aliases in FIELD_ALIASES.items():
@@ -254,9 +321,26 @@ def map_platform_metric_row(raw: dict[str, Any], *, sample_source: str = "mock")
             if target == "platform_item_id":
                 value = _clean_item_id(value)
             mapped[target] = value
-    for key in ["window_name", "label_window", "hours_since_publish", "collected_at", "candidate_segment_id", "slice_variant_id", "experiment_id"]:
+    for key in ["account_id", "window_name", "label_window", "hours_since_publish", "collected_at", "candidate_segment_id", "slice_variant_id", "experiment_id"]:
         if raw.get(key) not in (None, ""):
             mapped[key] = raw.get(key)
+    warnings = _warning_values(raw.get("metric_warnings"))
+    ambiguous_visible_count = _first(raw, AMBIGUOUS_VISIBLE_COUNT_ALIASES)
+    if ambiguous_visible_count not in (None, ""):
+        warnings.append("ambiguous_visible_count_ignored")
+        mapped["ambiguous_visible_count"] = ambiguous_visible_count
+    if source == "mock":
+        metric_semantics = "mock"
+    elif any(_first(raw, FIELD_ALIASES[field]) not in (None, "") for field in EXPLICIT_OUTCOME_FIELDS):
+        metric_semantics = "explicit_platform_outcome"
+    elif any(_first(raw, FIELD_ALIASES[field]) not in (None, "") for field in ENGAGEMENT_PROXY_FIELDS):
+        metric_semantics = "engagement_proxy"
+    elif ambiguous_visible_count not in (None, ""):
+        metric_semantics = "ambiguous_visible_count"
+    else:
+        metric_semantics = "unverified"
+    mapped["metric_semantics"] = metric_semantics
+    mapped["metric_warnings"] = sorted(set(warnings))
     return mapped
 
 
@@ -267,10 +351,12 @@ def platform_metric_contract() -> dict:
         "sample_sources": ["csv", "api", "mock"],
         "file_formats": ["csv", "xlsx", "json"],
         "field_aliases": FIELD_ALIASES,
+        "rejected_ambiguous_view_aliases": AMBIGUOUS_VISIBLE_COUNT_ALIASES,
         "window_names": ["6h", "24h", "72h", "7d", "30d", "final"],
         "mapping_keys": ["platform_item_id", "candidate_segment_id", "slice_variant_id", "experiment_id"],
         "auth_policy": "Only local read-only account status is stored by default; real access/refresh tokens are not persisted in this workspace.",
         "sync_policy": "Mock/API rows are mapped locally first; the default sync client never makes real platform requests.",
+        "metric_semantics_policy": "Ambiguous visible counts are never mapped to views; legacy or ambiguous rows remain audit-only for target-account readiness.",
     }
 
 
@@ -322,3 +408,17 @@ def _json_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False)
+
+
+def _warning_values(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = [value]
+        value = decoded
+    if not isinstance(value, (list, tuple, set)):
+        value = [value]
+    return [str(item).strip() for item in value if str(item).strip()]

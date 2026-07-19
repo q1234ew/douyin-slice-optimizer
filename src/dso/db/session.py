@@ -1,3 +1,5 @@
+"""Primary SQLite connection helpers and idempotent forward migrations."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -8,6 +10,8 @@ from dso.config import ensure_data_dirs, get_settings
 
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
+    """Open a connection with foreign keys and bounded lock waiting enabled."""
+
     settings = ensure_data_dirs()
     conn = sqlite3.connect(str(db_path or settings.db_path), timeout=10.0)
     conn.row_factory = sqlite3.Row
@@ -17,6 +21,8 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | None = None) -> Path:
+    """Create the base schema and migrate an existing local database in place."""
+
     settings = ensure_data_dirs()
     path = db_path or settings.db_path
     with connect(path) as conn:
@@ -38,6 +44,8 @@ def fetch_all(conn: sqlite3.Connection, query: str, params: Iterable[Any] = ()) 
 
 
 def insert_row(conn: sqlite3.Connection, table: str, data: Mapping[str, Any]) -> str:
+    """Insert trusted internal table/column names while binding every value."""
+
     keys = list(data.keys())
     placeholders = ", ".join("?" for _ in keys)
     columns = ", ".join(keys)
@@ -96,12 +104,34 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
     _add_columns(
         conn,
+        "platform_accounts",
+        {
+            "account_role": "TEXT NOT NULL DEFAULT 'unassigned'",
+        },
+    )
+    _add_columns(
+        conn,
         "platform_video_mappings",
         {
             "platform_url": "TEXT NOT NULL DEFAULT ''",
             "platform_title": "TEXT NOT NULL DEFAULT ''",
             "published_at": "TEXT NOT NULL DEFAULT ''",
             "last_metrics_at": "TEXT NOT NULL DEFAULT ''",
+            "evidence_scope": "TEXT NOT NULL DEFAULT 'unclassified'",
+        },
+    )
+    _add_columns(
+        conn,
+        "performance_metrics",
+        {
+            "metric_semantics": "TEXT NOT NULL DEFAULT 'legacy_unverified'",
+        },
+    )
+    _add_columns(
+        conn,
+        "metric_snapshots",
+        {
+            "metric_semantics": "TEXT NOT NULL DEFAULT 'legacy_unverified'",
         },
     )
     _add_columns(
@@ -178,10 +208,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _ensure_embedding_records_schema(conn)
     _ensure_material_gold_annotations_schema(conn)
     _ensure_material_window_annotations_schema(conn)
+    _ensure_multimodal_vector_reviews_schema(conn)
     _ensure_precut_batch_schema(conn)
 
 
 def _add_columns(conn: sqlite3.Connection, table: str, columns: Mapping[str, str]) -> None:
+    """Apply additive migrations without overwriting existing column data."""
+
     existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     for name, ddl in columns.items():
         if name not in existing:
@@ -189,6 +222,8 @@ def _add_columns(conn: sqlite3.Connection, table: str, columns: Mapping[str, str
 
 
 def _ensure_prototype_bank_dataset_schema(conn: sqlite3.Connection) -> None:
+    """Rebuild the legacy table only when its dataset-scoped uniqueness is absent."""
+
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prototype_bank_items'"
     ).fetchone()
@@ -241,6 +276,8 @@ def _ensure_prototype_bank_dataset_schema(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_historical_capture_item_unique(conn: sqlite3.Connection) -> None:
+    """Resolve legacy duplicates before enforcing platform-item uniqueness."""
+
     _dedupe_historical_capture_item_rows(conn)
     conn.execute(
         """
@@ -252,6 +289,8 @@ def _ensure_historical_capture_item_unique(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_embedding_records_schema(conn: sqlite3.Connection) -> None:
+    """Create versioned embedding metadata; vectors remain external artifacts."""
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS embedding_records (
@@ -283,6 +322,13 @@ def _ensure_embedding_records_schema(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_precut_batch_schema(conn: sqlite3.Connection) -> None:
+    """Create G1 import tables and enforce immutable original clip boundaries.
+
+    The triggers are the database-level backstop for the G1 contract: once a
+    precut candidate is locked, neither application code nor ad-hoc SQL may
+    move or unlock its original start/end boundary.
+    """
+
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS precut_import_batches (
@@ -418,7 +464,35 @@ def _ensure_material_window_annotations_schema(conn: sqlite3.Connection) -> None
     )
 
 
+def _ensure_multimodal_vector_reviews_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS multimodal_vector_reviews (
+          id TEXT PRIMARY KEY,
+          benchmark_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          reviewer_id TEXT NOT NULL DEFAULT 'local',
+          left_sample_id TEXT NOT NULL,
+          right_sample_id TEXT NOT NULL,
+          choice TEXT NOT NULL DEFAULT 'abstain',
+          confidence TEXT NOT NULL DEFAULT 'medium',
+          reason_tags_json TEXT NOT NULL DEFAULT '[]',
+          review_note TEXT NOT NULL DEFAULT '',
+          manifest_sha256 TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(benchmark_id, task_id, reviewer_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_multimodal_vector_reviews_progress ON multimodal_vector_reviews(benchmark_id, reviewer_id, updated_at DESC)"
+    )
+
+
 def _dedupe_historical_capture_item_rows(conn: sqlite3.Connection) -> None:
+    """Keep the richest deterministic row before adding the unique index."""
+
     groups = conn.execute(
         """
         SELECT account_id, platform, platform_item_id, COUNT(*) AS count
@@ -841,6 +915,7 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL DEFAULT 'main',
   platform TEXT NOT NULL DEFAULT 'douyin',
+  account_role TEXT NOT NULL DEFAULT 'unassigned',
   platform_account_id TEXT NOT NULL DEFAULT '',
   display_name TEXT NOT NULL DEFAULT '',
   auth_status TEXT NOT NULL DEFAULT 'not_connected',
@@ -882,6 +957,7 @@ CREATE TABLE IF NOT EXISTS platform_video_mappings (
   platform_url TEXT NOT NULL DEFAULT '',
   platform_title TEXT NOT NULL DEFAULT '',
   published_at TEXT NOT NULL DEFAULT '',
+  evidence_scope TEXT NOT NULL DEFAULT 'unclassified',
   sync_status TEXT NOT NULL DEFAULT 'linked',
   last_synced_at TEXT,
   last_metrics_at TEXT NOT NULL DEFAULT '',
@@ -941,6 +1017,7 @@ CREATE TABLE IF NOT EXISTS performance_metrics (
   uncertainty REAL NOT NULL DEFAULT 1,
   sample_source TEXT NOT NULL DEFAULT 'csv',
   platform_item_id TEXT NOT NULL DEFAULT '',
+  metric_semantics TEXT NOT NULL DEFAULT 'legacy_unverified',
   created_at TEXT NOT NULL,
   FOREIGN KEY(experiment_id) REFERENCES publishing_experiments(id) ON DELETE SET NULL,
   FOREIGN KEY(slice_variant_id) REFERENCES slice_variants(id) ON DELETE SET NULL,
@@ -975,6 +1052,7 @@ CREATE TABLE IF NOT EXISTS metric_snapshots (
   uncertainty REAL NOT NULL DEFAULT 1,
   sample_source TEXT NOT NULL DEFAULT 'csv',
   platform_item_id TEXT NOT NULL DEFAULT '',
+  metric_semantics TEXT NOT NULL DEFAULT 'legacy_unverified',
   created_at TEXT NOT NULL,
   FOREIGN KEY(performance_metric_id) REFERENCES performance_metrics(id) ON DELETE CASCADE,
   FOREIGN KEY(experiment_id) REFERENCES publishing_experiments(id) ON DELETE SET NULL,
@@ -1136,6 +1214,23 @@ CREATE TABLE IF NOT EXISTS material_window_annotations (
   FOREIGN KEY(sample_id) REFERENCES historical_capture_samples(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS multimodal_vector_reviews (
+  id TEXT PRIMARY KEY,
+  benchmark_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  reviewer_id TEXT NOT NULL DEFAULT 'local',
+  left_sample_id TEXT NOT NULL,
+  right_sample_id TEXT NOT NULL,
+  choice TEXT NOT NULL DEFAULT 'abstain',
+  confidence TEXT NOT NULL DEFAULT 'medium',
+  reason_tags_json TEXT NOT NULL DEFAULT '[]',
+  review_note TEXT NOT NULL DEFAULT '',
+  manifest_sha256 TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(benchmark_id, task_id, reviewer_id)
+);
+
 CREATE TABLE IF NOT EXISTS prototype_bank_items (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL DEFAULT 'main',
@@ -1183,6 +1278,7 @@ CREATE INDEX IF NOT EXISTS idx_historical_capture_dataset ON historical_capture_
 CREATE INDEX IF NOT EXISTS idx_material_gold_scope ON material_gold_annotations(account_id, dataset_id, review_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_material_window_scope ON material_window_annotations(account_id, dataset_id, review_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_material_window_sample ON material_window_annotations(sample_id, start_seconds);
+CREATE INDEX IF NOT EXISTS idx_multimodal_vector_reviews_progress ON multimodal_vector_reviews(benchmark_id, reviewer_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_historical_capture_item ON historical_capture_samples(platform, platform_item_id);
 CREATE INDEX IF NOT EXISTS idx_prototype_bank_account ON prototype_bank_items(account_id, dataset_id, source, updated_at DESC);
 """

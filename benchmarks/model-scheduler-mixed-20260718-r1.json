@@ -1,0 +1,21 @@
+{
+  "contract_version": "model_scheduler_benchmark_manifest.v1",
+  "benchmark_id": "dso-model-scheduler-mixed-20260718-r1",
+  "created_at": "2026-07-18T00:00:00+08:00",
+  "status": "frozen_synthetic_contract_workload",
+  "scope": "scheduler policy, persistence, parent fairness, profile affinity and staged commit; no real model quality or GPU throughput claim",
+  "jobs": [
+    {"id": "omni-a", "job_kind": "bench_omni", "profile_id": "omni", "priority_class": "interactive_product", "base_priority": 300, "items": 6, "simulated_inference_ms": 7000},
+    {"id": "asr-a", "job_kind": "bench_asr", "profile_id": "asr", "priority_class": "product_batch", "base_priority": 220, "items": 12, "simulated_inference_ms": 2500},
+    {"id": "omni-b", "job_kind": "bench_omni", "profile_id": "omni", "priority_class": "interactive_product", "base_priority": 300, "items": 6, "simulated_inference_ms": 7000},
+    {"id": "embed-a", "job_kind": "bench_embedding", "profile_id": "embedding", "priority_class": "maintenance", "base_priority": 110, "items": 8, "simulated_inference_ms": 350},
+    {"id": "shadow-a", "job_kind": "bench_shadow", "profile_id": "omni", "priority_class": "research", "base_priority": 40, "items": 4, "simulated_inference_ms": 7000},
+    {"id": "embed-b", "job_kind": "bench_embedding", "profile_id": "embedding", "priority_class": "maintenance", "base_priority": 110, "items": 8, "simulated_inference_ms": 350}
+  ],
+  "acceptance": {
+    "max_parent_burst": 4,
+    "minimum_switch_reduction_rate": 0.6,
+    "maximum_enqueue_p95_ms": 500,
+    "maximum_scheduler_overhead_rate": 0.05
+  }
+}

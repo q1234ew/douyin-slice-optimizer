@@ -31,6 +31,8 @@ def _currency(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Money:
+    """Exact non-negative money value; floats are deliberately rejected."""
+
     amount: Decimal
     currency: str
 
@@ -44,6 +46,8 @@ class Money:
 
 @dataclass(frozen=True, slots=True)
 class BudgetLimits:
+    """Nested hard limits sharing one currency: request <= batch <= day by policy."""
+
     per_request: Money
     per_batch: Money
     per_day: Money
@@ -59,6 +63,8 @@ class BudgetLimits:
 
 
 class BudgetExceeded(RuntimeError):
+    """Identifies the limit scope that rejected a reservation or settlement."""
+
     def __init__(
         self,
         scope: str,
@@ -83,6 +89,8 @@ class CurrencyMismatch(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BudgetReservation:
+    """Worst-case cost counted before a network request is allowed to start."""
+
     reservation_id: str
     amount: Money
     batch_id: str
@@ -90,13 +98,28 @@ class BudgetReservation:
 
 
 @dataclass(frozen=True, slots=True)
+class BudgetSettlement:
+    """Final accounting that replaces exactly one active reservation."""
+
+    reservation_id: str
+    reserved: Money
+    actual: Money
+    released: Money
+    batch_id: str
+    day: date
+
+
+@dataclass(frozen=True, slots=True)
 class BudgetSnapshot:
+    """Read-only view used for status reporting; it does not reserve funds."""
+
     batch_id: str
     day: date
     batch_spent: Money
     daily_spent: Money
     batch_remaining: Money
     daily_remaining: Money
+    active_reservation_count: int
 
 
 class BudgetGuard:
@@ -130,6 +153,7 @@ class BudgetGuard:
         self._daily_spent = (
             initial_daily_spent.amount if initial_daily_spent is not None else Decimal("0")
         )
+        self._reservations: dict[str, BudgetReservation] = {}
         self._lock = Lock()
 
     def _roll_day(self) -> None:
@@ -169,22 +193,126 @@ class BudgetGuard:
                     )
             self._batch_spent += estimated_cost.amount
             self._daily_spent += estimated_cost.amount
-            return BudgetReservation(
+            reservation = BudgetReservation(
                 reservation_id=uuid4().hex,
                 amount=estimated_cost,
                 batch_id=self._batch_id,
                 day=self._day,
             )
+            self._reservations[reservation.reservation_id] = reservation
+            return reservation
+
+    def settle(
+        self,
+        reservation: BudgetReservation,
+        actual_cost: Money,
+    ) -> BudgetSettlement:
+        """Replace a preflight reservation with a usage-based cost.
+
+        The actual cost is accounted even when it exceeds the reservation.  In
+        that case this method raises ``BudgetExceeded`` after updating the
+        counters, so callers can fail closed without allowing later requests to
+        spend against stale optimistic totals.
+        """
+
+        self._check_currency(actual_cost)
+        with self._lock:
+            self._roll_day()
+            active = self._reservations.pop(reservation.reservation_id, None)
+            if active != reservation:
+                raise ValueError("budget reservation is unknown, stale, or already settled")
+
+            if reservation.day == self._day:
+                self._daily_spent = max(
+                    Decimal("0"), self._daily_spent - reservation.amount.amount
+                )
+                if reservation.batch_id == self._batch_id:
+                    self._batch_spent = max(
+                        Decimal("0"), self._batch_spent - reservation.amount.amount
+                    )
+
+            self._daily_spent += actual_cost.amount
+            if reservation.batch_id == self._batch_id:
+                self._batch_spent += actual_cost.amount
+
+            settlement = BudgetSettlement(
+                reservation_id=reservation.reservation_id,
+                reserved=reservation.amount,
+                actual=actual_cost,
+                released=self._money(
+                    max(Decimal("0"), reservation.amount.amount - actual_cost.amount)
+                ),
+                batch_id=reservation.batch_id,
+                day=reservation.day,
+            )
+
+            checks = (
+                ("reservation", Decimal("0"), reservation.amount),
+                ("per_request", Decimal("0"), self.limits.per_request),
+                ("per_batch", Decimal("0"), self.limits.per_batch),
+                ("per_day", Decimal("0"), self.limits.per_day),
+            )
+            actuals = (
+                actual_cost.amount,
+                actual_cost.amount,
+                self._batch_spent,
+                self._daily_spent,
+            )
+            for (scope, spent, limit), actual in zip(checks, actuals, strict=True):
+                if actual > limit.amount:
+                    raise BudgetExceeded(
+                        scope,
+                        requested=self._money(actual),
+                        spent=self._money(spent),
+                        limit=limit,
+                    )
+            return settlement
+
+    def release(self, reservation: BudgetReservation) -> BudgetSettlement:
+        """Release a reservation only when no billable network attempt occurred."""
+
+        with self._lock:
+            self._roll_day()
+            active = self._reservations.pop(reservation.reservation_id, None)
+            if active != reservation:
+                raise ValueError("budget reservation is unknown, stale, or already settled")
+            if reservation.day == self._day:
+                self._daily_spent = max(
+                    Decimal("0"), self._daily_spent - reservation.amount.amount
+                )
+                if reservation.batch_id == self._batch_id:
+                    self._batch_spent = max(
+                        Decimal("0"), self._batch_spent - reservation.amount.amount
+                    )
+            return BudgetSettlement(
+                reservation_id=reservation.reservation_id,
+                reserved=reservation.amount,
+                actual=self._money(Decimal("0")),
+                released=reservation.amount,
+                batch_id=reservation.batch_id,
+                day=reservation.day,
+            )
+
+    def settle_unknown(self, reservation: BudgetReservation) -> BudgetSettlement:
+        """Conservatively charge the full reservation when billing is unknown."""
+
+        return self.settle(reservation, reservation.amount)
 
     def begin_batch(self, batch_id: str) -> None:
+        """Start a new batch only after every prior reservation is finalized."""
+
         if not batch_id.strip():
             raise ValueError("batch_id is required")
         with self._lock:
             self._roll_day()
+            if self._reservations:
+                raise RuntimeError("cannot begin a new batch with active budget reservations")
             self._batch_id = batch_id
             self._batch_spent = Decimal("0")
 
     def snapshot(self) -> BudgetSnapshot:
+        """Return counters under the same lock used by reserve and settle."""
+
         with self._lock:
             self._roll_day()
             return BudgetSnapshot(
@@ -198,4 +326,5 @@ class BudgetGuard:
                 daily_remaining=self._money(
                     max(Decimal("0"), self.limits.per_day.amount - self._daily_spent)
                 ),
+                active_reservation_count=len(self._reservations),
             )

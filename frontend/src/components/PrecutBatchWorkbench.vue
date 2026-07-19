@@ -20,8 +20,8 @@
 
     <form class="precut-intake" @submit.prevent="submitBatch">
       <label>
-        <span>目标账号</span>
-        <input v-model="accountId" name="account_id" aria-label="目标账号" />
+        <span>研究匹配账号</span>
+        <input v-model="accountId" name="account_id" aria-label="研究匹配账号" />
       </label>
       <label>
         <span>批次名称</span>
@@ -40,7 +40,7 @@
     <div v-if="detail" class="precut-batch-status" aria-live="polite">
       <div class="precut-batch-head">
         <div>
-          <span class="meta">{{ detail.batch.account_id || "main" }} · {{ detail.contract_version || "precut_batch.v1" }}</span>
+          <span class="meta">研究匹配 {{ detail.batch.account_id || "main" }} · {{ detail.contract_version || "precut_batch.v1" }}</span>
           <strong>{{ detail.batch.title || detail.batch_id }}</strong>
         </div>
         <div class="toolbar-actions">

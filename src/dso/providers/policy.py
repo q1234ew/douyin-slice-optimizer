@@ -69,13 +69,18 @@ class DataPermission:
     authorization_basis: str = ""
     allowed_upload_levels: frozenset[UploadLevel] = field(default_factory=frozenset)
     redaction_strategy: str = ""
-    retention_days: int = 0
+    retention_days: int | None = None
+    retention_policy_reference: str = ""
 
     def __post_init__(self) -> None:
         levels = frozenset(UploadLevel(level) for level in self.allowed_upload_levels)
         object.__setattr__(self, "allowed_upload_levels", levels)
-        if self.retention_days < 0:
-            raise ValueError("retention_days must be non-negative")
+        if self.retention_days is not None and (
+            isinstance(self.retention_days, bool)
+            or not isinstance(self.retention_days, int)
+            or self.retention_days < 0
+        ):
+            raise ValueError("retention_days must be a non-negative integer or None")
         if not self.may_leave_local:
             if levels:
                 raise ValueError("upload levels cannot be allowed while may_leave_local is false")
@@ -86,6 +91,10 @@ class DataPermission:
             raise ValueError("at least one explicit upload level is required")
         if not self.redaction_strategy.strip():
             raise ValueError("redaction_strategy is required when data may leave local")
+        if not self.retention_policy_reference.strip():
+            raise ValueError(
+                "retention_policy_reference is required when data may leave local"
+            )
 
     def permits(self, upload_level: UploadLevel) -> bool:
         return self.may_leave_local and UploadLevel(upload_level) in self.allowed_upload_levels

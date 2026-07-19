@@ -76,13 +76,21 @@ class PublicModelProviderContractTests(unittest.TestCase):
                 redaction_strategy="representative_frames_only",
                 retention_days=0,
             )
-        with self.assertRaisesRegex(ValueError, "retention_days"):
+        with self.assertRaisesRegex(ValueError, "retention_policy_reference"):
             ProviderDataPermissionRecord(
                 allowed_to_leave_local=True,
                 authorization_basis="owner_authorized",
                 redaction_strategy="representative_frames_only",
                 retention_days=None,
             )
+        policy_only = ProviderDataPermissionRecord(
+            allowed_to_leave_local=True,
+            authorization_basis="owner_authorized",
+            redaction_strategy="representative_frames_only",
+            retention_days=None,
+            retention_policy_reference="https://provider.example/retention-policy",
+        )
+        self.assertIsNone(policy_only.retention_days)
 
     def test_request_rejects_wrong_contract_hash_and_non_json_payload(self) -> None:
         with self.assertRaisesRegex(ValueError, "contract_version"):

@@ -1,3 +1,10 @@
+"""Research-only Omni reranking layered over the shared deterministic ranker.
+
+The model may add bounded evidence for preselected candidates, but it never
+changes candidate boundaries, writes manual Gold, or silently replaces the
+``current_rules`` fallback used by G1 and G2.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +17,7 @@ from dso.db.session import connect, fetch_all
 from dso.learning.qwen_omni import QWEN_OMNI_MODEL, QwenOmniClient, qwen_omni_status
 from dso.media.ffmpeg import require_binary
 from dso.scoring.scorer import score_video, suggestions
+from dso.scheduler.media import register_prepared_media
 from dso.segments.generator import generate_segments
 from dso.utils import clamp, read_json, run_cmd, utc_now, write_json
 from dso.versions import HYBRID_SLICE_PIPELINE_VERSION, OMNI_SLICE_RANKER_VERSION
@@ -18,6 +26,80 @@ from dso.versions import HYBRID_SLICE_PIPELINE_VERSION, OMNI_SLICE_RANKER_VERSIO
 DEFAULT_CANDIDATE_LIMIT = 3
 DEFAULT_MAX_CLIP_SECONDS = 6.0
 DEFAULT_OMNI_WEIGHT = 0.15
+
+
+def omni_rerank_input_snapshot(
+    video_id: str,
+    *,
+    candidate_limit: int = DEFAULT_CANDIDATE_LIMIT,
+    max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS,
+    omni_weight: float = DEFAULT_OMNI_WEIGHT,
+) -> dict:
+    """Return a stable, path-free snapshot used by scheduler fencing checks."""
+
+    rows = _scored_candidate_rows(video_id)
+    selected_limit = max(1, min(20, int(candidate_limit or DEFAULT_CANDIDATE_LIMIT)))
+    clip_limit = max(4.0, min(15.0, float(max_clip_seconds or DEFAULT_MAX_CLIP_SECONDS)))
+    weight_limit = max(0.0, min(0.30, float(omni_weight or 0.0)))
+    selected = rows[:selected_limit]
+    candidates = []
+    window_items = []
+    estimated_window_count = 0
+    for row in selected:
+        windows = candidate_window_plan(row, max_clip_seconds=clip_limit)
+        estimated_window_count += len(windows)
+        candidates.append(
+            {
+                "segment_id": str(row.get("id") or ""),
+                "source_video_id": str(row.get("source_video_id") or video_id),
+                "source_content_hash": str(row.get("source_content_hash") or ""),
+                "source_signature": _source_signature(Path(str(row.get("file_path") or ""))),
+                "start_time": float(row.get("start_time") or 0.0),
+                "end_time": float(row.get("end_time") or 0.0),
+                "transcript_sha256": hashlib.sha256(str(row.get("transcript") or "").encode("utf-8")).hexdigest(),
+                "final_score": round(float(row.get("final_score") or 0.0), 6),
+                "window_roles": [str(window.get("window") or "") for window in windows],
+            }
+        )
+        for window in windows:
+            item_payload = {
+                "video_id": video_id,
+                "segment_id": str(row.get("id") or ""),
+                "source_content_hash": str(row.get("source_content_hash") or ""),
+                "source_signature": _source_signature(Path(str(row.get("file_path") or ""))),
+                "candidate_start": float(row.get("start_time") or 0.0),
+                "candidate_end": float(row.get("end_time") or 0.0),
+                "window": window,
+                "max_clip_seconds": clip_limit,
+                "ranker_version": OMNI_SLICE_RANKER_VERSION,
+            }
+            window_items.append(
+                {
+                    "segment_id": str(row.get("id") or ""),
+                    "window_role": str(window.get("window") or ""),
+                    "window": window,
+                    "input_hash": hashlib.sha256(
+                        json.dumps(item_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    ).hexdigest(),
+                }
+            )
+    payload = {
+        "video_id": video_id,
+        "candidate_limit": selected_limit,
+        "max_clip_seconds": clip_limit,
+        "omni_weight": weight_limit,
+        "ranker_version": OMNI_SLICE_RANKER_VERSION,
+        "candidates": candidates,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "input_hash": hashlib.sha256(encoded).hexdigest(),
+        "account_id": str(rows[0].get("account_id") or "main") if rows else "main",
+        "candidate_count": len(selected),
+        "candidate_ids": [item["segment_id"] for item in candidates],
+        "estimated_window_count": estimated_window_count,
+        "window_items": window_items,
+    }
 
 
 def run_hybrid_slice_pipeline(
@@ -31,6 +113,8 @@ def run_hybrid_slice_pipeline(
     force: bool = False,
     client: QwenOmniClient | None = None,
 ) -> dict:
+    """Run recall and shared scoring before an optional bounded Omni rerank."""
+
     recall_count = max(30, int(candidate_limit or DEFAULT_CANDIDATE_LIMIT) * 4, int(top_k or 10) * 3)
     segments = generate_segments(video_id, top_k=recall_count)
     scores = score_video(video_id)
@@ -82,7 +166,15 @@ def rerank_video_candidates_with_omni(
     load_model: bool = False,
     force: bool = False,
     client: QwenOmniClient | None = None,
+    persist: bool = True,
 ) -> dict:
+    """Rerank only the preselection pool and preserve rule scores on any failure.
+
+    ``persist=False`` is the scheduler path: it returns an explicit commit
+    payload that must pass the later input-snapshot fence before database writes.
+    Model readiness or per-candidate failures never block the base ranking.
+    """
+
     rows = _scored_candidate_rows(video_id)
     if not rows:
         return _empty_report(video_id, "no_scored_candidates")
@@ -103,7 +195,8 @@ def rerank_video_candidates_with_omni(
 
     if not ready:
         reason = str(deployment.get("status") or "model_unavailable")
-        _persist_fallback(rows, status=f"fallback_{reason}", reason=reason)
+        if persist:
+            _persist_fallback(rows, status=f"fallback_{reason}", reason=reason)
         return {
             "contract_version": OMNI_SLICE_RANKER_VERSION,
             "status": "fallback",
@@ -148,6 +241,8 @@ def rerank_video_candidates_with_omni(
             status = "ready"
             analysis = result
         else:
+            # Missing, unselected, or invalid model evidence is abstention, not
+            # a zero score. The deterministic base score remains authoritative.
             hybrid_score = base_score
             omni_score = 0.0
             confidence = 0.0
@@ -169,10 +264,11 @@ def rerank_video_candidates_with_omni(
             }
         )
     ranked_rows.sort(key=lambda item: (item["hybrid_score"], item["base_score"]), reverse=True)
-    _persist_hybrid_results(ranked_rows)
+    if persist:
+        _persist_hybrid_results(ranked_rows)
     applied = sum(1 for item in ranked_rows if item["omni_status"] == "ready")
     cache_hits = sum(1 for item in results if item.get("cache_hit"))
-    return {
+    report = {
         "contract_version": OMNI_SLICE_RANKER_VERSION,
         "status": "ready" if applied else "fallback",
         "video_id": video_id,
@@ -190,9 +286,55 @@ def rerank_video_candidates_with_omni(
         "research_only": True,
         "generated_at": utc_now(),
     }
+    if not persist:
+        report["_commit_payload"] = {"ranked_rows": ranked_rows}
+    return report
+
+
+def commit_scheduled_omni_rerank(
+    report: dict,
+    *,
+    expected_input_hash: str,
+    candidate_limit: int = DEFAULT_CANDIDATE_LIMIT,
+    max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS,
+    omni_weight: float = DEFAULT_OMNI_WEIGHT,
+) -> dict:
+    """Commit a staged scheduler result only while its input snapshot matches."""
+
+    video_id = str(report.get("video_id") or "")
+    snapshot = omni_rerank_input_snapshot(
+        video_id,
+        candidate_limit=candidate_limit,
+        max_clip_seconds=max_clip_seconds,
+        omni_weight=omni_weight,
+    )
+    if snapshot["input_hash"] != expected_input_hash:
+        raise RuntimeError("input_changed: candidate pool changed before Omni result commit")
+    if report.get("status") == "ready":
+        commit_payload = report.get("_commit_payload") if isinstance(report.get("_commit_payload"), dict) else {}
+        ranked_rows = commit_payload.get("ranked_rows")
+        if not isinstance(ranked_rows, list) or not ranked_rows:
+            raise RuntimeError("schema_invalid: scheduled Omni result has no commit rows")
+        _persist_hybrid_results(ranked_rows)
+    return {
+        "contract_version": str(report.get("contract_version") or OMNI_SLICE_RANKER_VERSION),
+        "status": str(report.get("status") or "fallback"),
+        "video_id": video_id,
+        "model": str(report.get("model") or QWEN_OMNI_MODEL),
+        "preselected_count": int(report.get("preselected_count") or 0),
+        "omni_applied_count": int(report.get("omni_applied_count") or 0),
+        "cache_hit_count": int(report.get("cache_hit_count") or 0),
+        "fallback_reason": str(report.get("fallback_reason") or ""),
+        "production_weight": False,
+        "writes_manual_gold": False,
+        "adjusts_boundaries": False,
+        "generated_at": utc_now(),
+    }
 
 
 def candidate_window_plan(row: dict, *, max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS) -> list[dict]:
+    """Create non-overlapping hook/middle/payoff windows inside fixed boundaries."""
+
     duration = max(0.0, float(row.get("duration_seconds") or 0.0))
     candidate_start = max(0.0, float(row.get("start_time") or 0.0))
     clip = max(4.0, min(float(max_clip_seconds or DEFAULT_MAX_CLIP_SECONDS), max(4.0, duration)))
@@ -218,6 +360,207 @@ def candidate_window_plan(row: dict, *, max_clip_seconds: float = DEFAULT_MAX_CL
     return plan
 
 
+def analyze_scheduled_omni_window(
+    video_id: str,
+    segment_id: str,
+    requested_window: dict,
+    *,
+    max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS,
+    force: bool = False,
+    client: QwenOmniClient | None = None,
+) -> dict:
+    """Execute exactly one scheduler-owned candidate window without DB writes."""
+
+    rows = _scored_candidate_rows(video_id)
+    row = next((item for item in rows if str(item.get("id") or "") == str(segment_id)), None)
+    if row is None:
+        raise KeyError(f"segment not found: {segment_id}")
+    clip_limit = max(4.0, min(15.0, float(max_clip_seconds or DEFAULT_MAX_CLIP_SECONDS)))
+    plan = candidate_window_plan(row, max_clip_seconds=clip_limit)
+    role = str(requested_window.get("window") or "")
+    window = next(
+        (
+            item
+            for item in plan
+            if str(item.get("window") or "") == role
+            and abs(float(item.get("absolute_start_seconds") or 0.0) - float(requested_window.get("absolute_start_seconds") or 0.0)) < 0.01
+            and abs(float(item.get("duration_seconds") or 0.0) - float(requested_window.get("duration_seconds") or 0.0)) < 0.01
+        ),
+        None,
+    )
+    if window is None:
+        raise RuntimeError("input_changed: candidate window plan changed before execution")
+    client = client or QwenOmniClient(timeout_seconds=90.0)
+    deployment = qwen_omni_status(client=client)
+    if deployment.get("status") != "ready":
+        raise RuntimeError(f"model_unavailable: Omni runtime is {deployment.get('status') or 'unknown'}")
+
+    cache_path = _scheduled_window_result_cache_path(row, window, model_id=getattr(client, "model_id", QWEN_OMNI_MODEL))
+    if cache_path.is_file() and not force:
+        cached = read_json(cache_path, default={}) or {}
+        if cached.get("status") == "ready":
+            return {**cached, "cache_hit": True}
+    clip_path, media = _prepare_candidate_window(row, window)
+    payload = _window_payload(row, window, model_id=getattr(client, "model_id", QWEN_OMNI_MODEL))
+    raw = client.analyze_clip_file(payload, clip_path)
+    normalized = _normalize_window_result(raw, role=role or "middle")
+    result = {
+        "contract_version": OMNI_SLICE_RANKER_VERSION,
+        "status": "ready",
+        "video_id": video_id,
+        "segment_id": str(segment_id),
+        "window_role": role,
+        "window": window,
+        "media": media,
+        **normalized,
+        "raw": raw,
+        "cache_hit": False,
+        "generated_at": utc_now(),
+    }
+    write_json(cache_path, result)
+    return result
+
+
+def prepare_scheduled_omni_window(
+    video_id: str,
+    segment_id: str,
+    requested_window: dict,
+    *,
+    max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS,
+) -> dict:
+    """Prepare one Omni media artifact in the CPU/IO preparation pool."""
+
+    rows = _scored_candidate_rows(video_id)
+    row = next((item for item in rows if str(item.get("id") or "") == str(segment_id)), None)
+    if row is None:
+        raise KeyError(f"segment not found: {segment_id}")
+    clip_limit = max(4.0, min(15.0, float(max_clip_seconds or DEFAULT_MAX_CLIP_SECONDS)))
+    plan = candidate_window_plan(row, max_clip_seconds=clip_limit)
+    role = str(requested_window.get("window") or "")
+    window = next(
+        (
+            item
+            for item in plan
+            if str(item.get("window") or "") == role
+            and abs(float(item.get("absolute_start_seconds") or 0.0) - float(requested_window.get("absolute_start_seconds") or 0.0)) < 0.01
+        ),
+        None,
+    )
+    if window is None:
+        raise RuntimeError("input_changed: candidate window plan changed before preparation")
+    clip_path, media = _prepare_candidate_window(row, window)
+    return {
+        "status": "ready",
+        "segment_id": segment_id,
+        "window_role": role,
+        "clip_size": int(clip_path.stat().st_size),
+        "prepared_media": media.get("prepared_media") or {},
+    }
+
+
+def commit_scheduled_omni_windows(
+    video_id: str,
+    item_results: list[dict],
+    *,
+    expected_input_hash: str,
+    candidate_limit: int = DEFAULT_CANDIDATE_LIMIT,
+    max_clip_seconds: float = DEFAULT_MAX_CLIP_SECONDS,
+    omni_weight: float = DEFAULT_OMNI_WEIGHT,
+) -> dict:
+    """Aggregate independently dispatched windows and commit once under fencing."""
+
+    selected_limit = max(1, min(20, int(candidate_limit or DEFAULT_CANDIDATE_LIMIT)))
+    clip_limit = max(4.0, min(15.0, float(max_clip_seconds or DEFAULT_MAX_CLIP_SECONDS)))
+    max_weight = max(0.0, min(0.30, float(omni_weight or 0.0)))
+    snapshot = omni_rerank_input_snapshot(
+        video_id,
+        candidate_limit=selected_limit,
+        max_clip_seconds=clip_limit,
+        omni_weight=max_weight,
+    )
+    if snapshot["input_hash"] != expected_input_hash:
+        raise RuntimeError("input_changed: candidate pool changed before Omni result commit")
+    rows = _scored_candidate_rows(video_id)
+    selected_ids = set(snapshot.get("candidate_ids") or [])
+    by_segment: dict[str, list[dict]] = {}
+    failed_items = 0
+    cache_hits = 0
+    for item in item_results:
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        if result.get("status") != "ready":
+            failed_items += 1
+            continue
+        segment_id = str(result.get("segment_id") or "")
+        if segment_id not in selected_ids:
+            raise RuntimeError("input_changed: scheduled Omni result references a different candidate")
+        by_segment.setdefault(segment_id, []).append(result)
+        cache_hits += int(bool(result.get("cache_hit")))
+
+    candidate_results: dict[str, dict] = {}
+    for row in rows:
+        segment_id = str(row.get("id") or "")
+        windows = by_segment.get(segment_id) or []
+        if not windows:
+            continue
+        windows.sort(key=lambda value: ("hook", "middle", "payoff").index(str(value.get("window_role") or "middle")) if str(value.get("window_role") or "middle") in {"hook", "middle", "payoff"} else 9)
+        omni_score, confidence = _aggregate_window_results(windows)
+        base_score = _base_score(row)
+        effective_weight = max_weight * confidence
+        candidate_results[segment_id] = {
+            "contract_version": OMNI_SLICE_RANKER_VERSION,
+            "status": "ready",
+            "segment_id": segment_id,
+            "model": QWEN_OMNI_MODEL,
+            "base_score": round(base_score, 2),
+            "omni_score": round(omni_score, 2),
+            "confidence": round(confidence, 4),
+            "effective_weight": round(effective_weight, 4),
+            "hybrid_score": round(clamp(base_score * (1.0 - effective_weight) + omni_score * effective_weight), 2),
+            "window_count": len(windows),
+            "window_roles": [str(value.get("window_role") or "") for value in windows],
+            "windows": windows,
+            "boundary_advice": _boundary_advice(windows),
+            "writes_labels": False,
+            "adjusts_boundaries": False,
+            "generated_at": utc_now(),
+        }
+
+    ranked_rows: list[dict] = []
+    for row in rows:
+        segment_id = str(row.get("id") or "")
+        base_score = _base_score(row)
+        analysis = candidate_results.get(segment_id)
+        ranked_rows.append(
+            {
+                "segment_id": segment_id,
+                "base_score": base_score,
+                "hybrid_score": round(float((analysis or {}).get("hybrid_score") or base_score), 2),
+                "omni_score": round(float((analysis or {}).get("omni_score") or 0.0), 2),
+                "confidence": round(float((analysis or {}).get("confidence") or 0.0), 4),
+                "omni_status": "ready" if analysis else ("error" if segment_id in selected_ids else "not_selected"),
+                "analysis": analysis or {"status": "not_selected" if segment_id not in selected_ids else "error"},
+            }
+        )
+    ranked_rows.sort(key=lambda item: (item["hybrid_score"], item["base_score"]), reverse=True)
+    if candidate_results:
+        _persist_hybrid_results(ranked_rows)
+    return {
+        "contract_version": OMNI_SLICE_RANKER_VERSION,
+        "status": "ready" if candidate_results else "fallback",
+        "video_id": video_id,
+        "model": QWEN_OMNI_MODEL,
+        "preselected_count": len(selected_ids),
+        "omni_applied_count": len(candidate_results),
+        "completed_window_count": sum(len(value) for value in by_segment.values()),
+        "failed_window_count": failed_items,
+        "cache_hit_count": cache_hits,
+        "production_weight": False,
+        "writes_manual_gold": False,
+        "adjusts_boundaries": False,
+        "generated_at": utc_now(),
+    }
+
+
 def _analyze_candidate_multi_window(
     row: dict,
     *,
@@ -226,6 +569,8 @@ def _analyze_candidate_multi_window(
     max_weight: float,
     force: bool,
 ) -> dict:
+    """Aggregate window evidence with confidence-scaled, capped model influence."""
+
     cache_path = _result_cache_path(row, model_id=getattr(client, "model_id", QWEN_OMNI_MODEL), max_clip_seconds=max_clip_seconds)
     if cache_path.exists() and not force:
         cached = read_json(cache_path, default={}) or {}
@@ -243,6 +588,8 @@ def _analyze_candidate_multi_window(
         raise RuntimeError("no_candidate_windows")
     omni_score, confidence = _aggregate_window_results(window_results)
     base_score = _base_score(row)
+    # Low-confidence model output should converge to the deterministic baseline;
+    # even full confidence cannot exceed the configured research weight cap.
     effective_weight = max_weight * confidence
     hybrid_score = clamp(base_score * (1.0 - effective_weight) + omni_score * effective_weight)
     result = {
@@ -318,6 +665,14 @@ def _prepare_candidate_window(row: dict, window: dict) -> tuple[Path, dict]:
             stderr = str(getattr(exc, "stderr", "") or "")
             detail = stderr.strip().splitlines()[-1] if stderr.strip() else str(exc)
             raise RuntimeError(f"omni_window_transcode_failed: {detail}") from exc
+    prepared = register_prepared_media(
+        source_content_key=_source_signature(source),
+        profile="omni_slice_640p_2fps_mono16k.v1",
+        artifacts=[cache_path],
+        start_seconds=float(window.get("absolute_start_seconds") or 0.0),
+        duration_seconds=float(window.get("duration_seconds") or 0.0),
+        metadata={"window_role": str(window.get("window") or "")},
+    )
     return cache_path, {
         "clip_path": str(cache_path),
         "source_path": str(source),
@@ -325,6 +680,7 @@ def _prepare_candidate_window(row: dict, window: dict) -> tuple[Path, dict]:
         "window": window.get("window") or "",
         "absolute_start_seconds": window.get("absolute_start_seconds") or 0,
         "duration_seconds": window.get("duration_seconds") or 0,
+        "prepared_media": prepared,
     }
 
 
@@ -614,6 +970,23 @@ def _window_cache_path(row: dict, window: dict, source: Path) -> Path:
     )
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
     return ensure_data_dirs().cache_dir / "omni_slice_windows" / str(row.get("source_video_id") or "video") / f"{digest}.mp4"
+
+
+def _scheduled_window_result_cache_path(row: dict, window: dict, *, model_id: str) -> Path:
+    source = Path(str(row.get("file_path") or ""))
+    raw = "|".join(
+        [
+            _source_signature(source),
+            str(row.get("id") or ""),
+            str(window.get("absolute_start_seconds") or 0),
+            str(window.get("duration_seconds") or 0),
+            str(window.get("window") or ""),
+            str(model_id),
+            OMNI_SLICE_RANKER_VERSION,
+        ]
+    )
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return ensure_data_dirs().cache_dir / "model_scheduler" / "omni_windows" / str(row.get("source_video_id") or "video") / f"{digest}.json"
 
 
 def _source_signature(path: Path) -> str:

@@ -66,7 +66,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(asset_response.status_code, 200)
         self.assertIn("javascript", asset_response.headers["content-type"])
         self.assertIn("研究学习", asset_response.text)
-        self.assertIn("样本与标注、评测校准、平台连接和模型环境", asset_response.text)
+        self.assertIn("研究样本与发布账号隔离管理、评测校准和模型环境", asset_response.text)
         self.assertIn("semantic-calibration-queue", asset_response.text)
         self.assertIn("memory-build-btn", asset_response.text)
         self.assertIn("backtest-btn", asset_response.text)
@@ -75,6 +75,8 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("素材审核", asset_response.text)
         self.assertIn("保存并进入下一条", asset_response.text)
         self.assertIn("calibration-mode-tabs", asset_response.text)
+        self.assertIn("模型 API", asset_response.text)
+        self.assertIn("安全保存（不调用模型）", asset_response.text)
 
     def test_static_dashboard_directory_serves_index(self) -> None:
         response = self.client.get("/static/dashboard/")
@@ -354,6 +356,109 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(mapped["mapped_row"]["views"], "100")
         self.assertIn("mock", mapped["contract"]["sample_sources"])
         self.assertEqual(mappings["count"], 1)
+
+    def test_ambiguous_visible_count_is_not_mapped_to_views(self) -> None:
+        payload = self.client.post(
+            "/platform/mock-map",
+            json={
+                "platform": "douyin",
+                "sample_source": "csv",
+                "aweme_id": "aweme_ambiguous_count",
+                "best_visible_count_number": "12.4万",
+            },
+        ).json()
+
+        mapped = payload["mapped_row"]
+        self.assertNotIn("views", mapped)
+        self.assertEqual(mapped["metric_semantics"], "ambiguous_visible_count")
+        self.assertIn("ambiguous_visible_count_ignored", mapped["metric_warnings"])
+        self.assertIn("best_visible_count_number", payload["contract"]["rejected_ambiguous_view_aliases"])
+
+    def test_publishing_target_and_research_evidence_are_isolated(self) -> None:
+        segment = _insert_segment()
+        score_segment(segment["id"])
+        target = self.client.post(
+            "/platform/accounts",
+            json={
+                "platform": "douyin",
+                "account_id": "target_slot",
+                "account_role": "publishing_target",
+                "platform_account_id": "target-open-id",
+                "display_name": "目标发布账号",
+            },
+        ).json()
+        research = self.client.post(
+            "/platform/accounts",
+            json={
+                "platform": "douyin",
+                "account_id": "tianci",
+                "account_role": "research_source",
+                "display_name": "天赐研究账号",
+            },
+        ).json()
+        target_mapping = self.client.post(
+            "/platform/mappings",
+            json={
+                "account_id": "target_slot",
+                "platform": "douyin",
+                "platform_item_id": "target_item_000001",
+                "candidate_segment_id": segment["id"],
+            },
+        ).json()
+        research_mapping = self.client.post(
+            "/platform/mappings",
+            json={
+                "account_id": "tianci",
+                "platform": "douyin",
+                "platform_item_id": "research_item_0001",
+            },
+        ).json()
+
+        target_sync = self.client.post(
+            "/platform/douyin/sync",
+            json={
+                "account_id": "target_slot",
+                "source": "api",
+                "rows": [{
+                    "platform_item_id": "target_item_000001",
+                    "views": 1200,
+                    "impressions": 2200,
+                    "completion_rate": 0.62,
+                    "shares": 18,
+                }],
+            },
+        )
+        research_sync = self.client.post(
+            "/platform/douyin/sync",
+            json={
+                "account_id": "tianci",
+                "source": "api",
+                "rows": [{"platform_item_id": "research_item_0001", "views": 5000}],
+            },
+        )
+        target_summary = self.client.get("/platform/douyin/summary?account_id=target_slot").json()
+        research_summary = self.client.get("/platform/douyin/summary?account_id=tianci").json()
+        reassignment = self.client.post(
+            "/platform/mappings",
+            json={
+                "account_id": "tianci",
+                "platform": "douyin",
+                "platform_item_id": "target_item_000001",
+            },
+        )
+
+        self.assertEqual(target["account_role"], "publishing_target")
+        self.assertEqual(research["account_role"], "research_source")
+        self.assertEqual(target_mapping["evidence_scope"], "target_outcome")
+        self.assertEqual(research_mapping["evidence_scope"], "research_proxy")
+        self.assertEqual(target_sync.status_code, 200)
+        self.assertEqual(research_sync.status_code, 200)
+        self.assertEqual(target_summary["metrics"]["count"], 1)
+        self.assertEqual(research_summary["metrics"]["count"], 1)
+        self.assertEqual(target_summary["account_context"]["metric_summary"]["verified_target_outcome_items"], 1)
+        self.assertEqual(research_summary["account_context"]["metric_summary"]["verified_target_outcome_items"], 0)
+        self.assertTrue(target_summary["account_context"]["cold_start"])
+        self.assertEqual(reassignment.status_code, 400)
 
     def test_douyin_sync_api_imports_mock_feedback_for_mapped_item(self) -> None:
         segment = _insert_segment()

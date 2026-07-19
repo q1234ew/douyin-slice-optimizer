@@ -5,7 +5,7 @@ from pathlib import Path
 from dso.config import ensure_data_dirs
 from dso.features.asr import active_asr_backend
 from dso.features.asr_profile import ASR_PROFILE_MODELS
-from dso.features.asr_routing import asr_routing_plan
+from dso.features.asr_routing import asr_routing_plan, qwen3_asr_primary_policy
 from dso.features.whisper_cpp import (
     whisper_cpp_model,
     whisper_cpp_vad_enabled,
@@ -44,6 +44,8 @@ def asr_profile_plan() -> dict:
         "contract_version": ASR_PROFILE_PLAN_VERSION,
         "default_profile": "fast",
         "manual_verify_profile": "verify",
+        "program_primary": qwen3_asr_primary_policy({"input_mode": "program"}),
+        "whisper_profiles_role": "fallback_and_candidate_verify",
         "routing_strategy": asr_routing_plan(),
         "profiles": profiles,
         "profiles_by_name": {item["profile"]: item for item in profiles},

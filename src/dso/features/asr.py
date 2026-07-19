@@ -11,7 +11,7 @@ from pathlib import Path
 from dso.config import ensure_data_dirs
 from dso.db.session import connect
 from dso.features.asr_profile import normalize_asr_profile, resolve_asr_model_size
-from dso.features.asr_routing import route_video_asr
+from dso.features.asr_routing import qwen3_asr_primary_policy, route_video_asr
 from dso.features.qwen3_asr import (
     Qwen3ASRError,
     qwen3_asr_cache_config,
@@ -179,7 +179,16 @@ def transcribe_video(
     routing = route_video_asr(video, requested_profile=requested_profile, model_size=model_size)
     profile_name = routing["recommended_profile"]
     model_size = resolve_asr_model_size(model_size, profile=profile_name)
-    routing = {**routing, "recommended_model": model_size}
+    primary_policy = qwen3_asr_primary_policy(video)
+    requested_backend = (backend or os.getenv("DSO_ASR_BACKEND", "auto")).strip().lower() or "auto"
+    effective_backend = "qwen3_asr_preferred" if requested_backend == "auto" and primary_policy["eligible"] else backend
+    routing = {
+        **routing,
+        "recommended_model": model_size,
+        "primary": primary_policy,
+        "requested_backend": requested_backend,
+        "backend_preference": effective_backend or requested_backend,
+    }
     video_path = Path(video["file_path"])
     transcript_dir = settings.cache_dir / video_id / "transcript"
     transcript_dir.mkdir(parents=True, exist_ok=True)
@@ -203,7 +212,8 @@ def transcribe_video(
     else:
         audio_path = transcript_dir / "audio.wav"
         extract_audio(video_path, audio_path)
-        cache_key = _asr_cache_key(audio_path, model_size, profile_name, backend)
+        cache_key = _asr_cache_key(audio_path, model_size, profile_name, effective_backend)
+        previous_transcript = read_json(transcript_path, default=None)
         cached = _cached_transcript(transcript_path, cache_key, force=force)
         if cached:
             _mark_transcribed(transcript_path, video_id)
@@ -213,15 +223,37 @@ def transcribe_video(
             transcript_dir,
             model_size=model_size,
             asr_profile=profile_name,
-            backend=backend,
+            backend=effective_backend,
             routing_context=routing,
         )
         segments = result["segments"]
         source = result["source"]
         if not segments:
+            preserved = _preserve_previous_transcript(
+                previous_transcript,
+                cache_key=cache_key,
+                failed_source=source,
+                routing=routing,
+            )
+            if preserved:
+                _mark_transcribed(transcript_path, video_id)
+                return preserved
             segments = _placeholder_segments(float(video["duration_seconds"]))
             source = "placeholder"
-        metadata = {**result.get("metadata", {}), "cache_key": cache_key, "cache_hit": False}
+        selected_backend = source.split(":", 1)[0]
+        fallback_used = effective_backend == "qwen3_asr_preferred" and not source.startswith("qwen3_asr:")
+        routing = {
+            **routing,
+            "selected_backend": selected_backend,
+            "fallback_used": fallback_used,
+            "fallback_backend": selected_backend if fallback_used else "",
+        }
+        metadata = {
+            **result.get("metadata", {}),
+            "routing": routing,
+            "cache_key": cache_key,
+            "cache_hit": False,
+        }
 
     data = {
         "video_id": video_id,
@@ -233,6 +265,57 @@ def transcribe_video(
     write_json(transcript_path, data)
     _mark_transcribed(transcript_path, video_id)
     return data
+
+
+def _preserve_previous_transcript(
+    previous: object,
+    *,
+    cache_key: dict,
+    failed_source: str,
+    routing: dict,
+) -> dict | None:
+    if not isinstance(previous, dict):
+        return None
+    previous_segments = previous.get("segments")
+    previous_source = str(previous.get("source") or "")
+    previous_metadata = previous.get("metadata") if isinstance(previous.get("metadata"), dict) else {}
+    previous_key = previous_metadata.get("cache_key") if isinstance(previous_metadata.get("cache_key"), dict) else {}
+    same_audio = bool(previous_key.get("audio_sha256")) and (
+        previous_key.get("audio_sha256") == cache_key.get("audio_sha256")
+    )
+    if not same_audio or not isinstance(previous_segments, list) or not previous_segments:
+        return None
+    if not previous_source or previous_source == "placeholder":
+        return None
+
+    selected_backend = previous_source.split(":", 1)[0]
+    preferred_qwen = str(cache_key.get("backend_preference") or "") in {
+        "qwen3_asr_preferred",
+        "qwen3-asr-preferred",
+    }
+    preserved_routing = {
+        **routing,
+        "selected_backend": selected_backend,
+        "fallback_used": preferred_qwen and selected_backend != "qwen3_asr",
+        "fallback_backend": selected_backend if preferred_qwen and selected_backend != "qwen3_asr" else "",
+        "preserved_previous_transcript": True,
+        "failed_attempt_source": failed_source,
+    }
+    return {
+        **previous,
+        "cache_hit": True,
+        "metadata": {
+            **previous_metadata,
+            "cache_hit": True,
+            "stale_fallback": True,
+            "routing": preserved_routing,
+            "failed_attempt": {
+                "source": failed_source,
+                "cache_key": cache_key,
+                "created_at": utc_now(),
+            },
+        },
+    }
 
 
 def transcribe_audio_file(
@@ -278,6 +361,182 @@ def transcribe_audio_file(
     }
 
 
+def commit_scheduled_qwen3_asr(
+    video_id: str,
+    audio_path: Path,
+    item_results: list[dict],
+    *,
+    expected_audio_sha256: str,
+    config: dict,
+    role: str = "primary",
+) -> dict:
+    """Commit fenced per-chunk ASR results, or preserve/fallback safely."""
+
+    if not audio_path.is_file():
+        raise RuntimeError("input_missing: scheduled ASR audio artifact is missing")
+    if _file_sha256(audio_path) != expected_audio_sha256:
+        raise RuntimeError("input_changed: scheduled ASR audio changed before commit")
+    settings = ensure_data_dirs()
+    transcript_dir = settings.cache_dir / video_id / "transcript"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    chunk_results = [item.get("result") for item in item_results if isinstance(item.get("result"), dict)]
+    failed_chunks = sum(
+        1
+        for item in item_results
+        if item.get("item_status") == "failed"
+        or not isinstance(item.get("result"), dict)
+        or (item.get("result") or {}).get("status") == "failed"
+    )
+    qwen_segments = []
+    diagnostics = []
+    for result in chunk_results:
+        qwen_segments.extend(result.get("segments") or [])
+        if isinstance(result.get("diagnostics"), dict):
+            diagnostics.append({"chunk_index": result.get("chunk_index"), **result["diagnostics"]})
+
+    fallback_used = False
+    fallback_source = ""
+    if failed_chunks or not qwen_segments:
+        if role == "shadow":
+            return {
+                "contract_version": "model_scheduler_asr.v1",
+                "status": "failed",
+                "video_id": video_id,
+                "source": "qwen3_asr_failed",
+                "segment_count": 0,
+                "completed_chunk_count": len(item_results) - failed_chunks,
+                "failed_chunk_count": failed_chunks,
+                "fallback_used": False,
+                "role": "shadow",
+                "active_transcript_preserved": True,
+                "writes_manual_gold": False,
+                "adjusts_boundaries": False,
+            }
+        fallback = transcribe_audio_file(
+            audio_path,
+            transcript_dir,
+            asr_profile="quality",
+            backend="whisper_cpp",
+            routing_context={
+                "contract_version": "model_scheduler_asr.v1",
+                "scope": "scheduled_fallback",
+                "decision": "qwen3_asr_failed_whisper_fallback",
+                "candidate_only": False,
+                "preserve_quality_result": True,
+            },
+        )
+        if fallback.get("segments"):
+            segments = list(fallback["segments"])
+            source = str(fallback.get("source") or "whisper_cpp")
+            metadata = dict(fallback.get("metadata") or {})
+            fallback_used = True
+            fallback_source = source
+        else:
+            previous_path = transcript_dir / "transcript.json"
+            previous = read_json(previous_path, default={}) or {}
+            if previous.get("segments"):
+                return {
+                    "contract_version": "model_scheduler_asr.v1",
+                    "status": "degraded",
+                    "video_id": video_id,
+                    "source": str(previous.get("source") or "existing_transcript"),
+                    "segment_count": len(previous.get("segments") or []),
+                    "failed_chunk_count": failed_chunks,
+                    "fallback_used": False,
+                    "preserved_existing_transcript": True,
+                    "writes_manual_gold": False,
+                    "adjusts_boundaries": False,
+                }
+            return {
+                "contract_version": "model_scheduler_asr.v1",
+                "status": "failed",
+                "video_id": video_id,
+                "source": "missing",
+                "segment_count": 0,
+                "failed_chunk_count": failed_chunks,
+                "fallback_used": False,
+                "preserved_existing_transcript": False,
+                "writes_manual_gold": False,
+                "adjusts_boundaries": False,
+            }
+    else:
+        segments = post_process_segments(sorted(qwen_segments, key=lambda row: (float(row.get("start") or 0.0), float(row.get("end") or 0.0))))
+        source = f"qwen3_asr:{qwen3_asr_model().rsplit('/', 1)[-1]}"
+        degraded_chunks = sum(1 for result in chunk_results if result.get("status") == "degraded")
+        metadata = {
+            "backend": "qwen3_asr",
+            "profile": "quality",
+            "model_size": qwen3_asr_model(),
+            "postprocess_version": POSTPROCESS_VERSION,
+            "segment_count_raw": len(qwen_segments),
+            "segment_count_processed": len(segments),
+            "quality_status": "degraded" if degraded_chunks else "ready",
+            "chunks": diagnostics,
+            "config": config,
+            "routing": {
+                "contract_version": "model_scheduler_asr.v1",
+                "scope": "scheduled_program",
+                "decision": "qwen3_asr_scheduler",
+                "selected_backend": "qwen3_asr",
+                "fallback_used": False,
+            },
+        }
+    metadata = {
+        **metadata,
+        "cache_key": {
+            "backend_preference": "qwen3_asr_preferred",
+            "audio_sha256": expected_audio_sha256,
+            "qwen3_asr": config,
+            "postprocess_version": POSTPROCESS_VERSION,
+        },
+        "model_scheduler": {"contract_version": "model_scheduler.v1", "role": role},
+    }
+    transcript = {
+        "video_id": video_id,
+        "source": source,
+        "segments": segments,
+        "metadata": metadata,
+        "created_at": utc_now(),
+    }
+    if role == "shadow":
+        root = transcript_dir / "shadow" / "qwen3_asr"
+        target = root / "transcript.json"
+        write_json(target, {**transcript, "role": "shadow", "auto_promote": False})
+        write_json(
+            root / "status.json",
+            {
+                "contract_version": "model_scheduler_asr.v1",
+                "video_id": video_id,
+                "status": "degraded" if failed_chunks or fallback_used else "ready",
+                "role": "shadow",
+                "source": source,
+                "segment_count": len(segments),
+                "active_transcript_preserved": True,
+                "auto_promote": False,
+                "updated_at": utc_now(),
+            },
+        )
+    else:
+        target = transcript_dir / "transcript.json"
+        write_json(target, transcript)
+        _mark_transcribed(target, video_id)
+    return {
+        "contract_version": "model_scheduler_asr.v1",
+        "status": "degraded" if failed_chunks or fallback_used or metadata.get("quality_status") == "degraded" else "ready",
+        "video_id": video_id,
+        "source": source,
+        "segment_count": len(segments),
+        "completed_chunk_count": len(item_results) - failed_chunks,
+        "failed_chunk_count": failed_chunks,
+        "fallback_used": fallback_used,
+        "fallback_source": fallback_source,
+        "role": role,
+        "active_transcript_preserved": role == "shadow",
+        "writes_manual_gold": False,
+        "adjusts_boundaries": False,
+    }
+
+
 def active_asr_backend(
     backend: str | None = None,
     *,
@@ -304,6 +563,16 @@ def active_asr_backend(
         if health.get("status") == "available":
             return "qwen3_asr_unloaded"
         return "missing_qwen3_asr"
+    if requested in {"qwen3_asr_preferred", "qwen3-asr-preferred"}:
+        health = qwen3_asr_health()
+        model = health.get("model") if isinstance(health.get("model"), dict) else {}
+        if model.get("loaded"):
+            return "qwen3_asr"
+        if whisper_cpp_ready(model_size):
+            return "whisper_cpp_fallback"
+        if importlib.util.find_spec("faster_whisper") is not None:
+            return "faster_whisper_fallback"
+        return "missing_preferred_asr"
     return f"unknown:{requested}"
 
 
@@ -346,6 +615,15 @@ def _try_configured_asr(
         return _try_faster_whisper(audio_path, model_size)
     if backend in {"qwen3_asr", "qwen3-asr", "qwen_asr", "qwen-asr"}:
         return _try_qwen3_asr(audio_path, transcript_dir)
+    if backend in {"qwen3_asr_preferred", "qwen3-asr-preferred"}:
+        segments, source = _try_qwen3_asr(audio_path, transcript_dir)
+        if segments:
+            return segments, source
+        if whisper_cpp_ready(model_size):
+            fallback_segments, fallback_source = _try_whisper_cpp(audio_path, transcript_dir, model_size)
+            if fallback_segments:
+                return fallback_segments, fallback_source
+        return _try_faster_whisper(audio_path, model_size)
     return [], f"unknown_asr_backend:{backend}"
 
 
@@ -465,7 +743,14 @@ def _asr_cache_key(audio_path: Path, model_size: str, profile_name: str, backend
         "prompt": asr_prompt(),
         "postprocess_version": POSTPROCESS_VERSION,
     }
-    if backend_preference in {"qwen3_asr", "qwen3-asr", "qwen_asr", "qwen-asr"}:
+    if backend_preference in {
+        "qwen3_asr",
+        "qwen3-asr",
+        "qwen_asr",
+        "qwen-asr",
+        "qwen3_asr_preferred",
+        "qwen3-asr-preferred",
+    }:
         cache_key["qwen3_asr"] = qwen3_asr_cache_config()
     return cache_key
 
@@ -477,8 +762,20 @@ def _cached_transcript(transcript_path: Path, cache_key: dict, *, force: bool) -
     if not isinstance(data, dict):
         return None
     metadata = data.get("metadata") or {}
-    if metadata.get("cache_key") != cache_key:
-        return None
+    stored_key = metadata.get("cache_key")
+    if stored_key != cache_key:
+        preferred = str(cache_key.get("backend_preference") or "") in {
+            "qwen3_asr_preferred",
+            "qwen3-asr-preferred",
+        }
+        if not preferred or not str(data.get("source") or "").startswith("qwen3_asr:"):
+            return None
+        old_key = dict(stored_key or {})
+        new_key = dict(cache_key)
+        old_key.pop("active_backend", None)
+        new_key.pop("active_backend", None)
+        if old_key != new_key:
+            return None
     data["metadata"] = {**metadata, "cache_hit": True}
     data["cache_hit"] = True
     return data

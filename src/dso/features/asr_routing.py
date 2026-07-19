@@ -1,3 +1,5 @@
+"""Deterministic ASR routing with explicit primary, shadow, and fallback roles."""
+
 from __future__ import annotations
 
 import os
@@ -5,7 +7,7 @@ import re
 from typing import Any
 
 from dso.features.asr_profile import ASR_PROFILE_MODELS, normalize_asr_profile, resolve_asr_model_size
-from dso.versions import ASR_MODEL_ROUTING_VERSION
+from dso.versions import ASR_MODEL_ROUTING_VERSION, QWEN3_ASR_SHADOW_VERSION
 
 
 AUTO_PROFILE_ALIASES = {"auto", "route", "routed", "smart", "strategy"}
@@ -98,7 +100,55 @@ REASON_LABELS = {
     "english_music_context": "英文歌手/歌名/英文介绍场景，优先保留 quality/small 结果",
     "default_candidate_quality": "候选默认保持 quality/small 作为发布前字幕基线",
     "keep_current": "当前 ASR 信号稳定，保留现有结果",
+    "music_variety_qwen3_shadow": "音乐综艺完整节目优先生成 Qwen3-ASR Shadow 转写",
 }
+
+
+def qwen3_asr_shadow_policy(video: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Describe comparison-only Qwen3-ASR execution that cannot replace transcript."""
+
+    video = video or {}
+    enabled = os.getenv("DSO_QWEN3_ASR_SHADOW", "1").strip().lower() not in {"0", "false", "no", "off"}
+    input_mode = str(video.get("input_mode") or "program").strip().lower() or "program"
+    eligible = enabled and input_mode == "program"
+    return {
+        "contract_version": QWEN3_ASR_SHADOW_VERSION,
+        "enabled": enabled,
+        "eligible": eligible,
+        "status": "available" if eligible else "disabled" if not enabled else "not_program_input",
+        "execution_mode": "shadow",
+        "preferred_backend": "qwen3_asr",
+        "fallback_backend": "whisper_cpp",
+        "artifact_role": "comparison_only",
+        "auto_promote": False,
+        "preserve_active_transcript": True,
+        "input_mode": input_mode,
+        "reason_keys": ["music_variety_qwen3_shadow"] if eligible else [],
+        "reasons": [REASON_LABELS["music_variety_qwen3_shadow"]] if eligible else [],
+    }
+
+
+def qwen3_asr_primary_policy(video: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Prefer Qwen3-ASR while retaining Whisper for unavailable/failed execution."""
+
+    video = video or {}
+    enabled = os.getenv("DSO_QWEN3_ASR_PRIMARY", "1").strip().lower() not in {"0", "false", "no", "off"}
+    input_mode = str(video.get("input_mode") or "program").strip().lower() or "program"
+    eligible = enabled and input_mode in {"program", "precut"}
+    return {
+        "contract_version": ASR_MODEL_ROUTING_VERSION,
+        "enabled": enabled,
+        "eligible": eligible,
+        "status": "primary" if eligible else "disabled" if not enabled else "unsupported_input_mode",
+        "execution_mode": "active_transcript",
+        "preferred_backend": "qwen3_asr",
+        "fallback_backend": "whisper_cpp",
+        "replace_whisper_when_ready": True,
+        "fallback_on_unavailable_or_failure": True,
+        "input_mode": input_mode,
+        "reason_keys": ["music_variety_qwen3_primary"] if eligible else [],
+        "reasons": ["音乐综艺优先使用 Qwen3-ASR，服务不可用或失败时回退 Whisper"] if eligible else [],
+    }
 
 
 def is_auto_asr_profile(profile: str | None) -> bool:
@@ -113,6 +163,15 @@ def route_video_asr(
     requested_profile: str | None = None,
     model_size: str | None = None,
 ) -> dict[str, Any]:
+    """Choose full-video transcription, quality rerun, verification, or no-op.
+
+    Explicit user profiles win. Automatic routing treats missing/unsafe evidence
+    as a reason to transcribe or verify, never as permission to overwrite a
+    stable transcript silently.
+    """
+
+    shadow = qwen3_asr_shadow_policy(video)
+    primary = qwen3_asr_primary_policy(video)
     manual_profile = _manual_profile(requested_profile)
     if manual_profile:
         return _route(
@@ -123,6 +182,8 @@ def route_video_asr(
             reason_keys=["manual_profile"],
             signals={"requested_profile": requested_profile or ""},
             candidate_only=False,
+            shadow=shadow,
+            primary=primary,
         )
 
     summary = transcript_summary or {}
@@ -142,6 +203,8 @@ def route_video_asr(
             reason_keys=["missing_transcript"],
             signals={"source": source, "status": (video or {}).get("status") or ""},
             candidate_only=False,
+            shadow=shadow,
+            primary=primary,
         )
 
     if quality_risk and (current_profile == "fast" or current_model in {"", "base"}):
@@ -158,6 +221,8 @@ def route_video_asr(
                 "issue_keys": sorted(issue_keys),
             },
             candidate_only=False,
+            shadow=shadow,
+            primary=primary,
         )
 
     if quality_risk:
@@ -174,6 +239,8 @@ def route_video_asr(
                 "issue_keys": sorted(issue_keys),
             },
             candidate_only=True,
+            shadow=shadow,
+            primary=primary,
         )
 
     return _route(
@@ -184,6 +251,8 @@ def route_video_asr(
         reason_keys=["keep_current"],
         signals={"source": source, "current_profile": current_profile, "current_model": current_model},
         candidate_only=False,
+        shadow=shadow,
+        primary=primary,
     )
 
 
@@ -195,6 +264,8 @@ def route_candidate_asr(
     requested_profile: str | None = None,
     model_size: str | None = None,
 ) -> dict[str, Any]:
+    """Choose candidate verification while preserving the quality transcript."""
+
     manual_profile = _manual_profile(requested_profile)
     signals = classify_candidate_asr_signals(segment, transcript_summary=transcript_summary, issues=issues)
     if manual_profile:
@@ -263,6 +334,8 @@ def classify_candidate_asr_signals(
     transcript_summary: dict[str, Any] | None = None,
     issues: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Return explainable rule signals; these are routing evidence, not labels."""
+
     text = _candidate_text(segment)
     compact = re.sub(r"\s+", "", text)
     cjk_count = sum(1 for char in compact if "\u4e00" <= char <= "\u9fff")
@@ -312,6 +385,8 @@ def classify_candidate_asr_signals(
 
 
 def asr_routing_plan() -> dict[str, Any]:
+    """Expose the versioned routing policy for UI, reports, and audits."""
+
     return {
         "contract_version": ASR_MODEL_ROUTING_VERSION,
         "auto_profile_aliases": sorted(AUTO_PROFILE_ALIASES),
@@ -319,7 +394,25 @@ def asr_routing_plan() -> dict[str, Any]:
         "default_candidate_profile": "quality",
         "verify_profile": "verify",
         "preserve_quality_for_english": True,
+        "full_program_primary": qwen3_asr_primary_policy({"input_mode": "program"}),
+        "full_program_shadow": qwen3_asr_shadow_policy({"input_mode": "program"}),
         "rules": [
+            {
+                "key": "music_variety_qwen3_primary",
+                "scope": "video",
+                "trigger": "音乐综艺 program/precut 且未显式指定其他后端",
+                "profile": "active",
+                "model": "Qwen/Qwen3-ASR-1.7B",
+                "action": "优先写主 transcript；服务不可用或失败时回退 Whisper",
+            },
+            {
+                "key": "music_variety_qwen3_shadow",
+                "scope": "video",
+                "trigger": "input_mode=program 的音乐综艺完整节目",
+                "profile": "shadow",
+                "model": "Qwen/Qwen3-ASR-1.7B",
+                "action": "写入独立 Shadow artifact；保留 Whisper 主转写和回退，不自动晋升",
+            },
             {
                 "key": "base_quality_risk",
                 "scope": "video",
@@ -358,10 +451,14 @@ def _route(
     signals: dict[str, Any],
     candidate_only: bool,
     preserve_quality_result: bool = False,
+    shadow: dict[str, Any] | None = None,
+    primary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build one stable routing decision without performing model inference."""
+
     resolved_profile = normalize_asr_profile(profile)
     resolved_model = model_size or resolve_asr_model_size(profile=resolved_profile)
-    return {
+    result = {
         "contract_version": ASR_MODEL_ROUTING_VERSION,
         "enabled": os.getenv("DSO_ASR_ROUTING", "1").strip().lower() not in {"0", "false", "no", "off"},
         "scope": scope,
@@ -374,6 +471,11 @@ def _route(
         "preserve_quality_result": preserve_quality_result,
         "signals": signals,
     }
+    if shadow is not None:
+        result["shadow"] = shadow
+    if primary is not None:
+        result["primary"] = primary
+    return result
 
 
 def _manual_profile(requested_profile: str | None) -> str | None:

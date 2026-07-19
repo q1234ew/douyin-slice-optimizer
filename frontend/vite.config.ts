@@ -13,6 +13,7 @@ export default defineConfig({
     proxy: {
       "/stats": "http://127.0.0.1:8000",
       "/runtime": "http://127.0.0.1:8000",
+      "/providers": "http://127.0.0.1:8000",
       "/videos": "http://127.0.0.1:8000",
       "/segments": "http://127.0.0.1:8000",
       "/variants": "http://127.0.0.1:8000",

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from dso.db.session import connect, fetch_all, fetch_one
+from dso.feedback.account_context import platform_account_context
 from dso.feedback.importer import import_metric_rows
 from dso.feedback.platform import (
     create_platform_mapping,
@@ -33,11 +34,15 @@ def douyin_sync_contract() -> dict:
         "sources": ["mock", "json", "csv", "xlsx", "api"],
         "default_windows": DEFAULT_WINDOWS,
         "metric_contract": platform_metric_contract(),
+        "account_roles": ["unassigned", "publishing_target", "research_source"],
+        "evidence_scopes": ["unclassified", "target_outcome", "research_proxy"],
         "policy": {
             "read_only": True,
             "no_auto_publish": True,
             "no_real_network_by_default": True,
             "token_storage": "real access/refresh tokens are not persisted by this local connector",
+            "publishing_target": "must be explicitly designated; research accounts never become publishing targets implicitly",
+            "target_outcome": "only explicit platform metrics on target_outcome mappings count toward account personalization readiness",
         },
     }
 
@@ -272,6 +277,8 @@ def _upsert_mappings_from_rows(account_id: str, rows: list[dict[str, Any]]) -> d
             "last_synced_at": utc_now(),
             "last_metrics_at": row.get("collected_at") or utc_now(),
         }
+        if row.get("evidence_scope"):
+            payload["evidence_scope"] = row.get("evidence_scope")
         mapping = create_platform_mapping(payload)
         if mapping.get("candidate_segment_id") or mapping.get("slice_variant_id") or mapping.get("experiment_id"):
             mapped_items.add(item_id)
@@ -336,12 +343,21 @@ def douyin_sync_summary(account_id: str = "main") -> dict:
         metrics = fetch_one(
             conn,
             """
-            SELECT COUNT(*) AS count,
-                   MAX(collected_at) AS latest_collected_at,
-                   SUM(CASE WHEN candidate_segment_id IS NULL OR candidate_segment_id = '' THEN 1 ELSE 0 END) AS unlinked
-            FROM performance_metrics
-            WHERE sample_source IN ('api', 'mock', 'csv') AND platform_item_id != ''
+            SELECT COUNT(pm.id) AS count,
+                   MAX(pm.collected_at) AS latest_collected_at,
+                   SUM(CASE WHEN pm.candidate_segment_id IS NULL OR pm.candidate_segment_id = '' THEN 1 ELSE 0 END) AS unlinked,
+                   SUM(CASE WHEN pm.metric_semantics = 'explicit_platform_outcome' THEN 1 ELSE 0 END) AS explicit_outcome_rows,
+                   SUM(CASE WHEN pm.metric_semantics = 'engagement_proxy' THEN 1 ELSE 0 END) AS engagement_proxy_rows,
+                   SUM(CASE WHEN pm.metric_semantics = 'legacy_unverified' THEN 1 ELSE 0 END) AS legacy_unverified_rows,
+                   SUM(CASE WHEN pm.metric_semantics = 'ambiguous_visible_count' THEN 1 ELSE 0 END) AS ambiguous_visible_count_rows,
+                   SUM(CASE WHEN pm.id IS NOT NULL AND m.evidence_scope = 'target_outcome' THEN 1 ELSE 0 END) AS target_outcome_rows,
+                   SUM(CASE WHEN pm.id IS NOT NULL AND m.evidence_scope = 'research_proxy' THEN 1 ELSE 0 END) AS research_proxy_rows,
+                   SUM(CASE WHEN pm.id IS NOT NULL AND (m.evidence_scope = 'unclassified' OR m.evidence_scope = '') THEN 1 ELSE 0 END) AS unclassified_rows
+            FROM platform_video_mappings m
+            LEFT JOIN performance_metrics pm ON pm.platform_item_id = m.platform_item_id
+            WHERE m.platform = 'douyin' AND m.account_id = ?
             """,
+            [account_id],
         )
         mappings = fetch_all(
             conn,
@@ -354,12 +370,14 @@ def douyin_sync_summary(account_id: str = "main") -> dict:
             [account_id],
         )
     runs = list_platform_sync_runs(account_id=account_id, platform="douyin", limit=5)
+    account_context = platform_account_context(account_id, "douyin")
     return {
         "contract_version": PLATFORM_SYNC_VERSION,
         "account_id": account_id,
         "metrics": metrics or {"count": 0, "latest_collected_at": "", "unlinked": 0},
         "mappings": mappings,
         "runs": runs,
+        "account_context": account_context,
         "contract": douyin_sync_contract(),
     }
 

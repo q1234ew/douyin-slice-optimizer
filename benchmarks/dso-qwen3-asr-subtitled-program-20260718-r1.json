@@ -1,0 +1,177 @@
+{
+  "contract_version": "dso.asr_subtitled_program_benchmark.v1",
+  "benchmark_id": "dso-qwen3-asr-subtitled-program-20260718-r1",
+  "locked_at": "2026-07-18T20:18:32+08:00",
+  "objective": "Evaluate Qwen3-ASR against the production Whisper base and quality Whisper small profiles on a second complete music-variety program using burned-in subtitles as pre-registered partial reference anchors.",
+  "source": {
+    "title": "【EP6】二皇子刘端端跨界搭档黄霄雲互飙高音！李佳薇首登天赐回应铁肺高音标签 杨宗纬姚晓棠二搭唱跳舞台！天赐的声音7 FULL 20260717",
+    "download_manifest": "data/tmp/video_downloads/download_86c2ac7a0ae74609/dso-download-manifest.json",
+    "video_path": "data/tmp/video_downloads/download_86c2ac7a0ae74609/YouTubeVideoClient/【EP6】二皇子刘端端跨界搭档黄霄雲互飙高音！李佳薇首登天赐回应铁肺高音标签 杨宗纬姚晓棠二搭唱跳舞台！天赐的声音7 FULL 20260717.mp4",
+    "video_sha256": "3f70a04089e41c9d17dae9f326e151f52d6f8ea0e25a7c4e7e51a661b12d91bf",
+    "video_seconds": 5862.57415,
+    "audio_path": "outputs/qwen3_asr_subtitled_program_20260718_r1/audio/audio.wav",
+    "audio_sha256": "c2c534bbd10d991c58fb383c5abc21cd6af91940c87e44d4b97585f52621849e",
+    "audio_seconds": 5862.574188,
+    "audio_format": "pcm_s16le/16000Hz/mono",
+    "subtitle_type": "burned_in_zh_hans",
+    "independent_subtitle_stream": false
+  },
+  "reference": {
+    "method": "Fixed 300-second interval frames starting at 60 seconds; macOS Vision OCR on the lower 260 pixels; anchors manually verified against the frozen frame before viewing ASR output.",
+    "matching": "Normalized exact substring within the registered 12-second window; also report normalized character similarity for diagnosis.",
+    "limitations": "Partial subtitle anchors are not a full transcript and cannot produce program-wide CER or WER.",
+    "anchors": [
+      {
+        "id": "opening_mood",
+        "timestamp": 60.0,
+        "window_start": 54.0,
+        "window_duration": 12.0,
+        "text": "我真的很开心然后很兴奋",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_60.jpg"
+      },
+      {
+        "id": "collaboration_plan",
+        "timestamp": 660.0,
+        "window_start": 654.0,
+        "window_duration": 12.0,
+        "text": "想了好久我跟她商量",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_660.jpg"
+      },
+      {
+        "id": "active_stage",
+        "timestamp": 960.0,
+        "window_start": 954.0,
+        "window_duration": 12.0,
+        "text": "我希望那舞台是可以躁动起来",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_960.jpg"
+      },
+      {
+        "id": "difficulty",
+        "timestamp": 1260.0,
+        "window_start": 1254.0,
+        "window_duration": 12.0,
+        "text": "其实非常不容易",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_1260.jpg"
+      },
+      {
+        "id": "let_me_leave",
+        "timestamp": 1860.0,
+        "window_start": 1854.0,
+        "window_duration": 12.0,
+        "text": "就让我走",
+        "kind": "lyrics",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_1860.jpg"
+      },
+      {
+        "id": "rushed_stage",
+        "timestamp": 2160.0,
+        "window_start": 2154.0,
+        "window_duration": 12.0,
+        "text": "今天这个舞台对你很匆忙",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_2160.jpg"
+      },
+      {
+        "id": "lotus_prayer",
+        "timestamp": 2460.0,
+        "window_start": 2454.0,
+        "window_duration": 12.0,
+        "text": "一步一莲花祈祷",
+        "kind": "lyrics",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_2460.jpg"
+      },
+      {
+        "id": "harmony_interference",
+        "timestamp": 2760.0,
+        "window_start": 2754.0,
+        "window_duration": 12.0,
+        "text": "她不会被和声所干扰",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_2760.jpg"
+      },
+      {
+        "id": "embarrassed_home",
+        "timestamp": 3360.0,
+        "window_start": 3354.0,
+        "window_duration": 12.0,
+        "text": "狼狈回家",
+        "kind": "lyrics",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_3360.jpg"
+      },
+      {
+        "id": "state_question",
+        "timestamp": 3660.0,
+        "window_start": 3654.0,
+        "window_duration": 12.0,
+        "text": "他一会的状态可不可以",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_3660.jpg"
+      },
+      {
+        "id": "happiness_control",
+        "timestamp": 4860.0,
+        "window_start": 4854.0,
+        "window_duration": 12.0,
+        "text": "以为幸福都可以掌握",
+        "kind": "lyrics",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_4860.jpg"
+      },
+      {
+        "id": "jury_consensus",
+        "timestamp": 5760.0,
+        "window_start": 5754.0,
+        "window_duration": 12.0,
+        "text": "经声音鉴赏团一致合议",
+        "kind": "speech",
+        "frame": "outputs/qwen3_asr_subtitled_program_20260718_r1/reference_candidates/frame_5760.jpg"
+      }
+    ]
+  },
+  "candidates": {
+    "qwen3_asr": {
+      "model": "Qwen/Qwen3-ASR-1.7B",
+      "aligner": "Qwen/Qwen3-ForcedAligner-0.6B",
+      "context": "",
+      "chunk_seconds": 60.0,
+      "overlap_seconds": 1.0,
+      "boundary_search_seconds": 5.0,
+      "retry_enabled": true,
+      "retry_chunk_seconds": 30.0,
+      "retry_min_rms": 0.002,
+      "retry_min_text_density": 0.5,
+      "retry_slow_seconds": 12.0,
+      "client_sha256": "333d85091852635f55fd0abd5b5f2a62997cc0b7da11a8ccad422f92a10bfc78",
+      "service_sha256": "63320c7243f2ef2d3be01f78301b9a0fc466ddd9c092ec638871e8cf9df7173e"
+    },
+    "whisper_base": {
+      "backend": "whisper_cpp",
+      "model": "base",
+      "model_sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "vad": true
+    },
+    "whisper_small": {
+      "backend": "whisper_cpp",
+      "model": "small",
+      "model_sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "vad": true
+    },
+    "whisper_binary_sha256": "154775fe1a2a1b4ccf07bdc33ae2bdd9fe4087037de3b126c45575a6f65922a9",
+    "whisper_vad_sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
+  },
+  "acceptance": {
+    "all_full_program_runs_complete": true,
+    "qwen_audio_coverage_min": 1.0,
+    "qwen_unresolved_chunk_count_max": 0,
+    "qwen_context_echo_count_max": 0,
+    "qwen_retry_chunk_ratio_max": 0.1,
+    "qwen_rtf_max": 0.07,
+    "qwen_anchor_recall_not_below_whisper_small": true,
+    "qwen_anchor_recall_delta_vs_whisper_base_min": 0.1,
+    "restore_omni_after_run": true
+  },
+  "output_root": "outputs/qwen3_asr_subtitled_program_20260718_r1"
+}

@@ -68,6 +68,7 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
     total_rows = 0
     linked_rows = 0
     unlinked_rows = 0
+    metric_semantics_counts: dict[str, int] = {}
     row_issues: list[dict] = []
     with connect() as conn:
         for row_number, raw in enumerate(normalized_rows, start=2):
@@ -78,6 +79,10 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
             else:
                 unlinked_rows += 1
                 row_issues.append(_link_issue(row_number, raw))
+            metric_semantics = str(raw.get("metric_semantics") or "unverified").strip() or "unverified"
+            metric_semantics_counts[metric_semantics] = metric_semantics_counts.get(metric_semantics, 0) + 1
+            if raw.get("metric_warnings"):
+                row_issues.append(_metric_issue(row_number, raw))
             rights_risk_score = _rights_risk_score(conn, links["candidate_segment_id"])
             metrics = _metric_values(raw, duration_seconds=_candidate_duration_seconds(conn, links["candidate_segment_id"]))
             reward_proxy, _components = compute_reward_proxy(metrics, rights_risk_score=rights_risk_score)
@@ -99,6 +104,7 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
                 "uncertainty": 1.0,
                 "sample_source": row_source,
                 "platform_item_id": platform_item_id,
+                "metric_semantics": metric_semantics,
             }
             row.update(metrics)
             insert_row(conn, "performance_metrics", row)
@@ -117,6 +123,7 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
                 "uncertainty": 1.0,
                 "sample_source": row_source,
                 "platform_item_id": platform_item_id,
+                "metric_semantics": metric_semantics,
             }
             snapshot.update(metrics)
             insert_row(conn, "metric_snapshots", snapshot)
@@ -133,6 +140,7 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
         "skipped_rows": 0,
         "created_training_samples": feedback["training_samples"],
         "rebuilt_baselines": feedback["baselines"],
+        "metric_semantics": metric_semantics_counts,
     }
     status = "import_completed"
     if total_rows <= 0 or imported <= 0:
@@ -154,6 +162,12 @@ def import_metric_rows(rows: Iterable[dict[str, Any]], *, sample_source: str = "
             "eligible_rows": linked_rows,
             "ineligible_rows": unlinked_rows,
             "policy": "Only linked metric_snapshots create training_samples.",
+        },
+        "target_outcome_eligibility": {
+            "explicit_platform_outcome_rows": metric_semantics_counts.get("explicit_platform_outcome", 0),
+            "legacy_or_ambiguous_rows": metric_semantics_counts.get("legacy_unverified", 0)
+            + metric_semantics_counts.get("ambiguous_visible_count", 0),
+            "policy": "Only explicit platform outcome fields can contribute to target-account readiness; visible-count aliases are audit-only.",
         },
         "feedback_state": feedback.get("feedback_state", {}),
         "input_contract": metrics_import_input_contract(),
@@ -207,6 +221,20 @@ def _link_issue(row_number: int, raw: dict) -> dict:
     }
 
 
+def _metric_issue(row_number: int, raw: dict) -> dict:
+    return {
+        "row_number": row_number,
+        "issue_type": "metric_semantics",
+        "trust_status": "audit_only",
+        "reason": "ambiguous visible count was not mapped to views",
+        "metric_semantics": raw.get("metric_semantics") or "unverified",
+        "warnings": list(raw.get("metric_warnings") or []),
+        "training_eligible": bool(raw.get("candidate_segment_id")),
+        "target_outcome_eligible": False,
+        "action": "提供明确的 views/play_count/view_count 或官方曝光、观看、分享、关注字段。",
+    }
+
+
 def metrics_import_input_contract() -> dict:
     return {
         "identifier_fields": ["candidate_segment_id", "slice_variant_id", "experiment_id", "platform_item_id"],
@@ -218,6 +246,7 @@ def metrics_import_input_contract() -> dict:
         "window_fields": ["window_name", "label_window", "hours_since_publish", "collected_at"],
         "ratio_format": "Use 0-1 decimals or percentage strings such as 82%.",
         "training_policy": "Only rows linked to an existing candidate segment create training_samples.",
+        "target_outcome_policy": "Ambiguous visible-count aliases are never treated as views and cannot satisfy target-account readiness.",
     }
 
 

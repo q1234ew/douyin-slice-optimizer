@@ -21,6 +21,8 @@ from dso.config import ensure_data_dirs
 from dso.db.session import connect, fetch_all, fetch_one, insert_row
 from dso.learning.multimodal_validation import _build_asset_index, _prepare_row
 from dso.media.ffmpeg import extract_frame, probe_video
+from dso.scheduler.guard import require_scheduler_lease, scheduler_enforces_gpu_lease
+from dso.scheduler.media import register_prepared_media
 from dso.utils import clamp, new_id, read_json, utc_now, write_json
 from dso.versions import QWEN_EMBEDDING_VERSION, RESEARCH_RANKER_VERSION
 
@@ -76,6 +78,7 @@ class QwenEmbeddingClient:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
     def load(self) -> dict:
+        require_scheduler_lease("qwen_embedding.load")
         try:
             payload = self._json_request(
                 "POST",
@@ -98,6 +101,7 @@ class QwenEmbeddingClient:
             return {"status": "service_unavailable", "service_url": self.service_url, "error": str(exc)}
 
     def embed_text(self, text: str) -> list[float]:
+        require_scheduler_lease("qwen_embedding.embed_text")
         text = str(text or "").strip()
         if not text:
             raise ValueError("empty_text")
@@ -121,6 +125,7 @@ class QwenEmbeddingClient:
         raise RuntimeError(f"embedding_response_empty: {last_error}")
 
     def embed_image(self, image_path: Path) -> list[float]:
+        require_scheduler_lease("qwen_embedding.embed_image")
         data = self._multipart_request("/embed/image", [("file", image_path)])
         embeddings = _validated_embedding_vectors(data, endpoint="embed/image")
         if not embeddings:
@@ -128,6 +133,7 @@ class QwenEmbeddingClient:
         return embeddings[0]
 
     def embed_video_frames(self, frame_paths: list[Path]) -> list[float]:
+        require_scheduler_lease("qwen_embedding.embed_video_frames")
         if not frame_paths:
             raise ValueError("empty_frame_paths")
         data = self._multipart_request("/embed/video-frames", [("files", path) for path in frame_paths])
@@ -222,6 +228,7 @@ def build_qwen_embedding_index(
     *,
     dataset_id: str | None = None,
     entity_type: str = "historical_sample",
+    entity_ids: list[str] | tuple[str, ...] | None = None,
     modality: str = "text",
     limit: int = 300,
     force: bool = False,
@@ -229,7 +236,14 @@ def build_qwen_embedding_index(
 ) -> dict:
     quarantined_invalid = quarantine_invalid_qwen_embedding_records()
     selected_modalities = _modalities(modality)
-    rows = _entity_rows(entity_type, account_id=account_id, dataset_id=dataset_id, limit=int(limit or 0))
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
+    rows = _entity_rows(
+        entity_type,
+        account_id=account_id,
+        dataset_id=dataset_id,
+        limit=int(limit or 0),
+        entity_ids=normalized_entity_ids,
+    )
     client = client or QwenEmbeddingClient()
     service_status = client.health()
     if not _service_ready(service_status):
@@ -253,7 +267,13 @@ def build_qwen_embedding_index(
             counts[result.get("status") or "failed"] += 1
             if result.get("error"):
                 errors.append(result)
-    ready_count = _ready_record_count(entity_type, account_id=account_id, dataset_id=dataset_id, modalities=selected_modalities)
+    ready_count = _ready_record_count(
+        entity_type,
+        account_id=account_id,
+        dataset_id=dataset_id,
+        modalities=selected_modalities,
+        entity_ids=normalized_entity_ids,
+    )
     total_slots = max(1, len(rows) * len(selected_modalities))
     return {
         "contract_version": QWEN_EMBEDDING_VERSION,
@@ -268,6 +288,7 @@ def build_qwen_embedding_index(
             "account_id": account_id or "all",
             "dataset_id": _scope(dataset_id),
             "entity_type": entity_type,
+            "entity_ids": normalized_entity_ids,
             "modality": modality,
             "limit": int(limit or 0),
             "force": bool(force),
@@ -288,6 +309,196 @@ def build_qwen_embedding_index(
         "cache_root": str(ensure_data_dirs().cache_dir / "qwen_embeddings"),
         "generated_at": utc_now(),
     }
+
+
+def qwen_embedding_scheduler_snapshot(
+    account_id: str | None = None,
+    *,
+    dataset_id: str | None = None,
+    entity_type: str = "historical_sample",
+    entity_ids: list[str] | tuple[str, ...] | None = None,
+    modality: str = "text",
+    limit: int = 300,
+    force: bool = False,
+) -> dict:
+    """Prepare stable per-entity embedding items without calling the GPU."""
+
+    selected_modalities = _modalities(modality)
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
+    rows = _entity_rows(
+        entity_type,
+        account_id=account_id,
+        dataset_id=dataset_id,
+        limit=int(limit or 0),
+        entity_ids=normalized_entity_ids,
+    )
+    asset_index = _build_asset_index() if "visual" in selected_modalities and entity_type == "historical_sample" else {}
+    items: list[dict] = []
+    skipped: list[dict] = []
+    reused: list[dict] = []
+    for row in rows:
+        entity_id = _entity_id(row, entity_type)
+        for current_modality in selected_modalities:
+            try:
+                source = _embedding_source(row, entity_type=entity_type, modality=current_modality, asset_index=asset_index)
+            except FileNotFoundError as exc:
+                skipped.append({"entity_id": entity_id, "modality": current_modality, "reason": str(exc) or "source_missing"})
+                continue
+            normalized_source = {
+                **source,
+                "paths": [str(path) for path in source.get("paths") or []],
+            }
+            cached = _find_ready_record(entity_type, entity_id, current_modality, str(source.get("source_hash") or ""))
+            if cached and not force and Path(str(cached.get("vector_path") or "")).is_file():
+                reused.append({"entity_id": entity_id, "modality": current_modality, "reason": "ready_cache"})
+                continue
+            if source.get("type") == "visual":
+                normalized_source["prepared_media"] = register_prepared_media(
+                    source_content_key=str(source.get("source_hash") or ""),
+                    profile="qwen3_vl_embedding_three_frames.v1",
+                    artifacts=[Path(path) for path in source.get("paths") or []],
+                    metadata={"entity_type": entity_type, "entity_id": entity_id, "modality": current_modality},
+                )
+            item_hash = _source_hash(
+                json.dumps(
+                    {
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
+                        "modality": current_modality,
+                        "source_hash": source["source_hash"],
+                        "model": QWEN_EMBEDDING_MODEL,
+                        "version": QWEN_EMBEDDING_VERSION,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            items.append(
+                {
+                    "input_hash": item_hash,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "account_id": str(row.get("account_id") or ""),
+                    "dataset_id": str(row.get("dataset_id") or ""),
+                    "platform_item_id": str(row.get("platform_item_id") or ""),
+                    "modality": current_modality,
+                    "source": normalized_source,
+                    "force": bool(force),
+                }
+            )
+    input_hash = _source_hash(
+        json.dumps(
+            {
+                "scope": [
+                    account_id or "all",
+                    dataset_id or "all",
+                    entity_type,
+                    selected_modalities,
+                    int(limit or 0),
+                    normalized_entity_ids,
+                ],
+                "items": [item["input_hash"] for item in items],
+                "version": QWEN_EMBEDDING_VERSION,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return {
+        "input_hash": input_hash,
+        "items": items,
+        "skipped": skipped,
+        "reused": reused,
+        "row_count": len(rows),
+        "item_count": len(items),
+        "modalities": selected_modalities,
+    }
+
+
+def compute_scheduled_qwen_embedding(request: dict, *, client: QwenEmbeddingClient | None = None) -> dict:
+    source = request.get("source") if isinstance(request.get("source"), dict) else {}
+    source_type = str(source.get("type") or "")
+    client = client or QwenEmbeddingClient()
+    service_status = client.health()
+    if not _service_ready(service_status):
+        raise RuntimeError(f"model_unavailable: embedding runtime is {service_status.get('status') or 'unknown'}")
+    if source_type == "text":
+        vector = client.embed_text(str(source.get("text") or ""))
+    elif source_type == "visual":
+        paths = [Path(path) for path in source.get("paths") or []]
+        if not paths or any(not path.is_file() for path in paths):
+            raise FileNotFoundError("prepared visual embedding source is missing")
+        vector = client.embed_image(paths[0]) if len(paths) == 1 else client.embed_video_frames(paths[:3])
+    else:
+        raise ValueError(f"unsupported embedding source type: {source_type}")
+    if len(vector) != QWEN_EMBEDDING_DIM:
+        raise RuntimeError(f"schema_invalid: expected {QWEN_EMBEDDING_DIM} dimensions, got {len(vector)}")
+    return {
+        "contract_version": QWEN_EMBEDDING_VERSION,
+        "status": "ready",
+        "entity_type": str(request.get("entity_type") or ""),
+        "entity_id": str(request.get("entity_id") or ""),
+        "account_id": str(request.get("account_id") or ""),
+        "dataset_id": str(request.get("dataset_id") or ""),
+        "platform_item_id": str(request.get("platform_item_id") or ""),
+        "modality": str(request.get("modality") or ""),
+        "source_hash": str(source.get("source_hash") or ""),
+        "source_summary": source.get("summary") or {},
+        "model_name": QWEN_EMBEDDING_MODEL,
+        "model_version": QWEN_EMBEDDING_VERSION,
+        "vector_dim": len(vector),
+        "vector": vector,
+        "generated_at": utc_now(),
+    }
+
+
+def commit_scheduled_qwen_embedding(result: dict) -> dict:
+    entity_type = str(result.get("entity_type") or "")
+    entity_id = str(result.get("entity_id") or "")
+    modality = str(result.get("modality") or "")
+    row = _entity_row(entity_type, entity_id)
+    if row is None:
+        raise RuntimeError("input_changed: embedding entity no longer exists")
+    asset_index = _build_asset_index() if modality == "visual" and entity_type == "historical_sample" else {}
+    source = _embedding_source(row, entity_type=entity_type, modality=modality, asset_index=asset_index)
+    if str(source.get("source_hash") or "") != str(result.get("source_hash") or ""):
+        raise RuntimeError("input_changed: embedding source changed before commit")
+    vector = result.get("vector") if isinstance(result.get("vector"), list) else []
+    if len(vector) != QWEN_EMBEDDING_DIM:
+        raise RuntimeError("schema_invalid: scheduled embedding vector has an invalid dimension")
+    vector_path = _vector_cache_path(entity_type, modality, entity_id, str(result["source_hash"]))
+    write_json(
+        vector_path,
+        {
+            "contract_version": QWEN_EMBEDDING_VERSION,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "modality": modality,
+            "model_name": QWEN_EMBEDDING_MODEL,
+            "model_version": QWEN_EMBEDDING_VERSION,
+            "source_hash": result["source_hash"],
+            "source_summary": result.get("source_summary") or {},
+            "vector_dim": len(vector),
+            "vector": vector,
+            "created_at": utc_now(),
+        },
+    )
+    _store_embedding_record(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        account_id=str(result.get("account_id") or row.get("account_id") or ""),
+        dataset_id=str(result.get("dataset_id") or row.get("dataset_id") or ""),
+        platform_item_id=str(result.get("platform_item_id") or row.get("platform_item_id") or ""),
+        modality=modality,
+        source_hash=str(result["source_hash"]),
+        vector_path=vector_path,
+        vector_dim=len(vector),
+        status="ready",
+        error="",
+    )
+    return {"status": "ready", "entity_id": entity_id, "modality": modality, "vector_dim": len(vector)}
 
 
 def run_qwen_embedding_evidence(
@@ -364,26 +575,40 @@ def qwen_embedding_evidence_for_segment(
     selected = _modalities(modality)
     client = client or QwenEmbeddingClient()
     service_status = client.health()
-    if not _service_ready(service_status):
+    scheduler_read_only = scheduler_enforces_gpu_lease()
+    if not scheduler_read_only and not _service_ready(service_status):
         loaded = client.load()
         if _service_ready(loaded):
             service_status = loaded
-    build_results = []
-    for current_modality in selected:
-        build_results.append(
-            _ensure_entity_embedding(
-                row,
-                entity_type="candidate",
-                modality=current_modality,
-                force=False,
-                client=client,
-                service_status=service_status,
-                asset_index={},
+    candidate_records = _embedding_records_for_entities("candidate", [segment_id])
+    if scheduler_read_only:
+        existing = candidate_records.get(segment_id, {})
+        build_results = [
+            {
+                "status": "reused" if current_modality in existing else "deferred_scheduler",
+                "entity_id": segment_id,
+                "modality": current_modality,
+                "reason": "read_path_does_not_dispatch_gpu_work" if current_modality not in existing else "",
+            }
+            for current_modality in selected
+        ]
+    else:
+        build_results = []
+        for current_modality in selected:
+            build_results.append(
+                _ensure_entity_embedding(
+                    row,
+                    entity_type="candidate",
+                    modality=current_modality,
+                    force=False,
+                    client=client,
+                    service_status=service_status,
+                    asset_index={},
+                )
             )
-        )
+        candidate_records = _embedding_records_for_entities("candidate", [segment_id])
     history_rows = _historical_rows_for_evidence(account_id or row.get("account_id"))
     records = _embedding_records_for_entities("historical_sample", [str(item.get("id") or "") for item in history_rows])
-    candidate_records = _embedding_records_for_entities("candidate", [segment_id])
     evidence = _embedding_matches_for_entity(
         row,
         history_rows,
@@ -858,15 +1083,39 @@ def _embedding_matches_for_entity(
     return result
 
 
-def _entity_rows(entity_type: str, *, account_id: str | None, dataset_id: str | None, limit: int) -> list[dict]:
+def _entity_rows(
+    entity_type: str,
+    *,
+    account_id: str | None,
+    dataset_id: str | None,
+    limit: int,
+    entity_ids: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
     if entity_type == "historical_sample":
-        return _historical_rows(account_id=account_id, dataset_id=dataset_id, limit=limit)
+        rows = _historical_rows(account_id=account_id, dataset_id=dataset_id, limit=limit, entity_ids=normalized_entity_ids)
+        return _rows_in_requested_order(rows, normalized_entity_ids)
     if entity_type == "candidate":
-        return _candidate_rows(account_id=account_id, limit=limit)
+        rows = _candidate_rows(account_id=account_id, limit=limit, entity_ids=normalized_entity_ids)
+        return _rows_in_requested_order(rows, normalized_entity_ids)
     raise ValueError(f"unsupported_entity_type:{entity_type}")
 
 
-def _historical_rows(account_id: str | None, dataset_id: str | None, limit: int) -> list[dict]:
+def _entity_row(entity_type: str, entity_id: str) -> dict | None:
+    if entity_type == "candidate":
+        return _candidate_row(entity_id)
+    if entity_type == "historical_sample":
+        with connect() as conn:
+            return fetch_one(conn, "SELECT * FROM historical_capture_samples WHERE id = ?", [entity_id])
+    return None
+
+
+def _historical_rows(
+    account_id: str | None,
+    dataset_id: str | None,
+    limit: int,
+    entity_ids: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     clauses = [
         "COALESCE(platform_item_id, '') != ''",
         "(COALESCE(reward_proxy, 0) > 0 OR COALESCE(normalized_reward, 0) > 0)",
@@ -880,6 +1129,10 @@ def _historical_rows(account_id: str | None, dataset_id: str | None, limit: int)
     if dataset and dataset.lower() != "all":
         clauses.append("dataset_id = ?")
         params.append(dataset)
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
+    if normalized_entity_ids:
+        clauses.append(f"id IN ({','.join('?' for _ in normalized_entity_ids)})")
+        params.extend(normalized_entity_ids)
     query = f"""
         SELECT *
         FROM historical_capture_samples
@@ -904,16 +1157,27 @@ def _historical_rows_for_evidence(account_id: str | None) -> list[dict]:
     return _historical_rows(None, dataset_id=None, limit=0) or rows
 
 
-def _candidate_rows(account_id: str | None, limit: int) -> list[dict]:
+def _candidate_rows(
+    account_id: str | None,
+    limit: int,
+    entity_ids: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     query = """
         SELECT c.*, v.account_id, v.title AS video_title, v.file_path
         FROM candidate_segments c
         JOIN source_videos v ON v.id = c.source_video_id
     """
     params: list[Any] = []
+    clauses: list[str] = []
     if account_id and str(account_id).lower() != "all":
-        query += " WHERE v.account_id = ?"
+        clauses.append("v.account_id = ?")
         params.append(account_id)
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
+    if normalized_entity_ids:
+        clauses.append(f"c.id IN ({','.join('?' for _ in normalized_entity_ids)})")
+        params.extend(normalized_entity_ids)
+    if clauses:
+        query += f" WHERE {' AND '.join(clauses)}"
     query += " ORDER BY c.created_at DESC"
     if int(limit or 0) > 0:
         query += " LIMIT ?"
@@ -1060,7 +1324,14 @@ def _store_embedding_record(
         conn.commit()
 
 
-def _ready_record_count(entity_type: str, *, account_id: str | None, dataset_id: str | None, modalities: list[str]) -> int:
+def _ready_record_count(
+    entity_type: str,
+    *,
+    account_id: str | None,
+    dataset_id: str | None,
+    modalities: list[str],
+    entity_ids: list[str] | tuple[str, ...] | None = None,
+) -> int:
     clauses = ["entity_type = ?", "model_name = ?", "status = 'ready'", "vector_dim = ?"]
     params: list[Any] = [entity_type, QWEN_EMBEDDING_MODEL, QWEN_EMBEDDING_DIM]
     account = str(account_id or "").strip()
@@ -1074,9 +1345,63 @@ def _ready_record_count(entity_type: str, *, account_id: str | None, dataset_id:
     if modalities:
         clauses.append(f"modality IN ({','.join('?' for _ in modalities)})")
         params.extend(modalities)
+    normalized_entity_ids = _normalize_entity_ids(entity_ids)
+    if normalized_entity_ids:
+        clauses.append(f"entity_id IN ({','.join('?' for _ in normalized_entity_ids)})")
+        params.extend(normalized_entity_ids)
     with connect() as conn:
         row = fetch_one(conn, f"SELECT COUNT(*) AS count FROM embedding_records WHERE {' AND '.join(clauses)}", params)
     return int((row or {}).get("count") or 0)
+
+
+def embedding_coverage_for_entity_ids(
+    entity_ids: list[str] | tuple[str, ...],
+    *,
+    entity_type: str = "historical_sample",
+) -> dict:
+    ids = _normalize_entity_ids(entity_ids)
+    records = _embedding_records_for_entities(entity_type, ids)
+    counts = {
+        modality: sum(1 for entity_id in ids if modality in records.get(entity_id, {}))
+        for modality in ("text", "visual")
+    }
+    return {
+        "entity_type": entity_type,
+        "sample_count": len(ids),
+        "text_ready_count": counts["text"],
+        "text_ready_rate": round(counts["text"] / max(1, len(ids)), 4),
+        "visual_ready_count": counts["visual"],
+        "visual_ready_rate": round(counts["visual"] / max(1, len(ids)), 4),
+        "text_visual_ready_count": sum(
+            1 for entity_id in ids if {"text", "visual"}.issubset(records.get(entity_id, {}))
+        ),
+        "missing_text_ids": [entity_id for entity_id in ids if "text" not in records.get(entity_id, {})],
+        "missing_visual_ids": [entity_id for entity_id in ids if "visual" not in records.get(entity_id, {})],
+        "model_name": QWEN_EMBEDDING_MODEL,
+    }
+
+
+def _normalize_entity_ids(entity_ids: list[str] | tuple[str, ...] | None) -> list[str]:
+    if not entity_ids:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in entity_ids:
+        entity_id = str(value or "").strip()
+        if not entity_id or entity_id in seen:
+            continue
+        seen.add(entity_id)
+        result.append(entity_id)
+    if len(result) > 500:
+        raise ValueError("entity_ids supports at most 500 items")
+    return result
+
+
+def _rows_in_requested_order(rows: list[dict], entity_ids: list[str]) -> list[dict]:
+    if not entity_ids:
+        return rows
+    by_id = {str(row.get("id") or ""): row for row in rows}
+    return [by_id[entity_id] for entity_id in entity_ids if entity_id in by_id]
 
 
 def _record_status_count(
