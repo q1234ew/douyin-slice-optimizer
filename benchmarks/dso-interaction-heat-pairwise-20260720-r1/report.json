@@ -1,0 +1,459 @@
+{
+  "admission": "research_only",
+  "claim_limit": "Offline ranking of observed interaction-heat proxies only; no claim about play traffic, exposure-normalized conversion, or production lift.",
+  "experiment_id": "dso-interaction-heat-pairwise-20260720-r1",
+  "protocols": {
+    "account_holdout": {
+      "pair_count": 27642,
+      "splits": {
+        "test": {
+          "account_count": 5,
+          "account_metrics": {
+            "hukan_music": {
+              "ndcg_at_10": 0.21439,
+              "random_ndcg_at_10": 0.194066,
+              "sample_count": 310,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.080182
+            },
+            "kim0330music": {
+              "ndcg_at_10": 0.610716,
+              "random_ndcg_at_10": 0.425054,
+              "sample_count": 276,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.102795
+            },
+            "raoxianyin": {
+              "ndcg_at_10": 0.463684,
+              "random_ndcg_at_10": 0.40744,
+              "sample_count": 96,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.114103
+            },
+            "rimu_live": {
+              "ndcg_at_10": 0.266745,
+              "random_ndcg_at_10": 0.278207,
+              "sample_count": 513,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": 0.024614
+            },
+            "xindong_yure_live": {
+              "ndcg_at_10": 0.507615,
+              "random_ndcg_at_10": 0.331483,
+              "sample_count": 502,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": 0.068429
+            }
+          },
+          "macro_ndcg_at_10": 0.41263,
+          "macro_random_ndcg_at_10": 0.32725,
+          "macro_severe_misselection_rate": 0.2,
+          "macro_top10_heat_lift": 0.078025,
+          "sample_count": 1697
+        },
+        "validation": {
+          "account_count": 3,
+          "account_metrics": {
+            "adai_valerio": {
+              "ndcg_at_10": 0.404935,
+              "random_ndcg_at_10": 0.200004,
+              "sample_count": 106,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.200496
+            },
+            "dk_voice_teacher": {
+              "ndcg_at_10": 0.171655,
+              "random_ndcg_at_10": 0.231166,
+              "sample_count": 431,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.068255
+            },
+            "yuhuan": {
+              "ndcg_at_10": 0.330018,
+              "random_ndcg_at_10": 0.296054,
+              "sample_count": 106,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.0628
+            }
+          },
+          "macro_ndcg_at_10": 0.302203,
+          "macro_random_ndcg_at_10": 0.242408,
+          "macro_severe_misselection_rate": 0.2,
+          "macro_top10_heat_lift": 0.065014,
+          "sample_count": 643
+        }
+      },
+      "train_sample_count": 7606
+    },
+    "account_time": {
+      "pair_count": 24759,
+      "splits": {
+        "test": {
+          "account_count": 25,
+          "account_metrics": {
+            "adai_valerio": {
+              "ndcg_at_10": 0.288149,
+              "random_ndcg_at_10": 0.539687,
+              "sample_count": 21,
+              "severe_misselection_rate": 0.5,
+              "top10_heat_lift": -0.125048
+            },
+            "beidou_live": {
+              "ndcg_at_10": 0.700897,
+              "random_ndcg_at_10": 0.48322,
+              "sample_count": 43,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.121302
+            },
+            "dk_voice_teacher": {
+              "ndcg_at_10": 0.393291,
+              "random_ndcg_at_10": 0.312491,
+              "sample_count": 125,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.118325
+            },
+            "duanduanzhengzheng": {
+              "ndcg_at_10": 0.780594,
+              "random_ndcg_at_10": 0.75632,
+              "sample_count": 55,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.022291
+            },
+            "geshou2026": {
+              "ndcg_at_10": 0.369896,
+              "random_ndcg_at_10": 0.375404,
+              "sample_count": 531,
+              "severe_misselection_rate": 0.6,
+              "top10_heat_lift": -0.154935
+            },
+            "haiye_yelaoshi": {
+              "ndcg_at_10": 0.341393,
+              "random_ndcg_at_10": 0.30884,
+              "sample_count": 69,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.086942
+            },
+            "hukan_music": {
+              "ndcg_at_10": 0.551156,
+              "random_ndcg_at_10": 0.596492,
+              "sample_count": 62,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": 0.034832
+            },
+            "jason_teacher": {
+              "ndcg_at_10": 0.645022,
+              "random_ndcg_at_10": 0.460479,
+              "sample_count": 104,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.106094
+            },
+            "kim0330music": {
+              "ndcg_at_10": 0.687609,
+              "random_ndcg_at_10": 0.51285,
+              "sample_count": 69,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.197889
+            },
+            "kuku_oscar": {
+              "ndcg_at_10": 0.461893,
+              "random_ndcg_at_10": 0.425093,
+              "sample_count": 46,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.034048
+            },
+            "manfen_kexuejia": {
+              "ndcg_at_10": 0.155548,
+              "random_ndcg_at_10": 0.178667,
+              "sample_count": 100,
+              "severe_misselection_rate": 0.6,
+              "top10_heat_lift": -0.028088
+            },
+            "raoxianyin": {
+              "ndcg_at_10": 0.318961,
+              "random_ndcg_at_10": 0.48575,
+              "sample_count": 31,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.135511
+            },
+            "ricot": {
+              "ndcg_at_10": 0.282937,
+              "random_ndcg_at_10": 0.329249,
+              "sample_count": 102,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.039094
+            },
+            "rimu_live": {
+              "ndcg_at_10": 0.391487,
+              "random_ndcg_at_10": 0.447745,
+              "sample_count": 112,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": -0.00396
+            },
+            "singer_yuhang": {
+              "ndcg_at_10": 0.340398,
+              "random_ndcg_at_10": 0.362673,
+              "sample_count": 106,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.017892
+            },
+            "sixuweilive": {
+              "ndcg_at_10": 0.566708,
+              "random_ndcg_at_10": 0.617839,
+              "sample_count": 198,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.0747
+            },
+            "taotao_daxiaojie": {
+              "ndcg_at_10": 0.682093,
+              "random_ndcg_at_10": 0.371505,
+              "sample_count": 105,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.260716
+            },
+            "tianci": {
+              "ndcg_at_10": 0.806515,
+              "random_ndcg_at_10": 0.586575,
+              "sample_count": 626,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.189995
+            },
+            "wccyu": {
+              "ndcg_at_10": 0.658002,
+              "random_ndcg_at_10": 0.332369,
+              "sample_count": 28,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.13157
+            },
+            "weibabibibi": {
+              "ndcg_at_10": 0.397335,
+              "random_ndcg_at_10": 0.450397,
+              "sample_count": 103,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.061023
+            },
+            "xindong_yure_live": {
+              "ndcg_at_10": 0.312023,
+              "random_ndcg_at_10": 0.393645,
+              "sample_count": 101,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.073815
+            },
+            "xingxing_live": {
+              "ndcg_at_10": 0.205868,
+              "random_ndcg_at_10": 0.448626,
+              "sample_count": 100,
+              "severe_misselection_rate": 0.7,
+              "top10_heat_lift": -0.156981
+            },
+            "yuhuan": {
+              "ndcg_at_10": 0.56282,
+              "random_ndcg_at_10": 0.589185,
+              "sample_count": 36,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.013763
+            },
+            "yule_xiaoe_yu": {
+              "ndcg_at_10": 0.391475,
+              "random_ndcg_at_10": 0.512189,
+              "sample_count": 101,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.08589
+            },
+            "zaijian_jianghuchuan": {
+              "ndcg_at_10": 0.112186,
+              "random_ndcg_at_10": 0.299367,
+              "sample_count": 104,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.130784
+            }
+          },
+          "macro_ndcg_at_10": 0.45617,
+          "macro_random_ndcg_at_10": 0.447066,
+          "macro_severe_misselection_rate": 0.264,
+          "macro_top10_heat_lift": 0.009532,
+          "sample_count": 3078
+        },
+        "validation": {
+          "account_count": 24,
+          "account_metrics": {
+            "adai_valerio": {
+              "ndcg_at_10": 0.960455,
+              "random_ndcg_at_10": 0.898267,
+              "sample_count": 10,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.0
+            },
+            "beidou_live": {
+              "ndcg_at_10": 0.63294,
+              "random_ndcg_at_10": 0.579064,
+              "sample_count": 22,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": 0.016714
+            },
+            "dk_voice_teacher": {
+              "ndcg_at_10": 0.564767,
+              "random_ndcg_at_10": 0.53329,
+              "sample_count": 43,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.005895
+            },
+            "duanduanzhengzheng": {
+              "ndcg_at_10": 0.805098,
+              "random_ndcg_at_10": 0.868442,
+              "sample_count": 27,
+              "severe_misselection_rate": 0.5,
+              "top10_heat_lift": -0.045112
+            },
+            "geshou2026": {
+              "ndcg_at_10": 0.454469,
+              "random_ndcg_at_10": 0.555009,
+              "sample_count": 39,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.069199
+            },
+            "haiye_yelaoshi": {
+              "ndcg_at_10": 0.225465,
+              "random_ndcg_at_10": 0.406363,
+              "sample_count": 34,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": -0.128845
+            },
+            "hukan_music": {
+              "ndcg_at_10": 0.54241,
+              "random_ndcg_at_10": 0.551498,
+              "sample_count": 31,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.036578
+            },
+            "jason_teacher": {
+              "ndcg_at_10": 0.632644,
+              "random_ndcg_at_10": 0.546991,
+              "sample_count": 51,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.052611
+            },
+            "kim0330music": {
+              "ndcg_at_10": 0.87428,
+              "random_ndcg_at_10": 0.710141,
+              "sample_count": 26,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.102153
+            },
+            "kuku_oscar": {
+              "ndcg_at_10": 0.622806,
+              "random_ndcg_at_10": 0.568291,
+              "sample_count": 20,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.106389
+            },
+            "manfen_kexuejia": {
+              "ndcg_at_10": 0.390558,
+              "random_ndcg_at_10": 0.365242,
+              "sample_count": 50,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.097873
+            },
+            "raoxianyin": {
+              "ndcg_at_10": 1.0,
+              "random_ndcg_at_10": 1.0,
+              "sample_count": 1,
+              "severe_misselection_rate": 1.0,
+              "top10_heat_lift": 0.0
+            },
+            "ricot": {
+              "ndcg_at_10": 0.682765,
+              "random_ndcg_at_10": 0.388758,
+              "sample_count": 50,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.168951
+            },
+            "rimu_live": {
+              "ndcg_at_10": 0.620929,
+              "random_ndcg_at_10": 0.336766,
+              "sample_count": 54,
+              "severe_misselection_rate": 0.0,
+              "top10_heat_lift": 0.290069
+            },
+            "singer_yuhang": {
+              "ndcg_at_10": 0.39767,
+              "random_ndcg_at_10": 0.469533,
+              "sample_count": 50,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": -0.014596
+            },
+            "sixuweilive": {
+              "ndcg_at_10": 0.351955,
+              "random_ndcg_at_10": 0.570742,
+              "sample_count": 92,
+              "severe_misselection_rate": 0.5,
+              "top10_heat_lift": -0.170231
+            },
+            "taotao_daxiaojie": {
+              "ndcg_at_10": 0.571739,
+              "random_ndcg_at_10": 0.44899,
+              "sample_count": 53,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.020244
+            },
+            "wccyu": {
+              "ndcg_at_10": 0.924393,
+              "random_ndcg_at_10": 0.736956,
+              "sample_count": 8,
+              "severe_misselection_rate": 0.25,
+              "top10_heat_lift": 0.0
+            },
+            "weibabibibi": {
+              "ndcg_at_10": 0.614288,
+              "random_ndcg_at_10": 0.514015,
+              "sample_count": 51,
+              "severe_misselection_rate": 0.2,
+              "top10_heat_lift": 0.144895
+            },
+            "xindong_yure_live": {
+              "ndcg_at_10": 0.803346,
+              "random_ndcg_at_10": 0.636963,
+              "sample_count": 53,
+              "severe_misselection_rate": 0.1,
+              "top10_heat_lift": 0.091572
+            },
+            "xingxing_live": {
+              "ndcg_at_10": 0.562109,
+              "random_ndcg_at_10": 0.52192,
+              "sample_count": 52,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.029021
+            },
+            "yuhuan": {
+              "ndcg_at_10": 0.706795,
+              "random_ndcg_at_10": 0.738672,
+              "sample_count": 7,
+              "severe_misselection_rate": 0.285714,
+              "top10_heat_lift": 0.0
+            },
+            "yule_xiaoe_yu": {
+              "ndcg_at_10": 0.515608,
+              "random_ndcg_at_10": 0.596745,
+              "sample_count": 50,
+              "severe_misselection_rate": 0.4,
+              "top10_heat_lift": -0.01141
+            },
+            "zaijian_jianghuchuan": {
+              "ndcg_at_10": 0.619448,
+              "random_ndcg_at_10": 0.466207,
+              "sample_count": 51,
+              "severe_misselection_rate": 0.3,
+              "top10_heat_lift": 0.046145
+            }
+          },
+          "macro_ndcg_at_10": 0.628206,
+          "macro_random_ndcg_at_10": 0.583703,
+          "macro_severe_misselection_rate": 0.272321,
+          "macro_top10_heat_lift": 0.026605,
+          "sample_count": 925
+        }
+      },
+      "train_sample_count": 6850
+    }
+  },
+  "status": "completed"
+}

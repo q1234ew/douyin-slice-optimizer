@@ -6,11 +6,14 @@ weights, writes manual Gold, or replaces the supplied local baseline.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Any, Mapping
 
+from dso.providers.base import PublicModelProvider
 from dso.providers.budget import (
+    BudgetDayChanged,
     BudgetExceeded,
     BudgetGuard,
     BudgetReservation,
@@ -23,7 +26,12 @@ from dso.providers.contracts import (
     ProviderCallStatus,
     ProviderRequest,
 )
-from dso.providers.ledger import LedgerAttemptEntry, LedgerEntry, PublicModelLedger
+from dso.providers.ledger import (
+    BudgetExecutionLockError,
+    LedgerAttemptEntry,
+    LedgerEntry,
+    PublicModelLedger,
+)
 from dso.providers.policy import PolicyDenied, PublicModelPolicy, UploadLevel
 from dso.providers.registry import ProviderRegistry
 
@@ -96,16 +104,10 @@ class PublicModelRunner:
 
         provider = self.registry.resolve(request.target.provider_id)
         if provider.descriptor.uses_public_network:
+            lock_stack = ExitStack()
             try:
-                with self.ledger.budget_execution_lock():
-                    return self._execute_serialized(
-                        request,
-                        estimated_cost=estimated_cost,
-                        upload_level=upload_level,
-                        batch_id=batch_id,
-                        local_baseline=local_baseline,
-                    )
-            except Exception as exc:
+                lock_stack.enter_context(self.ledger.budget_execution_lock())
+            except BudgetExecutionLockError as exc:
                 zero = Money(Decimal("0"), estimated_cost.currency)
                 return self._fallback(
                     request,
@@ -120,7 +122,17 @@ class PublicModelRunner:
                     policy_code="budget_execution_lock_failed",
                     error_summary=f"public-model budget execution lock failed: {exc}",
                 )
+            with lock_stack:
+                return self._execute_serialized(
+                    provider,
+                    request,
+                    estimated_cost=estimated_cost,
+                    upload_level=upload_level,
+                    batch_id=batch_id,
+                    local_baseline=local_baseline,
+                )
         return self._execute_serialized(
+            provider,
             request,
             estimated_cost=estimated_cost,
             upload_level=upload_level,
@@ -130,6 +142,7 @@ class PublicModelRunner:
 
     def _execute_serialized(
         self,
+        provider: PublicModelProvider,
         request: ProviderRequest,
         *,
         estimated_cost: Money,
@@ -145,7 +158,6 @@ class PublicModelRunner:
         these steps can leak data or permit concurrent budget overspend.
         """
 
-        provider = self.registry.resolve(request.target.provider_id)
         descriptor = provider.descriptor
         zero = Money(Decimal("0"), estimated_cost.currency)
         if descriptor.identity != request.target:
@@ -297,6 +309,34 @@ class PublicModelRunner:
                     policy_code="budget_batch_mismatch",
                     error_summary="budget guard batch does not match runner batch",
                 )
+            try:
+                self.ledger.record_budget_reservation(reservation)
+            except Exception as exc:
+                release_error = ""
+                try:
+                    self.budget_guard.release(reservation)
+                except Exception as release_exc:  # pragma: no cover - defensive fail-closed path
+                    release_error = (
+                        "; in-memory reservation release failed: "
+                        f"{type(release_exc).__name__}: {release_exc}"
+                    )
+                reservation = None
+                return self._fallback(
+                    request,
+                    preflight_reserved_cost=zero,
+                    usage_estimated_cost=zero,
+                    effective_cost=zero,
+                    billing_status=ProviderBillingStatus.NOT_BILLABLE,
+                    upload_level=upload_level,
+                    batch_id=batch_id,
+                    local_baseline=local_baseline,
+                    ledger_status="budget_rejected",
+                    policy_code="budget_reservation_persist_failed",
+                    error_summary=(
+                        "durable budget reservation failed before provider invocation: "
+                        f"{type(exc).__name__}: {exc}{release_error}"
+                    ),
+                )
 
         result = None
         # A reservation has exactly one terminal action: release, usage-based
@@ -328,6 +368,7 @@ class PublicModelRunner:
                     policy_code=f"budget_{budget_error.scope}_actual_exceeded",
                     error_summary=str(budget_error),
                     metrics=result.metrics,
+                    budget_reservation=reservation,
                 )
 
             if result.status != ProviderCallStatus.SUCCEEDED:
@@ -350,6 +391,7 @@ class PublicModelRunner:
                     error_code=result.metrics.error_code,
                     error_summary=result.metrics.error_message or result.metrics.error_code,
                     metrics=result.metrics,
+                    budget_reservation=reservation,
                 )
 
             output = dict(result.output)
@@ -373,6 +415,7 @@ class PublicModelRunner:
                 billing_status=billing_status,
                 cache_hit=result.metrics.cache_hit,
                 metrics=result.metrics,
+                budget_reservation=reservation,
             )
             return RunnerOutcome(
                 contract_version=PUBLIC_MODEL_RUNNER_CONTRACT_VERSION,
@@ -399,6 +442,7 @@ class PublicModelRunner:
         except Exception as exc:
             metrics = result.metrics if result is not None else None
             budget_recovery_error = ""
+            budget_overrun: BudgetExceeded | None = None
             if reservation is not None and not reservation_finalized:
                 # Once a network-capable provider may have started, absence of
                 # usage is not evidence of zero cost. Keep the full reservation.
@@ -408,7 +452,7 @@ class PublicModelRunner:
                         effective_cost = reservation.amount
                         billing_status = ProviderBillingStatus.UNKNOWN
                     else:
-                        effective_cost, usage_cost, _ = self._finalize_budget(
+                        effective_cost, usage_cost, budget_overrun = self._finalize_budget(
                             reservation,
                             metrics,
                         )
@@ -426,9 +470,14 @@ class PublicModelRunner:
                         )
                     effective_cost = reservation.amount
                     billing_status = ProviderBillingStatus.UNKNOWN
-            error_summary = str(exc)
+            if budget_overrun is not None:
+                budget_recovery_error = (
+                    f"actual provider usage exceeded {budget_overrun.scope} budget: "
+                    f"{budget_overrun}"
+                )
+            error_summary = f"provider execution failed: {exc}"
             if budget_recovery_error:
-                error_summary = f"{error_summary}; {budget_recovery_error}"
+                error_summary = f"{budget_recovery_error}; {error_summary}"
             return self._fallback(
                 request,
                 preflight_reserved_cost=(reservation.amount if reservation else zero),
@@ -439,9 +488,14 @@ class PublicModelRunner:
                 batch_id=batch_id,
                 local_baseline=local_baseline,
                 ledger_status="error",
-                policy_code="provider_error",
+                policy_code=(
+                    f"budget_{budget_overrun.scope}_actual_exceeded"
+                    if budget_overrun is not None
+                    else "provider_error"
+                ),
                 error_summary=error_summary,
                 metrics=metrics,
+                budget_reservation=reservation,
             )
 
     def _refresh_budget_from_ledger(self, batch_id: str) -> None:
@@ -450,15 +504,28 @@ class PublicModelRunner:
         if self.budget_guard is None:  # pragma: no cover - guarded by caller
             raise RuntimeError("public provider requires a configured budget guard")
         currency = self.budget_guard.limits.currency
-        recorded_date = self.budget_guard.snapshot().day.isoformat()
-        self.budget_guard.refresh_persisted_spend(
-            batch_id=batch_id,
-            batch_spent=self.ledger.total_spend(currency=currency, batch_id=batch_id),
-            daily_spent=self.ledger.total_spend(
-                currency=currency,
-                recorded_date=recorded_date,
-            ),
-        )
+        for attempt in range(2):
+            spend_day = self.budget_guard.snapshot().day
+            recorded_date = spend_day.isoformat()
+            try:
+                self.budget_guard.refresh_persisted_spend(
+                    batch_id=batch_id,
+                    spend_day=spend_day,
+                    batch_spent=self.ledger.total_spend(
+                        currency=currency,
+                        batch_id=batch_id,
+                        recorded_date=recorded_date,
+                    ),
+                    daily_spent=self.ledger.total_spend(
+                        currency=currency,
+                        recorded_date=recorded_date,
+                    ),
+                )
+            except BudgetDayChanged:
+                if attempt == 0:
+                    continue
+                raise
+            return
 
     def _finalize_budget(
         self,
@@ -553,6 +620,7 @@ class PublicModelRunner:
         error_summary: str,
         error_code: str | None = None,
         metrics: ProviderCallMetrics | None = None,
+        budget_reservation: BudgetReservation | None = None,
     ) -> RunnerOutcome:
         """Record failure/denial and return the local baseline without adoption."""
 
@@ -569,6 +637,7 @@ class PublicModelRunner:
             metrics=metrics,
             error_code=error_code or policy_code,
             error_summary=error_summary,
+            budget_reservation=budget_reservation,
         )
         return RunnerOutcome(
             contract_version=PUBLIC_MODEL_RUNNER_CONTRACT_VERSION,
@@ -608,6 +677,7 @@ class PublicModelRunner:
         metrics: ProviderCallMetrics | None = None,
         error_code: str | None = None,
         error_summary: str | None = None,
+        budget_reservation: BudgetReservation | None = None,
     ) -> str:
         """Persist bounded operational metadata, never request or response bodies."""
 
@@ -660,4 +730,8 @@ class PublicModelRunner:
             LedgerAttemptEntry.from_provider_metrics(item)
             for item in (metrics.attempts if metrics else ())
         )
-        return self.ledger.record(entry, attempts=attempts)
+        return self.ledger.record(
+            entry,
+            attempts=attempts,
+            budget_reservation=budget_reservation,
+        )

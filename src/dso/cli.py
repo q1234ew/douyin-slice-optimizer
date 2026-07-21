@@ -43,6 +43,26 @@ from dso.learning.historical_samples import (
     reopen_historical_sample_calibration,
     semantic_calibration_queue,
 )
+from dso.learning.interaction_heat_v3 import (
+    DEFAULT_INTERACTION_HEAT_ARTIFACT_ID,
+    export_interaction_heat_input_snapshot,
+    freeze_interaction_heat_from_db,
+    freeze_interaction_heat_from_snapshot,
+    verify_interaction_heat_artifact,
+)
+from dso.learning.interaction_heat_holdout import (
+    HoldoutReadinessThresholds,
+    assess_interaction_heat_holdout_readiness,
+)
+from dso.learning.interaction_heat_pairwise import (
+    DEFAULT_PAIRWISE_EXPERIMENT_ID,
+    run_local_pairwise_experiment,
+)
+from dso.learning.interaction_heat_target_encoding import (
+    DEFAULT_TARGET_ENCODING_EXPERIMENT_ID,
+    TargetEncodingConfig,
+    run_local_target_encoding_experiment,
+)
 from dso.learning.interest_clock import build_interest_clock, recommend_publish_hours
 from dso.learning.material_description_experiment import run_material_description_experiment
 from dso.learning.material_evidence import run_material_evidence_batch, run_material_resolver_shadow
@@ -496,6 +516,128 @@ def cmd_benchmark_verify(benchmark_id: str) -> dict:
 def cmd_benchmark_run(benchmark_id: str, allow_drift: bool = False) -> dict:
     init_db()
     return run_frozen_benchmark(benchmark_id, allow_drift=allow_drift)
+
+
+def cmd_interaction_heat_freeze(
+    artifact_id: str,
+    db_path: str | None,
+    output_root: str | None,
+    min_group_samples: int,
+    input_jsonl: str | None = None,
+    media_index: str | None = None,
+) -> dict:
+    if bool(input_jsonl) != bool(media_index):
+        raise ValueError("--input-jsonl and --media-index must be provided together")
+    if input_jsonl and media_index:
+        return freeze_interaction_heat_from_snapshot(
+            artifact_id=artifact_id,
+            input_path=Path(input_jsonl).expanduser(),
+            media_index_path=Path(media_index).expanduser(),
+            output_root=Path(output_root or "benchmarks").expanduser(),
+            min_group_samples=min_group_samples,
+        )
+    return freeze_interaction_heat_from_db(
+        artifact_id=artifact_id,
+        db_path=Path(db_path).expanduser() if db_path else None,
+        output_root=Path(output_root).expanduser() if output_root else None,
+        min_group_samples=min_group_samples,
+    )
+
+
+def cmd_interaction_heat_export_input(
+    db_path: str,
+    input_jsonl: str,
+    media_index: str,
+) -> dict:
+    return export_interaction_heat_input_snapshot(
+        db_path=Path(db_path).expanduser(),
+        input_path=Path(input_jsonl).expanduser(),
+        media_index_path=Path(media_index).expanduser(),
+    )
+
+
+def cmd_interaction_heat_verify(
+    artifact_id: str,
+    artifact_dir: str | None,
+    expected_manifest_sha256: str,
+) -> dict:
+    path = (
+        Path(artifact_dir).expanduser()
+        if artifact_dir
+        else Path.cwd() / "benchmarks" / artifact_id
+    )
+    return verify_interaction_heat_artifact(
+        path,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
+
+
+def cmd_interaction_heat_holdout_readiness(
+    label_artifact_dir: str,
+    expected_label_manifest_sha256: str,
+    db_path: str,
+    min_forward_samples: int = 1000,
+    min_forward_accounts: int = 5,
+    min_forward_span_days: int = 7,
+    min_new_accounts: int = 3,
+    min_samples_per_new_account: int = 100,
+) -> dict:
+    return assess_interaction_heat_holdout_readiness(
+        label_artifact_dir=Path(label_artifact_dir).expanduser(),
+        expected_label_manifest_sha256=expected_label_manifest_sha256,
+        db_path=Path(db_path).expanduser(),
+        thresholds=HoldoutReadinessThresholds(
+            min_forward_samples=min_forward_samples,
+            min_forward_accounts=min_forward_accounts,
+            min_forward_span_days=min_forward_span_days,
+            min_new_accounts=min_new_accounts,
+            min_samples_per_new_account=min_samples_per_new_account,
+        ),
+    )
+
+
+def cmd_interaction_heat_pairwise(
+    experiment_id: str,
+    label_artifact_dir: str,
+    expected_label_manifest_sha256: str,
+    db_path: str,
+    output_root: str,
+) -> dict:
+    return run_local_pairwise_experiment(
+        experiment_id=experiment_id,
+        label_artifact_dir=Path(label_artifact_dir).expanduser(),
+        expected_label_manifest_sha256=expected_label_manifest_sha256,
+        db_path=Path(db_path).expanduser(),
+        output_root=Path(output_root).expanduser(),
+    )
+
+
+def cmd_interaction_heat_target_encoding(
+    experiment_id: str,
+    label_artifact_dir: str,
+    expected_label_manifest_sha256: str,
+    db_path: str,
+    output_root: str,
+    evaluation_scope: str = "validation",
+    alpha: float = 20.0,
+    min_samples: int = 3,
+    folds: int = 5,
+    include_title: bool = False,
+) -> dict:
+    return run_local_target_encoding_experiment(
+        experiment_id=experiment_id,
+        label_artifact_dir=Path(label_artifact_dir).expanduser(),
+        expected_label_manifest_sha256=expected_label_manifest_sha256,
+        db_path=Path(db_path).expanduser(),
+        output_root=Path(output_root).expanduser(),
+        config=TargetEncodingConfig(
+            alpha=alpha,
+            folds=folds,
+            include_title=include_title,
+            min_samples=min_samples,
+        ),
+        evaluation_scope=evaluation_scope,
+    )
 
 
 def cmd_ranker_tuning(account: str | None, k: int, holdout_policy: str, max_trials: int, label_version: str | None = None) -> dict:
@@ -1650,6 +1792,157 @@ def _typer_main(typer_module: Any) -> None:
     ) -> None:
         _print(cmd_benchmark_run(benchmark_id, allow_drift))
 
+    @app.command("interaction-heat-freeze")
+    def interaction_heat_freeze_command(
+        artifact_id: str = typer_module.Option(
+            DEFAULT_INTERACTION_HEAT_ARTIFACT_ID,
+            "--artifact-id",
+        ),
+        db_path: str | None = typer_module.Option(None, "--db-path"),
+        output_root: str | None = typer_module.Option(None, "--output-root"),
+        min_group_samples: int = typer_module.Option(20, "--min-group-samples"),
+        input_jsonl: str | None = typer_module.Option(None, "--input-jsonl"),
+        media_index: str | None = typer_module.Option(None, "--media-index"),
+    ) -> None:
+        _print(
+            cmd_interaction_heat_freeze(
+                artifact_id,
+                db_path,
+                output_root,
+                min_group_samples,
+                input_jsonl,
+                media_index,
+            )
+        )
+
+    @app.command("interaction-heat-export-input")
+    def interaction_heat_export_input_command(
+        db_path: str = typer_module.Option("data/db/dso.sqlite3", "--db-path"),
+        input_jsonl: str = typer_module.Option(..., "--input-jsonl"),
+        media_index: str = typer_module.Option(..., "--media-index"),
+    ) -> None:
+        _print(cmd_interaction_heat_export_input(db_path, input_jsonl, media_index))
+
+    @app.command("interaction-heat-verify")
+    def interaction_heat_verify_command(
+        artifact_id: str = typer_module.Option(
+            DEFAULT_INTERACTION_HEAT_ARTIFACT_ID,
+            "--artifact-id",
+        ),
+        artifact_dir: str | None = typer_module.Option(None, "--artifact-dir"),
+        expected_manifest_sha256: str = typer_module.Option(
+            ...,
+            "--expected-manifest-sha256",
+        ),
+    ) -> None:
+        _print(
+            cmd_interaction_heat_verify(
+                artifact_id,
+                artifact_dir,
+                expected_manifest_sha256,
+            )
+        )
+
+    @app.command("interaction-heat-pairwise-local")
+    def interaction_heat_pairwise_local_command(
+        experiment_id: str = typer_module.Option(
+            DEFAULT_PAIRWISE_EXPERIMENT_ID,
+            "--experiment-id",
+        ),
+        label_artifact_dir: str = typer_module.Option(
+            f"benchmarks/{DEFAULT_INTERACTION_HEAT_ARTIFACT_ID}",
+            "--label-artifact-dir",
+        ),
+        expected_label_manifest_sha256: str = typer_module.Option(
+            ...,
+            "--expected-label-manifest-sha256",
+        ),
+        db_path: str = typer_module.Option("data/db/dso.sqlite3", "--db-path"),
+        output_root: str = typer_module.Option("benchmarks", "--output-root"),
+    ) -> None:
+        _print(
+            cmd_interaction_heat_pairwise(
+                experiment_id,
+                label_artifact_dir,
+                expected_label_manifest_sha256,
+                db_path,
+                output_root,
+            )
+        )
+
+    @app.command("interaction-heat-holdout-readiness")
+    def interaction_heat_holdout_readiness_command(
+        label_artifact_dir: str = typer_module.Option(
+            f"benchmarks/{DEFAULT_INTERACTION_HEAT_ARTIFACT_ID}",
+            "--label-artifact-dir",
+        ),
+        expected_label_manifest_sha256: str = typer_module.Option(
+            ...,
+            "--expected-label-manifest-sha256",
+        ),
+        db_path: str = typer_module.Option("data/db/dso.sqlite3", "--db-path"),
+        min_forward_samples: int = typer_module.Option(1000, "--min-forward-samples"),
+        min_forward_accounts: int = typer_module.Option(5, "--min-forward-accounts"),
+        min_forward_span_days: int = typer_module.Option(7, "--min-forward-span-days"),
+        min_new_accounts: int = typer_module.Option(3, "--min-new-accounts"),
+        min_samples_per_new_account: int = typer_module.Option(
+            100,
+            "--min-samples-per-new-account",
+        ),
+    ) -> None:
+        _print(
+            cmd_interaction_heat_holdout_readiness(
+                label_artifact_dir,
+                expected_label_manifest_sha256,
+                db_path,
+                min_forward_samples,
+                min_forward_accounts,
+                min_forward_span_days,
+                min_new_accounts,
+                min_samples_per_new_account,
+            )
+        )
+
+    @app.command("interaction-heat-target-encoding-local")
+    def interaction_heat_target_encoding_local_command(
+        experiment_id: str = typer_module.Option(
+            DEFAULT_TARGET_ENCODING_EXPERIMENT_ID,
+            "--experiment-id",
+        ),
+        label_artifact_dir: str = typer_module.Option(
+            f"benchmarks/{DEFAULT_INTERACTION_HEAT_ARTIFACT_ID}",
+            "--label-artifact-dir",
+        ),
+        expected_label_manifest_sha256: str = typer_module.Option(
+            ...,
+            "--expected-label-manifest-sha256",
+        ),
+        db_path: str = typer_module.Option("data/db/dso.sqlite3", "--db-path"),
+        output_root: str = typer_module.Option("benchmarks", "--output-root"),
+        evaluation_scope: str = typer_module.Option(
+            "validation",
+            "--evaluation-scope",
+        ),
+        alpha: float = typer_module.Option(20.0, "--alpha"),
+        min_samples: int = typer_module.Option(3, "--min-samples"),
+        folds: int = typer_module.Option(5, "--folds"),
+        include_title: bool = typer_module.Option(False, "--include-title"),
+    ) -> None:
+        _print(
+            cmd_interaction_heat_target_encoding(
+                experiment_id,
+                label_artifact_dir,
+                expected_label_manifest_sha256,
+                db_path,
+                output_root,
+                evaluation_scope,
+                alpha,
+                min_samples,
+                folds,
+                include_title,
+            )
+        )
+
     @app.command("ranker-tuning-run")
     def ranker_tuning_command(
         account: str | None = typer_module.Option(None, "--account"),
@@ -2299,6 +2592,27 @@ def _argparse_main() -> None:
     benchmark_run = sub.add_parser("benchmark-run")
     benchmark_run.add_argument("--benchmark-id", default=DEFAULT_BENCHMARK_ID)
     benchmark_run.add_argument("--allow-drift", action="store_true")
+    interaction_heat_freeze = sub.add_parser("interaction-heat-freeze")
+    interaction_heat_freeze.add_argument(
+        "--artifact-id",
+        default=DEFAULT_INTERACTION_HEAT_ARTIFACT_ID,
+    )
+    interaction_heat_freeze.add_argument("--db-path")
+    interaction_heat_freeze.add_argument("--output-root")
+    interaction_heat_freeze.add_argument("--min-group-samples", type=int, default=20)
+    interaction_heat_freeze.add_argument("--input-jsonl")
+    interaction_heat_freeze.add_argument("--media-index")
+    interaction_heat_export = sub.add_parser("interaction-heat-export-input")
+    interaction_heat_export.add_argument("--db-path", default="data/db/dso.sqlite3")
+    interaction_heat_export.add_argument("--input-jsonl", required=True)
+    interaction_heat_export.add_argument("--media-index", required=True)
+    interaction_heat_verify = sub.add_parser("interaction-heat-verify")
+    interaction_heat_verify.add_argument(
+        "--artifact-id",
+        default=DEFAULT_INTERACTION_HEAT_ARTIFACT_ID,
+    )
+    interaction_heat_verify.add_argument("--artifact-dir")
+    interaction_heat_verify.add_argument("--expected-manifest-sha256", required=True)
     ranker_tuning = sub.add_parser("ranker-tuning-run")
     ranker_tuning.add_argument("--account")
     ranker_tuning.add_argument("--k", type=int, default=10)
@@ -2699,6 +3013,33 @@ def _argparse_main() -> None:
         _print(cmd_benchmark_verify(args.benchmark_id))
     elif args.command == "benchmark-run":
         _print(cmd_benchmark_run(args.benchmark_id, args.allow_drift))
+    elif args.command == "interaction-heat-freeze":
+        _print(
+            cmd_interaction_heat_freeze(
+                args.artifact_id,
+                args.db_path,
+                args.output_root,
+                args.min_group_samples,
+                args.input_jsonl,
+                args.media_index,
+            )
+        )
+    elif args.command == "interaction-heat-export-input":
+        _print(
+            cmd_interaction_heat_export_input(
+                args.db_path,
+                args.input_jsonl,
+                args.media_index,
+            )
+        )
+    elif args.command == "interaction-heat-verify":
+        _print(
+            cmd_interaction_heat_verify(
+                args.artifact_id,
+                args.artifact_dir,
+                args.expected_manifest_sha256,
+            )
+        )
     elif args.command == "ranker-tuning-run":
         _print(cmd_ranker_tuning(args.account, args.k, args.holdout_policy, args.max_trials, args.label_version))
     elif args.command == "semantic-feature-experiment":

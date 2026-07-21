@@ -600,6 +600,27 @@ dso prototype-build --account main --source visible_capture --dataset all --forc
 dso semantic-calibration-queue --account main --dataset all --limit 50
 dso semantic-calibration-reopen <sample_id> --confidence low --reason "second calibration pass"
 dso research-labels-rebuild --account main --dataset all
+dso interaction-heat-export-input --db-path data/db/dso.sqlite3 --input-jsonl <input.jsonl> --media-index <media-sha.json>
+dso interaction-heat-freeze --input-jsonl <input.jsonl> --media-index <media-sha.json> --output-root benchmarks
+dso interaction-heat-verify \
+  --artifact-dir benchmarks/dso-interaction-heat-v3-20260720-r3 \
+  --expected-manifest-sha256 <另处保存的64位SHA-256>
+dso interaction-heat-pairwise-local \
+  --label-artifact-dir benchmarks/dso-interaction-heat-v3-20260720-r3 \
+  --expected-label-manifest-sha256 <阶段1另处保存的64位SHA-256> \
+  --db-path data/db/dso.sqlite3 \
+  --output-root benchmarks
+dso interaction-heat-target-encoding-local \
+  --experiment-id dso-interaction-heat-target-encoding-20260720-r2 \
+  --label-artifact-dir benchmarks/dso-interaction-heat-v3-20260720-r3 \
+  --expected-label-manifest-sha256 <阶段1另处保存的64位SHA-256> \
+  --db-path data/db/dso.sqlite3 \
+  --output-root benchmarks \
+  --evaluation-scope validation
+dso interaction-heat-holdout-readiness \
+  --label-artifact-dir benchmarks/dso-interaction-heat-v3-20260720-r3 \
+  --expected-label-manifest-sha256 <阶段1另处保存的64位SHA-256> \
+  --db-path data/db/dso.sqlite3
 dso backtest --account main --k 10 --strategy research_ranker_v2_1 --holdout-policy time
 dso ranker-tuning-run --account main --k 10 --max-trials 12
 dso backtest-reports --account main --limit 10
@@ -614,6 +635,14 @@ dso bailian-vector-holdout --stage evaluate --benchmark-id dso-multimodal-vector
 dso bailian-vector-attribution --benchmark-id dso-multimodal-vector-value-20260719-r1
 dso bailian-evidence-quality --benchmark-id dso-multimodal-vector-value-20260719-r1 --scope holdout --limit 40
 ```
+
+`interaction-heat-export-input` 只导出 V3 所需的最小字段和本地媒体 SHA 索引，不复制媒体或其他业务表；input 与 media 路径必须不同且不得已存在（包括 dangling symlink），先写 staging，再以 no-replace 语义发布，任一发布失败只会按 inode 回滚本操作创建的文件。`interaction-heat-freeze` 生成不可变的五文件 artifact，同一 ID 已存在时失败。`interaction-heat-verify` 必须接收在 artifact 外单独保存的 manifest SHA-256，要求目录精确包含 manifest 和固定四个 payload，以 no-follow 方式拒绝 symlink/非普通文件，并校验 manifest/payload SHA、零网络/零模型费用以及不覆盖 `visible_engagement_v2`；不传 pinned SHA 只能得到失败结果，不能把自签 manifest 当成可信验签。V3 是抓取时点互动热度研究标签，不是播放量、曝光归一化转化或生产排序分。
+
+`interaction-heat-pairwise-local` 在本地从已验签的 V3 artifact 和 SQLite 白名单内容字段训练两个纯 Python Pairwise Logistic 研究模型，不需要 NumPy、sklearn、LightGBM、ECS 或公网 API。命令拒绝覆盖同名实验目录，输出 `manifest.json / model.json / predictions.jsonl / report.json`。预测文件不包含互动标签；报告中的 heat lift 仅表示抓取时点互动热度差值，不是播放量或转化提升。当前模型只作为 `research_only` 基线，不能自动修改排序权重、Gold、导出或发布。
+
+`interaction-heat-target-encoding-local` 在同一 V3 contract 上训练两个纯 Python 平滑 Target Encoding 基线。默认 `--evaluation-scope validation`，只生成 train OOF 和 validation 预测，不读取纯 test 行、不输出 test 指标；标题特征默认关闭，只有显式 `--include-title` 才启用。命令拒绝覆盖同名实验目录并输出相同四文件 artifact；predictions 不含标签或互动 outcome。当前 r2 只是 `research_only` validation 基线，整账号泛化仍不稳定，不能据此修改生产排序、Gold、导出或发布。
+
+`interaction-heat-holdout-readiness` 是下一轮非线性 ranker 的只读数据门禁。命令验签冻结 V3，但只解析 `splits.jsonl` 的 sample ID、账号和发布时间 cutoff；数据库候选沿用 V3 显式 metric provenance 准入。默认要求新前向窗口至少 1,000 条、5 个账号并覆盖 7 天，且至少 3 个冻结集外账号各有 100 条；新账号可以包含较早发布但冻结后新收集的作品。只有输出 `status=ready` 且 `unlock_nonlinear_ranker=true` 才能冻结下一 holdout 并开始 LightGBM/LambdaRank；`not_ready` 时不应调低门槛追分或重用旧 test。
 
 样本少于 300 的账号只能展示低置信趋势，不应输出确定性权重。
 

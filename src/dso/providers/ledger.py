@@ -11,10 +11,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+import math
 import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
+from time import monotonic, sleep
 from typing import Iterator
 from uuid import uuid4
 
@@ -23,11 +26,11 @@ try:  # POSIX hosts are required for paid-provider execution.
 except ImportError:  # pragma: no cover - Windows must fail closed below.
     fcntl = None  # type: ignore[assignment]
 
-from .budget import Money
+from .budget import BudgetReservation, Money
 from .contracts import ProviderAttemptMetrics
 
 
-LEDGER_SCHEMA_VERSION = "public_model_ledger.v2"
+LEDGER_SCHEMA_VERSION = "public_model_ledger.v3"
 _STATUSES = {
     "reserved",
     "success",
@@ -49,6 +52,10 @@ _SECRET_PATTERNS = (
     ),
     re.compile(r'(?i)"(prompt|prompt_text|system_prompt)"\s*:\s*"(?:[^"\\]|\\.)*"'),
 )
+
+
+class BudgetExecutionLockError(RuntimeError):
+    """The shared paid-provider execution lock could not be acquired safely."""
 
 
 def _non_negative_int(value: int, field_name: str) -> int:
@@ -262,7 +269,12 @@ class PublicModelLedger:
         return connection
 
     @contextmanager
-    def budget_execution_lock(self) -> Iterator[None]:
+    def budget_execution_lock(
+        self,
+        *,
+        timeout_seconds: float = 10.0,
+        poll_seconds: float = 0.05,
+    ) -> Iterator[None]:
         """Serialize paid-provider execution across processes sharing this ledger.
 
         The lock spans ledger refresh, reservation, network execution, settlement,
@@ -270,17 +282,72 @@ class PublicModelLedger:
         silently falling back to a process-local lock that could overspend.
         """
 
+        for value, name in (
+            (timeout_seconds, "timeout_seconds"),
+            (poll_seconds, "poll_seconds"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be a finite positive number")
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be a finite positive number")
         if fcntl is None:
-            raise RuntimeError("cross-process public-model budget locking is unavailable")
+            raise BudgetExecutionLockError(
+                "cross-process public-model budget locking is unavailable"
+            )
         lock_path = self.db_path.with_suffix(f"{self.db_path.suffix}.budget.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+b") as handle:
-            os.chmod(lock_path, 0o600)
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        flags = os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor: int | None = None
+        try:
+            try:
+                descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                descriptor = os.open(lock_path, flags)
+            os.fchmod(descriptor, 0o600)
+            lock_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(lock_stat.st_mode):
+                raise BudgetExecutionLockError("budget lock path is not a regular file")
+            if hasattr(os, "geteuid") and lock_stat.st_uid != os.geteuid():
+                raise BudgetExecutionLockError("budget lock file is not owned by this process user")
+        except BudgetExecutionLockError:
+            if descriptor is not None:
+                os.close(descriptor)
+            raise
+        except OSError as exc:
+            if descriptor is not None:
+                os.close(descriptor)
+            raise BudgetExecutionLockError(
+                f"failed to open the public-model budget lock: {exc}"
+            ) from exc
+
+        with os.fdopen(descriptor, "a+b", closefd=True) as handle:
+            deadline = monotonic() + float(timeout_seconds)
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as exc:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        raise BudgetExecutionLockError(
+                            "timed out acquiring the public-model budget execution lock"
+                        ) from exc
+                    sleep(min(float(poll_seconds), remaining))
+                except OSError as exc:
+                    raise BudgetExecutionLockError(
+                        f"failed to acquire the public-model budget execution lock: {exc}"
+                    ) from exc
             try:
                 yield
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except OSError as exc:
+                    raise BudgetExecutionLockError(
+                        f"failed to release the public-model budget execution lock: {exc}"
+                    ) from exc
 
     def _initialize(self) -> None:
         """Create or add compatible columns without rewriting historical calls."""
@@ -364,6 +431,23 @@ class PublicModelLedger:
 
                 CREATE INDEX IF NOT EXISTS idx_public_model_attempts_provider_request
                 ON public_model_attempts(provider_request_id);
+
+                CREATE TABLE IF NOT EXISTS public_model_budget_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    reserved_at TEXT NOT NULL,
+                    budget_day TEXT NOT NULL,
+                    batch_id TEXT NOT NULL,
+                    reserved_cost TEXT NOT NULL,
+                    actual_cost TEXT NOT NULL DEFAULT '0',
+                    currency TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    billing_status TEXT NOT NULL DEFAULT 'unknown',
+                    call_id TEXT NOT NULL DEFAULT '',
+                    finalized_at TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_public_model_budget_reservations_budget
+                ON public_model_budget_reservations(currency, budget_day, batch_id, status);
                 """
             )
             connection.execute(
@@ -401,11 +485,53 @@ class PublicModelLedger:
                 """
             )
 
+    def record_budget_reservation(self, reservation: BudgetReservation) -> str:
+        """Persist the full preflight amount before any paid provider can run."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO public_model_budget_reservations (
+                    reservation_id, reserved_at, budget_day, batch_id,
+                    reserved_cost, actual_cost, currency, status,
+                    billing_status, call_id, finalized_at
+                ) VALUES (?, ?, ?, ?, ?, '0', ?, 'active', 'unknown', '', '')
+                """,
+                (
+                    reservation.reservation_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    reservation.day.isoformat(),
+                    reservation.batch_id,
+                    str(reservation.amount.amount),
+                    reservation.amount.currency,
+                ),
+            )
+        return reservation.reservation_id
+
+    def get_budget_reservation(self, reservation_id: str) -> dict[str, object] | None:
+        """Return one durable preflight reservation for audit and recovery."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM public_model_budget_reservations
+                WHERE reservation_id = ?
+                """,
+                (reservation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["reserved_cost"] = Decimal(str(result["reserved_cost"]))
+        result["actual_cost"] = Decimal(str(result["actual_cost"]))
+        return result
+
     def record(
         self,
         entry: LedgerEntry,
         *,
         attempts: tuple[LedgerAttemptEntry, ...] = (),
+        budget_reservation: BudgetReservation | None = None,
     ) -> str:
         """Atomically persist a call and its ordered physical attempts."""
 
@@ -413,6 +539,11 @@ class PublicModelLedger:
             range(1, len(attempts) + 1)
         ):
             raise ValueError("ledger attempts must be sequential starting at 1")
+        if budget_reservation is not None:
+            if budget_reservation.batch_id != entry.batch_id:
+                raise ValueError("ledger call and budget reservation batch must match")
+            if budget_reservation.amount.currency != entry.estimated_cost.currency:
+                raise ValueError("ledger call and budget reservation currency must match")
         with self._connect() as connection:
             connection.execute(
                 """
@@ -517,6 +648,40 @@ class PublicModelLedger:
                     for attempt in attempts
                 ],
             )
+            if budget_reservation is not None:
+                terminal_status = (
+                    "released"
+                    if entry.billing_status == "not_billable"
+                    else "finalized"
+                )
+                actual_cost = (
+                    Decimal("0")
+                    if terminal_status == "released"
+                    else entry.estimated_cost.amount
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE public_model_budget_reservations
+                    SET status = ?, actual_cost = ?, billing_status = ?,
+                        call_id = ?, finalized_at = ?
+                    WHERE reservation_id = ? AND status = 'active'
+                      AND batch_id = ? AND currency = ?
+                    """,
+                    (
+                        terminal_status,
+                        str(actual_cost),
+                        entry.billing_status,
+                        entry.call_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        budget_reservation.reservation_id,
+                        budget_reservation.batch_id,
+                        budget_reservation.amount.currency,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(
+                        "durable budget reservation is missing or already finalized"
+                    )
         return entry.call_id
 
     def get(self, call_id: str) -> dict[str, object] | None:
@@ -596,21 +761,44 @@ class PublicModelLedger:
         """
 
         normalized_currency = currency.strip().upper()
-        clauses = ["currency = ?"]
+        clauses = [
+            "calls.currency = ?",
+            "NOT EXISTS ("
+            "SELECT 1 FROM public_model_budget_reservations AS reservations "
+            "WHERE reservations.call_id = calls.call_id AND reservations.call_id != ''"
+            ")",
+        ]
         parameters: list[object] = [normalized_currency]
         if batch_id is not None:
-            clauses.append("batch_id = ?")
+            clauses.append("calls.batch_id = ?")
             parameters.append(batch_id)
         if recorded_date is not None:
-            clauses.append("substr(recorded_at, 1, 10) = ?")
+            clauses.append("substr(calls.recorded_at, 1, 10) = ?")
             parameters.append(recorded_date)
         query = (
             "SELECT billing_status, estimated_cost, usage_estimated_cost, billed_cost, "
-            "preflight_reserved_cost FROM public_model_calls WHERE "
+            "preflight_reserved_cost FROM public_model_calls AS calls WHERE "
             + " AND ".join(clauses)
+        )
+        reservation_clauses = ["currency = ?"]
+        reservation_parameters: list[object] = [normalized_currency]
+        if batch_id is not None:
+            reservation_clauses.append("batch_id = ?")
+            reservation_parameters.append(batch_id)
+        if recorded_date is not None:
+            reservation_clauses.append("budget_day = ?")
+            reservation_parameters.append(recorded_date)
+        reservation_query = (
+            "SELECT status, reserved_cost, actual_cost "
+            "FROM public_model_budget_reservations WHERE "
+            + " AND ".join(reservation_clauses)
         )
         with self._connect() as connection:
             rows = connection.execute(query, tuple(parameters)).fetchall()
+            reservation_rows = connection.execute(
+                reservation_query,
+                tuple(reservation_parameters),
+            ).fetchall()
         amounts = []
         for row in rows:
             billing_status = str(row[0])
@@ -620,6 +808,14 @@ class PublicModelLedger:
                 amounts.append(Decimal(str(row[4])))
             else:
                 amounts.append(Decimal(str(row[2] or row[1])))
+        for row in reservation_rows:
+            status = str(row[0])
+            if status == "released":
+                continue
+            if status == "finalized":
+                amounts.append(Decimal(str(row[2])))
+            else:
+                amounts.append(Decimal(str(row[1])))
         amount = sum(amounts, Decimal("0"))
         return Money(amount, normalized_currency)
 

@@ -1,0 +1,155 @@
+{
+  "account_count": 25,
+  "claim_limit": "Labels represent observed interaction heat without exposure denominators; they are not play traffic, watch quality, share rate, or follow conversion.",
+  "label_distribution": {
+    "broad_heat": {
+      "count": 10853,
+      "missing_count": 0,
+      "p05": 0.053898,
+      "p25": 0.252445,
+      "p50": 0.490833,
+      "p75": 0.738095,
+      "p95": 0.940476
+    },
+    "confidence_grades": {
+      "high": 7972,
+      "medium": 2881
+    },
+    "discussion_heat": {
+      "count": 10853,
+      "missing_count": 0,
+      "p05": 0.036818,
+      "p25": 0.22549,
+      "p50": 0.490868,
+      "p75": 0.754223,
+      "p95": 0.949125
+    },
+    "favorite_heat": {
+      "count": 10853,
+      "missing_count": 0,
+      "p05": 0.032258,
+      "p25": 0.233051,
+      "p50": 0.5,
+      "p75": 0.76,
+      "p95": 0.953955
+    },
+    "like_heat": {
+      "count": 10853,
+      "missing_count": 0,
+      "p05": 0.028577,
+      "p25": 0.228395,
+      "p50": 0.5,
+      "p75": 0.759146,
+      "p95": 0.953656
+    },
+    "share_heat": {
+      "count": 10853,
+      "missing_count": 0,
+      "p05": 0.038333,
+      "p25": 0.237847,
+      "p50": 0.507299,
+      "p75": 0.765306,
+      "p95": 0.953204
+    }
+  },
+  "leakage_audit": {
+    "account_holdout": {
+      "cross_split_source_group_count": 0,
+      "cross_split_source_group_ids": [],
+      "passed": true
+    },
+    "account_time": {
+      "cross_split_source_group_count": 0,
+      "cross_split_source_group_ids": [],
+      "passed": true
+    },
+    "media_sha_available_sample_count": 630,
+    "media_sha_coverage_rate": 0.058048,
+    "media_sha_unavailable_sample_count": 10223,
+    "program_group_policy": "normalized program_name + song_title when both are known",
+    "title_near_duplicate_policy": "stable-title equality plus six-band character-trigram MinHash candidate search and Jaccard>=0.90"
+  },
+  "metric_availability": {
+    "comments": {
+      "available_count": 10853,
+      "missing_count": 0
+    },
+    "favorites": {
+      "available_count": 10853,
+      "missing_count": 0
+    },
+    "likes": {
+      "available_count": 10853,
+      "missing_count": 0
+    },
+    "shares": {
+      "available_count": 10853,
+      "missing_count": 0
+    }
+  },
+  "sample_count": 10853,
+  "split_summary": {
+    "account_holdout": {
+      "account_counts": {
+        "test": 5,
+        "train": 17,
+        "validation": 3
+      },
+      "accounts": {
+        "test": [
+          "hukan_music",
+          "kim0330music",
+          "raoxianyin",
+          "rimu_live",
+          "xindong_yure_live"
+        ],
+        "train": [
+          "beidou_live",
+          "duanduanzhengzheng",
+          "geshou2026",
+          "haiye_yelaoshi",
+          "jason_teacher",
+          "kuku_oscar",
+          "manfen_kexuejia",
+          "ricot",
+          "singer_yuhang",
+          "sixuweilive",
+          "taotao_daxiaojie",
+          "tianci",
+          "wccyu",
+          "weibabibibi",
+          "xingxing_live",
+          "yule_xiaoe_yu",
+          "zaijian_jianghuchuan"
+        ],
+        "validation": [
+          "adai_valerio",
+          "dk_voice_teacher",
+          "yuhuan"
+        ]
+      },
+      "counts": {
+        "excluded_leakage": 907,
+        "test": 1697,
+        "train": 7606,
+        "validation": 643
+      },
+      "excluded_leakage_by_original_split": {
+        "train": 895,
+        "validation": 12
+      },
+      "policy": "whole-account deterministic holdout; rows whose source group reaches a later holdout fold are excluded from the earlier fold"
+    },
+    "account_time": {
+      "counts": {
+        "test": 3078,
+        "train": 6850,
+        "validation": 925
+      },
+      "policy": "account-local chronological 70/10/20; source groups move to the latest member partition",
+      "source_group_promoted_row_count": 946,
+      "timestamp_hash_fallback_count": 0
+    }
+  },
+  "status": "frozen"
+}

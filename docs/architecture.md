@@ -166,6 +166,19 @@ ASR + 1s 音频能量 + 静音/起音 + 低帧率切镜
 - 目标账号个性化 readiness 只统计 `publishing_target + target_outcome + explicit_platform_outcome + 已链接候选 + 非 mock` 的去重作品；不足 30 条或缺少流量及观看/转化维度时保持 `cold_start`。
 - 离线 research promotion gate 即使通过，也不代表目标账号生产校准通过；平台结果缺失时生产默认仍为 `current_rules/final_score`。
 
+### 2.3.2 互动热度标签 V3 冻结 contract
+
+`interaction_heat_labels.v3` 是可学习排序的研究标签层，不是生产分。它从点赞、评论、收藏和转发四项抓取时点客观计数分别生成 `like_heat / discussion_heat / favorite_heat / share_heat`，并以四维等权平均生成只用于宽口径诊断的 `broad_heat`；没有曝光分母时不得把这些字段解释为播放流量或转化率。
+
+- 原始计数先做 `log1p`，再按账号、发布时间年龄桶和时长桶映射到训练分区拟合的经验分位数；回退层级和样本量随标签保存，缺失指标保持 `null`，不以 0 填充。
+- `account_time` 和 `account_holdout` 各自只读取本 protocol 的 train 行拟合 normalizer。账号留出没有账号内统计时回退到训练账号的全局年龄/时长分布，禁止读取 holdout 分位点。
+- source group 联合平台 item ID、规范/近重复标题、节目+歌曲键和可用媒体 SHA-256；同组不得跨有效 split。无法安全保留在原 fold 的样本显式写为 `excluded_leakage`，不得静默混入训练。
+- 冻结目录使用 `interaction_heat_artifact.v1`，必须精确包含 `manifest.json / labels.jsonl / splits.jsonl / normalizers.json / report.json`，多一个或少一个目录项都失败。manifest 只能列出固定四个 payload basename；manifest/payload 使用 no-follow 普通文件读取，内部或外部 symlink、FIFO/device 和路径片段逃逸均 fail closed。验签必须提供另处保存的 `expected_manifest_sha256`，自签 manifest 只能证明内部一致，不能证明未被整体重写。manifest 同时固定输入、代码、网络请求数、模型费用及生产影响；同一 artifact ID 拒绝覆盖。
+- `research_labels.visible_engagement_v2` 保持原状。V3 只能进入显式研究训练/评测，Pairwise/LambdaRank 通过冻结 benchmark、账号宏平均和强基线门禁前不得写生产排序。
+- 阶段 2 的 `interaction_heat_pairwise_logistic.v1` 只从白名单结构元数据、时间/时长桶和标签置信度生成稳定 signed-hash 特征，禁止互动计数及其直接派生量。`account_time` 与 `account_holdout` 分别只用各自 train 行构造同账号有序对并训练独立模型；输出 artifact 固定保存模型、无标签预测、账号宏报告和来源/成本/生产影响 manifest，同一实验 ID 不覆盖。当前本地 r3 在账号内时间 test 回退、整账号留出仅有弱增益，状态为 `research_only`，没有接入统一生产 ranker。
+- `interaction_heat_target_encoding.v1` 从同一 V3 artifact 和 SQLite 白名单元数据构造层级平滑类别均值。训练预测必须使用 OOF，validation/test 只能查询本 protocol 的 train 统计；`account_time` 可按账号+特征值回退到全局特征值和全局均值，`account_holdout` 禁止账号历史。runner 先读无标签 splits，再按 `evaluation_scope` 过滤 sample ID；纯 test 行不进入 validation-only labels 映射，跨协议样本也必须先检查本 protocol split 再解析 target。artifact 固定包含 manifest、模型、无标签预测和账号宏报告，同一 ID 不覆盖。正式 r2 只评估 validation，当前为 `research_only`，未接入统一生产 ranker。
+- `interaction_heat_holdout_readiness.v1` 是后续非线性 ranker 的数据解锁门禁，不生成或重写标签。runner 必须先以外部 pinned SHA 验证冻结 V3，只解析 `splits.jsonl` 获得冻结 sample、账号和最大 `published_at`；当前数据库行继续通过 V3 的显式 metric provenance loader 过滤。只有发布时间严格晚于 cutoff 且不在冻结 sample ID 集合中的行可成为前向候选；整账号候选必须来自冻结账号集合外，可以是较早发布但在冻结后新收集的作品。输出仅为内存 JSON 状态、阈值、未满足原因、数据库 SHA 和零副作用声明；`not_ready` 时不得安装/运行下一非线性模型或重复使用旧 test 作为新 holdout。
+
 ### 2.4 授权远程媒体获取（2026-07-18）
 
 远程下载只作为 Media Ingest 前的可选获取层，不生成第二套节目、候选或排序 contract：

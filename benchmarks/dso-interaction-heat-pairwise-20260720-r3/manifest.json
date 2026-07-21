@@ -1,0 +1,37 @@
+{
+  "admission": "research_only",
+  "config": {
+    "dimensions": 4096,
+    "epochs": 5,
+    "feature_profile": "core",
+    "l2": 0.0001,
+    "learning_rate": 0.05,
+    "max_pairs_per_sample": 4,
+    "min_target_gap": 0.1,
+    "seed": 20260720
+  },
+  "contract_version": "interaction_heat_pairwise_experiment.v1",
+  "created_at": "2026-07-20T06:10:17+00:00",
+  "database_sha256": "68f55606efd05ed49711b7c55a4456df679da16314c79106ef8373b6ed28e237",
+  "effective_model_cost_cny": "0.000000",
+  "experiment_id": "dso-interaction-heat-pairwise-20260720-r3",
+  "files": {
+    "model.json": "951d6ce04f789bd3d96bc9b3fc831a86db886219e2ca54d965630ea14f902dd4",
+    "predictions.jsonl": "b5f52ce249f11833040bafb9a36cf01b8568386c8d6cdb858da1762cf0c4793f",
+    "report.json": "6c05922580d555e76372057a36e16499542dfc202eddd54c6e6ee79495101963"
+  },
+  "label_artifact_id": "dso-interaction-heat-v3-20260720-r3",
+  "label_manifest_sha256": "4d4157f145d83be5ef141f3a48f9f7f38d05e13d4d75bc7f730af74fd25a3971",
+  "manifest_sha256": "834dee35d6ec4dbac5d2351ee94a3ec101258ac55ecfc3f8bec6d9a239292368",
+  "model_version": "interaction_heat_pairwise_logistic.v1",
+  "network_request_count": 0,
+  "production_impact": {
+    "automatic_export": false,
+    "automatic_publish": false,
+    "database_rows_updated": 0,
+    "manual_gold_changed": false,
+    "production_weight_changed": false
+  },
+  "source_code_sha256": "f7da28ec59f5ea275f8d007bfa2e646f7a30051a22549b48cf6772f5762b561a",
+  "status": "completed"
+}

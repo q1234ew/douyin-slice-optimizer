@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+import multiprocessing
+import os
 import sqlite3
 
 import pytest
@@ -10,11 +12,16 @@ from dso.providers.budget import (
     BudgetExceeded,
     BudgetGuard,
     BudgetLimits,
+    BudgetReservation,
     CurrencyMismatch,
     Money,
 )
 from dso.providers.cache import FileResponseCache, UnsafeCacheData, build_cache_key
-from dso.providers.ledger import LedgerEntry, PublicModelLedger
+from dso.providers.ledger import (
+    BudgetExecutionLockError,
+    LedgerEntry,
+    PublicModelLedger,
+)
 from dso.providers.policy import (
     DataPermission,
     PolicyDenied,
@@ -43,6 +50,35 @@ def _limits(
         per_batch=Money(Decimal(per_batch), "CNY"),
         per_day=Money(Decimal(per_day), "CNY"),
     )
+
+
+def _persist_reservation_then_exit(db_path: str) -> None:
+    ledger = PublicModelLedger(db_path)
+    ledger.record_budget_reservation(
+        BudgetReservation(
+            reservation_id="crash-reservation",
+            amount=Money(Decimal("0.75"), "CNY"),
+            batch_id="crash-batch",
+            day=date(2026, 7, 20),
+        )
+    )
+    os._exit(0)
+
+
+def _hold_budget_lock(db_path: str, ready, release) -> None:
+    ledger = PublicModelLedger(db_path)
+    with ledger.budget_execution_lock(timeout_seconds=2.0, poll_seconds=0.01):
+        ready.set()
+        release.wait(2.0)
+
+
+def _contend_for_budget_lock(db_path: str, result_queue) -> None:
+    ledger = PublicModelLedger(db_path)
+    try:
+        with ledger.budget_execution_lock(timeout_seconds=0.1, poll_seconds=0.01):
+            result_queue.put("acquired")
+    except BudgetExecutionLockError:
+        result_queue.put("timed_out")
 
 
 def test_public_models_are_fail_closed_by_default() -> None:
@@ -208,11 +244,13 @@ def test_budget_refresh_merges_persisted_totals_conservatively() -> None:
 
     guard.refresh_persisted_spend(
         batch_id="shared-batch",
+        spend_day=guard.snapshot().day,
         batch_spent=Money(Decimal("0.75"), "CNY"),
         daily_spent=Money(Decimal("1.25"), "CNY"),
     )
     guard.refresh_persisted_spend(
         batch_id="shared-batch",
+        spend_day=guard.snapshot().day,
         batch_spent=Money(Decimal("0.10"), "CNY"),
         daily_spent=Money(Decimal("0.10"), "CNY"),
     )
@@ -230,6 +268,22 @@ def test_daily_budget_rolls_over_but_batch_and_daily_are_reset() -> None:
     days[0] = date(2026, 7, 19)
     snapshot = guard.snapshot()
 
+    assert snapshot.day == date(2026, 7, 19)
+    assert snapshot.batch_spent.amount == Decimal("0")
+    assert snapshot.daily_spent.amount == Decimal("0")
+
+
+def test_settlement_after_utc_rollover_does_not_charge_the_new_day() -> None:
+    days = [date(2026, 7, 18)]
+    guard = BudgetGuard(_limits(), batch_id="midnight-batch", today=lambda: days[0])
+    reservation = guard.reserve(Money(Decimal("0.75"), "CNY"))
+
+    days[0] = date(2026, 7, 19)
+    settlement = guard.settle(reservation, Money(Decimal("0.25"), "CNY"))
+
+    snapshot = guard.snapshot()
+    assert settlement.day == date(2026, 7, 18)
+    assert settlement.actual.amount == Decimal("0.25")
     assert snapshot.day == date(2026, 7, 19)
     assert snapshot.batch_spent.amount == Decimal("0")
     assert snapshot.daily_spent.amount == Decimal("0")
@@ -382,6 +436,92 @@ def test_ledger_records_only_safe_fixed_fields_and_preserves_decimal_cost(tmp_pa
         "prompt_text",
         "request_body",
     } & column_names
+
+
+def test_durable_budget_reservation_survives_process_exit(tmp_path) -> None:
+    context = multiprocessing.get_context("fork")
+    db_path = tmp_path / "crash-reservation-ledger.sqlite3"
+    process = context.Process(target=_persist_reservation_then_exit, args=(str(db_path),))
+
+    process.start()
+    process.join(timeout=5)
+
+    assert process.exitcode == 0
+    ledger = PublicModelLedger(db_path)
+    row = ledger.get_budget_reservation("crash-reservation")
+    assert row is not None
+    assert row["status"] == "active"
+    assert ledger.total_spend(
+        currency="CNY",
+        batch_id="crash-batch",
+        recorded_date="2026-07-20",
+    ).amount == Decimal("0.75")
+
+
+def test_call_record_atomically_finalizes_durable_budget_reservation(tmp_path) -> None:
+    ledger = PublicModelLedger(tmp_path / "finalized-reservation-ledger.sqlite3")
+    reservation = BudgetReservation(
+        reservation_id="finalized-reservation",
+        amount=Money(Decimal("0.50"), "CNY"),
+        batch_id="finalized-batch",
+        day=date(2026, 7, 20),
+    )
+    ledger.record_budget_reservation(reservation)
+    entry = LedgerEntry(
+        call_id="finalized-call",
+        recorded_at="2026-07-21T00:00:01+00:00",
+        batch_id="finalized-batch",
+        content_hash="sha256:content",
+        provider="fake-provider",
+        model="fake-model",
+        api_version="v1",
+        prompt_version="p1",
+        request_type="structured_summary",
+        status="success",
+        estimated_cost=Money(Decimal("0.25"), "CNY"),
+        preflight_reserved_cost=reservation.amount,
+        usage_estimated_cost=Money(Decimal("0.25"), "CNY"),
+        billing_status="usage_estimated",
+    )
+
+    ledger.record(entry, budget_reservation=reservation)
+
+    row = ledger.get_budget_reservation(reservation.reservation_id)
+    assert row is not None
+    assert row["status"] == "finalized"
+    assert row["call_id"] == "finalized-call"
+    assert row["actual_cost"] == Decimal("0.25")
+    assert ledger.total_spend(
+        currency="CNY",
+        batch_id="finalized-batch",
+        recorded_date="2026-07-20",
+    ).amount == Decimal("0.25")
+    assert ledger.total_spend(
+        currency="CNY",
+        recorded_date="2026-07-21",
+    ).amount == Decimal("0")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="paid-provider flock is POSIX-only")
+def test_budget_execution_lock_has_bounded_cross_process_contention(tmp_path) -> None:
+    context = multiprocessing.get_context("fork")
+    db_path = str(tmp_path / "multiprocess-lock-ledger.sqlite3")
+    ready = context.Event()
+    release = context.Event()
+    result_queue = context.Queue()
+    holder = context.Process(target=_hold_budget_lock, args=(db_path, ready, release))
+    contender = context.Process(target=_contend_for_budget_lock, args=(db_path, result_queue))
+
+    holder.start()
+    assert ready.wait(timeout=2)
+    contender.start()
+    contender.join(timeout=3)
+    release.set()
+    holder.join(timeout=3)
+
+    assert contender.exitcode == 0
+    assert holder.exitcode == 0
+    assert result_queue.get(timeout=1) == "timed_out"
 
 
 def test_ledger_rejects_invalid_status_and_negative_usage(tmp_path) -> None:

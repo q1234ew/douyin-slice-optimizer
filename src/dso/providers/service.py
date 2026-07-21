@@ -18,7 +18,7 @@ from dso.providers.aliyun_bailian import (
     BailianConfigurationError,
     validate_bailian_base_url,
 )
-from dso.providers.budget import BudgetGuard, BudgetLimits, Money
+from dso.providers.budget import BudgetDayChanged, BudgetGuard, BudgetLimits, Money
 from dso.providers.admin_config import provider_config_values
 from dso.providers.cache import FileResponseCache
 from dso.providers.contracts import (
@@ -377,14 +377,10 @@ def build_aliyun_bailian_runtime(
 
     cache_path, ledger_path = _runtime_paths()
     ledger = PublicModelLedger(ledger_path)
-    today = datetime.now(timezone.utc).date().isoformat()
-    initial_batch = ledger.total_spend(currency="CNY", batch_id=batch_id)
-    initial_daily = ledger.total_spend(currency="CNY", recorded_date=today)
-    budget_guard = BudgetGuard(
-        budget_limits,
+    budget_guard = _initialize_budget_guard(
+        budget_limits=budget_limits,
         batch_id=batch_id,
-        initial_batch_spent=initial_batch,
-        initial_daily_spent=initial_daily,
+        ledger=ledger,
     )
     policy = PublicModelPolicy(
         provider=BAILIAN_PROVIDER_ID,
@@ -417,6 +413,39 @@ def build_aliyun_bailian_runtime(
         allowed_upload_levels=permission.allowed_upload_levels,
         batch_id=batch_id,
     )
+
+
+def _initialize_budget_guard(
+    *,
+    budget_limits: BudgetLimits,
+    batch_id: str,
+    ledger: PublicModelLedger,
+) -> BudgetGuard:
+    guard = BudgetGuard(budget_limits, batch_id=batch_id)
+    for _attempt in range(3):
+        spend_day = datetime.now(timezone.utc).date()
+        recorded_date = spend_day.isoformat()
+        batch_spent = ledger.total_spend(
+            currency=budget_limits.currency,
+            batch_id=batch_id,
+            recorded_date=recorded_date,
+        )
+        daily_spent = ledger.total_spend(
+            currency=budget_limits.currency,
+            recorded_date=recorded_date,
+        )
+        try:
+            guard.refresh_persisted_spend(
+                batch_id=batch_id,
+                spend_day=spend_day,
+                batch_spent=batch_spent,
+                daily_spent=daily_spent,
+            )
+        except BudgetDayChanged:
+            continue
+        if guard.snapshot().day == spend_day:
+            return guard
+    raise RuntimeError("UTC budget day changed repeatedly during runtime initialization")
 
 
 def run_fake_provider_smoke(

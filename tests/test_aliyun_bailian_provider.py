@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import gzip
 import json
@@ -9,6 +11,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from dso.providers import service as provider_service
 from dso.providers.aliyun_bailian import (
     BAILIAN_COMPLETE_SHORT_CLIP_PROFILE,
     BAILIAN_EMBEDDING_MODEL,
@@ -39,7 +42,7 @@ from dso.providers.contracts import (
     ProviderRequest,
     stable_json_sha256,
 )
-from dso.providers.ledger import PublicModelLedger
+from dso.providers.ledger import LedgerEntry, PublicModelLedger
 from dso.providers.policy import (
     DataPermission,
     PublicModelPolicy,
@@ -1321,6 +1324,449 @@ def test_runner_refreshes_shared_ledger_before_a_second_process_reserves(
     assert network_calls == 1
 
 
+def test_runner_resolves_provider_once_when_registry_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    network_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    public_provider, client = _provider_with_handler(monkeypatch, handler)
+
+    class NetworkFreeProvider:
+        descriptor = replace(public_provider.descriptor, uses_public_network=False)
+
+        def invoke(self, request: ProviderRequest):  # pragma: no cover - fail-closed assertion
+            raise AssertionError("the originally resolved provider must remain authoritative")
+
+    registry = ProviderRegistry()
+    registry.register(NetworkFreeProvider())
+    original_resolve = registry.resolve
+    resolve_calls = 0
+
+    def replace_after_first_resolve(provider_id: str):
+        nonlocal resolve_calls
+        resolve_calls += 1
+        resolved = original_resolve(provider_id)
+        if resolve_calls == 1:
+            registry.register(public_provider, replace=True)
+        return resolved
+
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "registry-swap-cache"),
+        ledger=PublicModelLedger(tmp_path / "registry-swap-ledger.sqlite3"),
+        policy=_policy(),
+        budget_guard=BudgetGuard(
+            BudgetLimits(
+                per_request=Money(Decimal("0.10"), "CNY"),
+                per_batch=Money(Decimal("1"), "CNY"),
+                per_day=Money(Decimal("2"), "CNY"),
+            ),
+            batch_id="registry-swap",
+        ),
+    )
+
+    try:
+        with patch.object(registry, "resolve", side_effect=replace_after_first_resolve):
+            with pytest.raises(ValueError, match="network-free providers"):
+                runner.execute(
+                    _request(public_provider, request_id="registry-swap-test"),
+                    estimated_cost=Money(Decimal("0.01"), "CNY"),
+                    upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                    batch_id="registry-swap",
+                    local_baseline={"score": 0.4},
+                )
+    finally:
+        client.close()
+
+    assert resolve_calls == 1
+    assert network_calls == 0
+
+
+def test_paid_execution_error_is_not_reclassified_as_lock_acquisition_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    network_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    provider, client = _provider_with_handler(monkeypatch, handler)
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger = PublicModelLedger(tmp_path / "ledger-write-failure.sqlite3")
+    budget = BudgetGuard(
+        BudgetLimits(
+            per_request=Money(Decimal("0.10"), "CNY"),
+            per_batch=Money(Decimal("1"), "CNY"),
+            per_day=Money(Decimal("2"), "CNY"),
+        ),
+        batch_id="ledger-write-failure",
+    )
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "ledger-write-failure-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=budget,
+    )
+    original_record = ledger.record
+    record_attempts = 0
+
+    def fail_first_two_records(*args, **kwargs):
+        nonlocal record_attempts
+        record_attempts += 1
+        if record_attempts <= 2:
+            raise RuntimeError("simulated-ledger-write-failure")
+        return original_record(*args, **kwargs)
+
+    try:
+        with patch.object(ledger, "record", side_effect=fail_first_two_records):
+            with pytest.raises(RuntimeError, match="simulated-ledger-write-failure"):
+                runner.execute(
+                    _request(provider, request_id="ledger-write-failure-test"),
+                    estimated_cost=Money(Decimal("0.01"), "CNY"),
+                    upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                    batch_id="ledger-write-failure",
+                    local_baseline={"score": 0.4},
+                )
+    finally:
+        client.close()
+
+    assert network_calls == 1
+    assert record_attempts == 2
+    assert budget.snapshot().batch_spent.amount == Decimal("0.00044")
+    assert ledger.count() == 0
+
+
+def test_runner_persists_full_reservation_before_provider_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    ledger = PublicModelLedger(tmp_path / "pre-invoke-reservation.sqlite3")
+    observed_spend: list[Decimal] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_spend.append(
+            ledger.total_spend(currency="CNY", batch_id="pre-invoke").amount
+        )
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    provider, client = _provider_with_handler(monkeypatch, handler)
+    registry = ProviderRegistry()
+    registry.register(provider)
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "pre-invoke-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=BudgetGuard(
+            BudgetLimits(
+                per_request=Money(Decimal("0.10"), "CNY"),
+                per_batch=Money(Decimal("1"), "CNY"),
+                per_day=Money(Decimal("2"), "CNY"),
+            ),
+            batch_id="pre-invoke",
+        ),
+    )
+
+    try:
+        outcome = runner.execute(
+            _request(provider, request_id="pre-invoke-reservation-test"),
+            estimated_cost=Money(Decimal("0.01"), "CNY"),
+            upload_level=UploadLevel.STRUCTURED_SUMMARY,
+            batch_id="pre-invoke",
+            local_baseline={"score": 0.4},
+        )
+    finally:
+        client.close()
+
+    assert outcome.status == "shadow_succeeded"
+    assert observed_spend == [Decimal("0.01")]
+    assert ledger.total_spend(
+        currency="CNY",
+        batch_id="pre-invoke",
+    ).amount == Decimal("0.00044")
+
+
+def test_runner_fails_closed_when_durable_reservation_cannot_be_written(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    network_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        return httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        )
+
+    provider, client = _provider_with_handler(monkeypatch, handler)
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger = PublicModelLedger(tmp_path / "reservation-write-failure.sqlite3")
+    budget = BudgetGuard(
+        BudgetLimits(
+            per_request=Money(Decimal("0.10"), "CNY"),
+            per_batch=Money(Decimal("1"), "CNY"),
+            per_day=Money(Decimal("2"), "CNY"),
+        ),
+        batch_id="reservation-write-failure",
+    )
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "reservation-write-failure-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=budget,
+    )
+
+    try:
+        with patch.object(
+            ledger,
+            "record_budget_reservation",
+            side_effect=RuntimeError("simulated-reservation-write-failure"),
+        ):
+            outcome = runner.execute(
+                _request(provider, request_id="reservation-write-failure-test"),
+                estimated_cost=Money(Decimal("0.01"), "CNY"),
+                upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                batch_id="reservation-write-failure",
+                local_baseline={"score": 0.4},
+            )
+    finally:
+        client.close()
+
+    assert outcome.status == "fallback_local"
+    assert outcome.policy_code == "budget_reservation_persist_failed"
+    assert network_calls == 0
+    snapshot = budget.snapshot()
+    assert snapshot.active_reservation_count == 0
+    assert snapshot.batch_spent.amount == Decimal("0")
+
+
+def test_exception_recovery_preserves_actual_budget_overrun(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    provider, client = _provider_with_handler(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        ),
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger = PublicModelLedger(tmp_path / "exception-overrun.sqlite3")
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "exception-overrun-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=BudgetGuard(
+            BudgetLimits(
+                per_request=Money(Decimal("0.10"), "CNY"),
+                per_batch=Money(Decimal("1"), "CNY"),
+                per_day=Money(Decimal("2"), "CNY"),
+            ),
+            batch_id="exception-overrun",
+        ),
+    )
+
+    try:
+        with patch.object(
+            runner,
+            "_validate_result",
+            side_effect=ValueError("simulated-result-validation-failure"),
+        ):
+            outcome = runner.execute(
+                _request(provider, request_id="exception-overrun-test"),
+                estimated_cost=Money(Decimal("0.00001"), "CNY"),
+                upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                batch_id="exception-overrun",
+                local_baseline={"score": 0.4},
+            )
+    finally:
+        client.close()
+
+    assert outcome.policy_code == "budget_reservation_actual_exceeded"
+    row = ledger.get(outcome.ledger_call_id)
+    assert row is not None
+    assert row["estimated_cost"] == Decimal("0.00044")
+    assert row["billing_status"] == "usage_estimated"
+
+
+def test_budget_recovery_diagnostic_survives_long_provider_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    provider, client = _provider_with_handler(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json=_response_payload(model="qwen3.5-flash-2026-02-23"),
+        ),
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    ledger = PublicModelLedger(tmp_path / "long-budget-diagnostic.sqlite3")
+    runner = PublicModelRunner(
+        registry=registry,
+        cache=FileResponseCache(tmp_path / "long-budget-diagnostic-cache"),
+        ledger=ledger,
+        policy=_policy(),
+        budget_guard=BudgetGuard(
+            BudgetLimits(
+                per_request=Money(Decimal("0.10"), "CNY"),
+                per_batch=Money(Decimal("1"), "CNY"),
+                per_day=Money(Decimal("2"), "CNY"),
+            ),
+            batch_id="long-budget-diagnostic",
+        ),
+    )
+
+    try:
+        with (
+            patch.object(
+                runner,
+                "_validate_result",
+                side_effect=ValueError("provider-validation-" + ("x" * 800)),
+            ),
+            patch.object(
+                runner,
+                "_finalize_budget",
+                side_effect=RuntimeError("simulated-budget-finalization-failure"),
+            ),
+        ):
+            outcome = runner.execute(
+                _request(provider, request_id="long-budget-diagnostic-test"),
+                estimated_cost=Money(Decimal("0.01"), "CNY"),
+                upload_level=UploadLevel.STRUCTURED_SUMMARY,
+                batch_id="long-budget-diagnostic",
+                local_baseline={"score": 0.4},
+            )
+    finally:
+        client.close()
+
+    row = ledger.get(outcome.ledger_call_id)
+    assert row is not None
+    assert "budget finalization failed" in str(row["error_summary"])
+    assert "simulated-budget-finalization-failure" in str(row["error_summary"])
+
+
+def test_budget_refresh_ignores_prior_day_spend_for_reused_batch_id(tmp_path) -> None:
+    ledger = PublicModelLedger(tmp_path / "reused-batch.sqlite3")
+    ledger.record(
+        LedgerEntry(
+            call_id="prior-day-call",
+            recorded_at="2026-07-19T23:59:00+00:00",
+            batch_id="reused-batch",
+            content_hash="sha256:prior-day",
+            provider="fake-provider",
+            model="fake-model",
+            api_version="v1",
+            prompt_version="p1",
+            request_type="structured_summary",
+            status="success",
+            estimated_cost=Money(Decimal("0.60"), "CNY"),
+            usage_estimated_cost=Money(Decimal("0.60"), "CNY"),
+            billing_status="usage_estimated",
+        )
+    )
+    guard = BudgetGuard(
+        BudgetLimits(
+            per_request=Money(Decimal("1"), "CNY"),
+            per_batch=Money(Decimal("2"), "CNY"),
+            per_day=Money(Decimal("3"), "CNY"),
+        ),
+        batch_id="reused-batch",
+        today=lambda: date(2026, 7, 20),
+    )
+    runner = PublicModelRunner(
+        registry=ProviderRegistry(),
+        cache=FileResponseCache(tmp_path / "reused-batch-cache"),
+        ledger=ledger,
+        budget_guard=guard,
+    )
+
+    runner._refresh_budget_from_ledger("reused-batch")
+
+    snapshot = guard.snapshot()
+    assert snapshot.day == date(2026, 7, 20)
+    assert snapshot.batch_spent.amount == Decimal("0")
+    assert snapshot.daily_spent.amount == Decimal("0")
+
+
+def test_budget_refresh_retries_when_utc_day_changes_mid_refresh(tmp_path) -> None:
+    ledger = PublicModelLedger(tmp_path / "utc-rollover.sqlite3")
+    ledger.record(
+        LedgerEntry(
+            call_id="utc-rollover-prior-call",
+            recorded_at="2026-07-19T23:59:59+00:00",
+            batch_id="utc-rollover",
+            content_hash="sha256:utc-rollover",
+            provider="fake-provider",
+            model="fake-model",
+            api_version="v1",
+            prompt_version="p1",
+            request_type="structured_summary",
+            status="success",
+            estimated_cost=Money(Decimal("0.60"), "CNY"),
+            usage_estimated_cost=Money(Decimal("0.60"), "CNY"),
+            billing_status="usage_estimated",
+        )
+    )
+    day_calls = 0
+
+    def rolling_day() -> date:
+        nonlocal day_calls
+        day_calls += 1
+        return date(2026, 7, 19) if day_calls <= 2 else date(2026, 7, 20)
+
+    guard = BudgetGuard(
+        BudgetLimits(
+            per_request=Money(Decimal("1"), "CNY"),
+            per_batch=Money(Decimal("2"), "CNY"),
+            per_day=Money(Decimal("3"), "CNY"),
+        ),
+        batch_id="utc-rollover",
+        today=rolling_day,
+    )
+    runner = PublicModelRunner(
+        registry=ProviderRegistry(),
+        cache=FileResponseCache(tmp_path / "utc-rollover-cache"),
+        ledger=ledger,
+        budget_guard=guard,
+    )
+
+    runner._refresh_budget_from_ledger("utc-rollover")
+
+    snapshot = guard.snapshot()
+    assert snapshot.day == date(2026, 7, 20)
+    assert snapshot.batch_spent.amount == Decimal("0")
+    assert snapshot.daily_spent.amount == Decimal("0")
+
+
 def test_runner_records_budget_recovery_failure_instead_of_swallowing_it(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -1487,6 +1933,26 @@ def test_environment_runtime_requires_every_gate_and_never_exposes_secret(
     for name, value in configured.items():
         monkeypatch.setenv(name, value)
 
+    spend_queries: list[tuple[str | None, str | None]] = []
+    original_total_spend = PublicModelLedger.total_spend
+
+    def tracked_total_spend(
+        self: PublicModelLedger,
+        *,
+        currency: str,
+        batch_id: str | None = None,
+        recorded_date: str | None = None,
+    ) -> Money:
+        spend_queries.append((batch_id, recorded_date))
+        return original_total_spend(
+            self,
+            currency=currency,
+            batch_id=batch_id,
+            recorded_date=recorded_date,
+        )
+
+    monkeypatch.setattr(PublicModelLedger, "total_spend", tracked_total_spend)
+
     status = public_model_status()
     runtime = build_aliyun_bailian_runtime(batch_id="configured-smoke")
     embedding_runtime = build_aliyun_bailian_runtime(
@@ -1502,8 +1968,70 @@ def test_environment_runtime_requires_every_gate_and_never_exposes_secret(
     assert runtime.data_permission.retention_days == 30
     assert runtime.allowed_upload_levels == frozenset({UploadLevel.STRUCTURED_SUMMARY})
     assert runtime.budget_guard.snapshot().daily_spent.amount == Decimal("0")
+    assert spend_queries
+    assert all(recorded_date is not None for batch_id, recorded_date in spend_queries if batch_id)
     assert embedding_runtime.provider.descriptor.identity.model_id == BAILIAN_EMBEDDING_MODEL
     assert embedding_runtime.provider.descriptor.request_types == ("multimodal_embedding",)
+
+
+def test_runtime_budget_bootstrap_retries_if_utc_day_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    current_day = datetime.now(timezone.utc).date()
+    prior_day = current_day - timedelta(days=1)
+    observed_days: list[str] = []
+
+    class RolloverDateTime:
+        calls = 0
+
+        @classmethod
+        def now(cls, tz: timezone) -> datetime:
+            cls.calls += 1
+            selected = prior_day if cls.calls == 1 else current_day
+            return datetime.combine(selected, datetime.min.time(), tzinfo=tz)
+
+    ledger = PublicModelLedger(tmp_path / "ledger.jsonl")
+    original_total_spend = ledger.total_spend
+
+    def rollover_total_spend(
+        *,
+        currency: str,
+        batch_id: str | None = None,
+        recorded_date: str | None = None,
+    ) -> Money:
+        assert recorded_date is not None
+        observed_days.append(recorded_date)
+        if recorded_date == prior_day.isoformat():
+            return Money(Decimal("0.60"), currency)
+        return original_total_spend(
+            currency=currency,
+            batch_id=batch_id,
+            recorded_date=recorded_date,
+        )
+
+    monkeypatch.setattr(provider_service, "datetime", RolloverDateTime)
+    monkeypatch.setattr(ledger, "total_spend", rollover_total_spend)
+    guard = provider_service._initialize_budget_guard(
+        budget_limits=BudgetLimits(
+            per_request=Money(Decimal("1.00"), "CNY"),
+            per_batch=Money(Decimal("2.00"), "CNY"),
+            per_day=Money(Decimal("3.00"), "CNY"),
+        ),
+        batch_id="rollover-bootstrap",
+        ledger=ledger,
+    )
+
+    snapshot = guard.snapshot()
+    assert observed_days == [
+        prior_day.isoformat(),
+        prior_day.isoformat(),
+        current_day.isoformat(),
+        current_day.isoformat(),
+    ]
+    assert snapshot.day == current_day
+    assert snapshot.batch_spent.amount == Decimal("0")
+    assert snapshot.daily_spent.amount == Decimal("0")
 
 
 def test_environment_runtime_accepts_referenced_non_fixed_retention_policy(

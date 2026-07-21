@@ -1,0 +1,92 @@
+{
+  "account_count": 25,
+  "artifact_id": "dso-interaction-heat-v3-20260720-r3",
+  "contract_version": "interaction_heat_artifact.v1",
+  "created_at": "2026-07-20T03:57:19+00:00",
+  "effective_model_cost_cny": "0.000000",
+  "feature_leakage_policy": {
+    "forbidden_model_features": [
+      "likes",
+      "comments",
+      "favorites",
+      "shares",
+      "reward_proxy",
+      "normalized_reward",
+      "performance_label",
+      "all direct derivatives of interaction outcomes"
+    ],
+    "target_only": true
+  },
+  "files": {
+    "labels.jsonl": "b44e7e12152d1f6e21b06803beff9981ee6d9ad6d917ea56d40d2ca2df4618a7",
+    "normalizers.json": "330ffdb6ce770cf8b51978d8be310dc2eec2af2f4b415b7048d390eaf95dc6c2",
+    "report.json": "77fe1a9df7556427dacaf2b09e22cc734bf38da84f30a652423c10531bffb61e",
+    "splits.jsonl": "b2c73d1e04183e3cb5e249272f66854cd445d3ea0ff1fa8fd71aa7dfd13df12e"
+  },
+  "goal_alignment": [
+    "G1"
+  ],
+  "immutability_policy": "Never edit this directory in place; create a new artifact_id for any data, split, label, or code change.",
+  "input_sha256": "5284c4dfe32c687983b3152d1baec2c206c1846ea6344b6fb0796f54c92ea443",
+  "label_schema": {
+    "broad_heat": "unweighted mean of available component heat targets; unavailable when fewer than three components exist",
+    "missing_semantics": "null heat plus metric_missing=true; observed zero remains a valid zero count",
+    "normalization": "train-fitted empirical midpoint percentile with hierarchical fallback",
+    "range": [
+      0.0,
+      1.0
+    ],
+    "raw_transform": "log1p(non-negative observed count)",
+    "targets": [
+      "like_heat",
+      "share_heat",
+      "favorite_heat",
+      "discussion_heat",
+      "broad_heat"
+    ]
+  },
+  "label_version": "interaction_heat_labels.v3",
+  "lifecycle": "frozen",
+  "manifest_sha256": "4d4157f145d83be5ef141f3a48f9f7f38d05e13d4d75bc7f730af74fd25a3971",
+  "network_request_count": 0,
+  "production_impact": {
+    "automatic_export": false,
+    "automatic_publish": false,
+    "database_rows_updated": 0,
+    "manual_gold_changed": false,
+    "production_weight_changed": false,
+    "visible_engagement_v2_overwritten": false
+  },
+  "runtime": {
+    "implementation": "cpython",
+    "python": "3.11.15"
+  },
+  "sample_count": 10853,
+  "source": {
+    "code_sha256": "9632342bb122d3453914dc7a08721471178f8a06313c6b0ae399c36da3c83652",
+    "execution_environment": "ecs_isolated",
+    "git_branch": "",
+    "git_parent_commit": "",
+    "input_snapshot_sha256": "cb40e7526e7089ce9613820334f82d2184f8f52ad46f1e176c23790a684e4a83",
+    "media_index_sha256": "aa76891e886b03e88a173bed55e355109f5aa0c7b50b51441674006bcbeec59b",
+    "pyproject_sha256": "4db5ea576d36f7dc8f3f13161ee3a8e3b4e63f267b950a4d9a5de9241a8f0de2",
+    "source_bundle_sha256": "a6be1efd5ea933be80bf740e16320e53c9073a4c2c8f86a7d86671fd6fa43c3b",
+    "source_git_branch": "codex/d10-ab-benchmark-checkpoint",
+    "source_git_parent_commit": "e35bf2cc99b3259210627c37390ceca06381c209",
+    "source_kind": "minimal_interaction_heat_input_snapshot",
+    "source_worktree_diff_sha256": "305e50626b312b1fafa72300af2d9b78ed18d162df5894ef55a13b538d3046a6"
+  },
+  "split_policy": {
+    "normalizer_fit_partition": "train only, independently for each protocol",
+    "primary": "account-local chronological 70/10/20 with source-group promotion to the latest partition",
+    "secondary": "whole-account 70/10/20 holdout; earlier-fold rows linked to a later source group are excluded from evaluation/training",
+    "source_group": [
+      "platform_item_id",
+      "stable/near title",
+      "program+song",
+      "available media SHA-256"
+    ],
+    "split_seed": "dso-interaction-heat-v3-20260720"
+  },
+  "split_version": "interaction_heat_split.v1"
+}

@@ -227,7 +227,10 @@ sqlite3 -header -column data/db/dso.sqlite3 "SELECT COUNT(*) AS duplicate_item_g
 
 - 必须保留 `dataset_id` 和 `program_key`，支持节目/数据源隔离分析。
 - 不同节目、不同账号、不同视频 ID 不应被标题相似性误合并。
+- 已查看 test 后，下一轮可学习排序必须先通过 `interaction_heat_holdout_readiness.v1`：只允许显式 metric provenance 合格、sample ID 未在冻结集且 `published_at` 严格晚于冻结 cutoff 的样本进入前向候选；整账号候选必须来自冻结账号集合外，可包含较早发布但冻结后新收集的作品。默认门槛为前向至少 1,000 条、5 个账号、覆盖 7 天，以及至少 3 个新账号各 100 条。阈值如需调整，必须在读取新标签结果前先冻结理由和新阈值；`not_ready` 时不得把旧 test 改名复用，也不得据此解锁新的模型依赖或调参。
 - 标题相同但视频 ID 不同，默认视为不同发布作品。
+- 冻结 artifact 的 verifier 不得信任 manifest 提供的任意文件名；目录项必须与 contract 精确相等，只能以 no-follow 方式读取固定 basename 的普通文件，并拒绝绝对路径、`..`、内部/外部 symlink、FIFO/device 和 resolved path 越界。
+- 自签 manifest SHA 只能证明内部一致。需要声明 artifact 未被整体重写时，必须从 artifact 外的可信记录传入 pinned manifest SHA-256；缺少 pinned digest 时 fail closed。
 
 ### 5.4 账号与结果证据隔离
 

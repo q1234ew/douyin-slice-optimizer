@@ -1,0 +1,35 @@
+{
+  "admission": "research_only",
+  "config": {
+    "alpha": 20.0,
+    "folds": 5,
+    "include_title": false,
+    "min_samples": 3,
+    "seed": 20260720
+  },
+  "contract_version": "interaction_heat_target_encoding_experiment.v1",
+  "created_at": "2026-07-20T07:01:22+00:00",
+  "database_sha256": "68f55606efd05ed49711b7c55a4456df679da16314c79106ef8373b6ed28e237",
+  "effective_model_cost_cny": "0.000000",
+  "evaluation_scope": "validation",
+  "experiment_id": "dso-interaction-heat-target-encoding-20260720-r1",
+  "files": {
+    "model.json": "a9d82983631303e52c5a8c3b4d0d3f7bb55cc8d831d34ce51afa1797f2307f52",
+    "predictions.jsonl": "1d96b6b9ce001e27b52513e6f2ffe5c35448a707fcb1c37dab7d7e53f8ee536d",
+    "report.json": "345b5e874de690de48f18d5cddda18cf0354f7f94be52f0fb6cf33b5732049f0"
+  },
+  "label_artifact_id": "dso-interaction-heat-v3-20260720-r3",
+  "label_manifest_sha256": "4d4157f145d83be5ef141f3a48f9f7f38d05e13d4d75bc7f730af74fd25a3971",
+  "manifest_sha256": "a7dcaa6eaef7b85b7bcab2f70137632c01525ce2bbee25786f2cbe4a98771eaf",
+  "model_version": "interaction_heat_target_encoding.v1",
+  "network_request_count": 0,
+  "production_impact": {
+    "automatic_export": false,
+    "automatic_publish": false,
+    "database_rows_updated": 0,
+    "manual_gold_changed": false,
+    "production_weight_changed": false
+  },
+  "source_code_sha256": "4a94fd946d68ba47bfbbbab663143baccf3555ff27c142bdd669848ed8c762f1",
+  "status": "completed"
+}

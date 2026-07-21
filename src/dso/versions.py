@@ -41,6 +41,12 @@ MATERIAL_EVIDENCE_VERSION = "material_evidence.d10b.v1"
 MATERIAL_RESOLVER_VERSION = "material_confusion_resolver.shadow_v1"
 BENCHMARK_MANIFEST_VERSION = "benchmark_manifest.v1"
 RESEARCH_LABEL_VERSION = "research_labels.visible_engagement_v2"
+INTERACTION_HEAT_LABEL_VERSION = "interaction_heat_labels.v3"
+INTERACTION_HEAT_ARTIFACT_VERSION = "interaction_heat_artifact.v1"
+INTERACTION_HEAT_SPLIT_VERSION = "interaction_heat_split.v1"
+INTERACTION_HEAT_PAIRWISE_VERSION = "interaction_heat_pairwise_logistic.v1"
+INTERACTION_HEAT_TARGET_ENCODING_VERSION = "interaction_heat_target_encoding.v1"
+INTERACTION_HEAT_HOLDOUT_READINESS_VERSION = "interaction_heat_holdout_readiness.v1"
 RESEARCH_RANKER_VERSION = "historical_research_ranker.v2.4"
 SEGMENTER_VERSION = "music_variety_segmenter.v2_timeline"
 SCORER_VERSION = "music_variety_rules.v1"
@@ -88,6 +94,12 @@ def component_versions() -> dict[str, str]:
         "material_resolver": MATERIAL_RESOLVER_VERSION,
         "benchmark_manifest": BENCHMARK_MANIFEST_VERSION,
         "research_labels": RESEARCH_LABEL_VERSION,
+        "interaction_heat_labels": INTERACTION_HEAT_LABEL_VERSION,
+        "interaction_heat_artifact": INTERACTION_HEAT_ARTIFACT_VERSION,
+        "interaction_heat_split": INTERACTION_HEAT_SPLIT_VERSION,
+        "interaction_heat_pairwise": INTERACTION_HEAT_PAIRWISE_VERSION,
+        "interaction_heat_target_encoding": INTERACTION_HEAT_TARGET_ENCODING_VERSION,
+        "interaction_heat_holdout_readiness": INTERACTION_HEAT_HOLDOUT_READINESS_VERSION,
         "research_ranker": RESEARCH_RANKER_VERSION,
         "segmenter": SEGMENTER_VERSION,
         "scorer": SCORER_VERSION,

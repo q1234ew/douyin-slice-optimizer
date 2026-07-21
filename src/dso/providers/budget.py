@@ -91,6 +91,10 @@ class CurrencyMismatch(ValueError):
     pass
 
 
+class BudgetDayChanged(RuntimeError):
+    """The UTC budget day changed while persisted totals were being loaded."""
+
+
 @dataclass(frozen=True, slots=True)
 class BudgetReservation:
     """Worst-case cost counted before a network request is allowed to start."""
@@ -229,7 +233,8 @@ class BudgetGuard:
                 raise ValueError("budget reservation belongs to a different active batch")
             self._reservations.pop(reservation.reservation_id)
 
-            if reservation.day == self._day:
+            same_budget_day = reservation.day == self._day
+            if same_budget_day:
                 self._daily_spent = max(
                     Decimal("0"), self._daily_spent - reservation.amount.amount
                 )
@@ -237,10 +242,9 @@ class BudgetGuard:
                     self._batch_spent = max(
                         Decimal("0"), self._batch_spent - reservation.amount.amount
                     )
-
-            self._daily_spent += actual_cost.amount
-            if reservation.batch_id == self._batch_id:
-                self._batch_spent += actual_cost.amount
+                self._daily_spent += actual_cost.amount
+                if reservation.batch_id == self._batch_id:
+                    self._batch_spent += actual_cost.amount
 
             settlement = BudgetSettlement(
                 reservation_id=reservation.reservation_id,
@@ -253,18 +257,22 @@ class BudgetGuard:
                 day=reservation.day,
             )
 
-            checks = (
+            checks = [
                 ("reservation", Decimal("0"), reservation.amount),
                 ("per_request", Decimal("0"), self.limits.per_request),
-                ("per_batch", Decimal("0"), self.limits.per_batch),
-                ("per_day", Decimal("0"), self.limits.per_day),
-            )
-            actuals = (
+            ]
+            actuals = [
                 actual_cost.amount,
                 actual_cost.amount,
-                self._batch_spent,
-                self._daily_spent,
-            )
+            ]
+            if same_budget_day:
+                checks.extend(
+                    (
+                        ("per_batch", Decimal("0"), self.limits.per_batch),
+                        ("per_day", Decimal("0"), self.limits.per_day),
+                    )
+                )
+                actuals.extend((self._batch_spent, self._daily_spent))
             for (scope, spent, limit), actual in zip(checks, actuals, strict=True):
                 if actual > limit.amount:
                     raise BudgetExceeded(
@@ -321,6 +329,7 @@ class BudgetGuard:
         self,
         *,
         batch_id: str,
+        spend_day: date,
         batch_spent: Money,
         daily_spent: Money,
     ) -> None:
@@ -338,6 +347,10 @@ class BudgetGuard:
             raise ValueError("batch_id is required")
         with self._lock:
             self._roll_day()
+            if spend_day != self._day:
+                raise BudgetDayChanged(
+                    "UTC budget day changed while persisted spend was being refreshed"
+                )
             if self._reservations:
                 raise RuntimeError("cannot refresh persisted spend with active reservations")
             if batch_id != self._batch_id:
